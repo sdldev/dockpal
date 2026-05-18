@@ -1,0 +1,239 @@
+package update
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/blang/semver"
+)
+
+const (
+	// GitHubAPIURL is the endpoint for fetching the latest release
+	GitHubAPIURL = "https://api.github.com/repos/sdldev/dockpal/releases/latest"
+	// DefaultDataDir is the default data directory
+	DefaultDataDir = "/opt/dockpal/data"
+	// DefaultCacheTTL is the default cache TTL (1 hour)
+	DefaultCacheTTL = time.Hour
+)
+
+// Version represents a semantic version
+type Version struct {
+	Major int
+	Minor int
+	Patch int
+}
+
+// VersionInfo represents the version information returned by the API
+type VersionInfo struct {
+	CurrentVersion  string `json:"currentVersion"`  // e.g., "v0.2.0"
+	LatestVersion   string `json:"latestVersion"`   // e.g., "v0.2.1"
+	UpdateAvailable bool   `json:"updateAvailable"` // true if latest > current
+	ReleaseNotes    string `json:"releaseNotes"`    // Markdown from GitHub
+	DownloadURL     string `json:"downloadUrl"`     // Direct binary URL
+}
+
+// VersionService handles version checking and caching
+type VersionService struct {
+	dataDir        string
+	currentVersion string
+	httpClient     *http.Client
+	cacheTTL       time.Duration
+}
+
+// NewVersionService creates a new VersionService
+func NewVersionService(dataDir, currentVersion string) *VersionService {
+	if dataDir == "" {
+		dataDir = DefaultDataDir
+	}
+	return &VersionService{
+		dataDir:        dataDir,
+		currentVersion: currentVersion,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		cacheTTL: DefaultCacheTTL,
+	}
+}
+
+// NewVersionServiceWithTTL creates a new VersionService with custom cache TTL
+func NewVersionServiceWithTTL(dataDir, currentVersion string, cacheTTL time.Duration) *VersionService {
+	if dataDir == "" {
+		dataDir = DefaultDataDir
+	}
+	return &VersionService{
+		dataDir:        dataDir,
+		currentVersion: currentVersion,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		cacheTTL: cacheTTL,
+	}
+}
+
+// GetVersionInfo fetches the latest version from GitHub API and returns version info
+func (s *VersionService) GetVersionInfo(ctx context.Context) (*VersionInfo, error) {
+	cachePath := GetCachePath(s.dataDir)
+
+	// First try to get cached version
+	cached, err := ReadCache(cachePath)
+	if err == nil && cached != nil && !cached.IsCacheExpired() {
+		// Return cached data, compare versions
+		updateAvailable, _ := CompareVersions(s.currentVersion, cached.LatestVersion)
+		return &VersionInfo{
+			CurrentVersion:  s.currentVersion,
+			LatestVersion:   cached.LatestVersion,
+			UpdateAvailable: updateAvailable,
+			ReleaseNotes:    cached.ReleaseNotes,
+			DownloadURL:     cached.DownloadURL,
+		}, nil
+	}
+
+	// Fetch from GitHub
+	release, err := s.fetchFromGitHub(ctx)
+	if err != nil {
+		// If GitHub API fails and we have cached data, return it
+		if cached != nil {
+			return &VersionInfo{
+				CurrentVersion:  s.currentVersion,
+				LatestVersion:   cached.LatestVersion,
+				UpdateAvailable: false, // Unknown due to error
+				ReleaseNotes:    cached.ReleaseNotes,
+				DownloadURL:     cached.DownloadURL,
+			}, nil
+		}
+		return nil, fmt.Errorf("failed to fetch version info: %w", err)
+	}
+
+	// Compare versions
+	updateAvailable, err := CompareVersions(s.currentVersion, release.TagName)
+	if err != nil {
+		updateAvailable = false
+	}
+
+	// Update cache
+	cacheData := &CachedVersion{
+		LastChecked:   time.Now().UTC(),
+		LatestVersion: release.TagName,
+		ReleaseNotes:  release.Body,
+		DownloadURL:   release.Asset.GetBrowserDownloadURL(),
+	}
+	if err := WriteCache(cachePath, cacheData); err != nil {
+		// Log but don't fail
+		fmt.Printf("Warning: failed to write version cache: %v\n", err)
+	}
+
+	return &VersionInfo{
+		CurrentVersion:  s.currentVersion,
+		LatestVersion:   release.TagName,
+		UpdateAvailable: updateAvailable,
+		ReleaseNotes:    release.Body,
+		DownloadURL:     release.Asset.GetBrowserDownloadURL(),
+	}, nil
+}
+
+// GetCachedVersion reads and returns the cached version info
+func (s *VersionService) GetCachedVersion() (*CachedVersion, error) {
+	cachePath := GetCachePath(s.dataDir)
+	return ReadCache(cachePath)
+}
+
+// GetCachePath returns the full path to the cache file
+func (s *VersionService) GetCachePath() string {
+	return GetCachePath(s.dataDir)
+}
+
+// GitHubRelease represents the GitHub API release response
+type GitHubRelease struct {
+	TagName string       `json:"tag_name"`
+	Body    string       `json:"body"`
+	Asset   GitHubAsset  `json:"assets"`
+}
+
+// GitHubAsset represents a release asset in the GitHub API response
+type GitHubAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+}
+
+// GetBrowserDownloadURL returns the browser download URL
+func (a GitHubAsset) GetBrowserDownloadURL() string {
+	return a.BrowserDownloadURL
+}
+
+// fetchFromGitHub fetches the latest release from GitHub API
+func (s *VersionService) fetchFromGitHub(ctx context.Context) (*GitHubRelease, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", GitHubAPIURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "dockpal")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch from GitHub: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var release GitHubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("failed to decode GitHub response: %w", err)
+	}
+
+	return &release, nil
+}
+
+// CompareVersions compares two semver version strings and returns true if latest > current
+func CompareVersions(current, latest string) (bool, error) {
+	// Normalize version strings (remove 'v' prefix if present)
+	current = normalizeVersion(current)
+	latest = normalizeVersion(latest)
+
+	currentVer, err := semver.Parse(current)
+	if err != nil {
+		return false, fmt.Errorf("invalid current version %q: %w", current, err)
+	}
+
+	latestVer, err := semver.Parse(latest)
+	if err != nil {
+		return false, fmt.Errorf("invalid latest version %q: %w", latest, err)
+	}
+
+	return latestVer.GT(currentVer), nil
+}
+
+// parseVersion parses a semantic version string into a Version struct
+func parseVersion(v string) (*Version, error) {
+	// Normalize - remove 'v' prefix if present
+	v = normalizeVersion(v)
+
+	ver, err := semver.Parse(v)
+	if err != nil {
+		return nil, fmt.Errorf("invalid version %q: %w", v, err)
+	}
+
+	return &Version{
+		Major: int(ver.Major),
+		Minor: int(ver.Minor),
+		Patch: int(ver.Patch),
+	}, nil
+}
+
+// normalizeVersion removes 'v' prefix if present
+func normalizeVersion(v string) string {
+	if len(v) > 0 && v[0] == 'v' {
+		return v[1:]
+	}
+	return v
+}

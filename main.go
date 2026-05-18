@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sdldev/dockpal/internal/auth"
@@ -17,6 +18,7 @@ import (
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/logging"
 	"github.com/sdldev/dockpal/internal/server"
+	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/web"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -130,7 +132,19 @@ func runServer() {
 
 	srv := server.New()
 	srv.Router().Use(server.CORSMiddleware())
-	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database)
+
+	// Initialize version service
+	versionService := update.NewVersionService(dataDir, "v"+version)
+
+	// Initialize update service
+	updateService := update.NewUpdateService("v" + version)
+
+	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService)
+
+	// Initialize and start background version check scheduler (6-hour interval)
+	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)
+	ctx, cancelScheduler := context.WithCancel(context.Background())
+	scheduler.Start(ctx, 6*time.Hour)
 
 	// Serve embedded frontend
 	assetsFS, _ := fs.Sub(web.Assets, "assets")
@@ -161,6 +175,9 @@ func runServer() {
 	<-quit
 
 	log.Println("Shutting down...")
+	// Stop the scheduler first for graceful shutdown
+	cancelScheduler()
+	scheduler.Stop()
 	srv.Shutdown(context.Background())
 }
 
