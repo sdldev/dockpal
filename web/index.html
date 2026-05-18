@@ -23,6 +23,55 @@
 
 <!--#include "partials/header.html"-->
 
+    <!-- Update Banner -->
+    <div x-show="updateAvailable && !updateDismissed && view === 'app'" 
+         x-cloak
+         class="bg-blue-900/30 border-b border-blue-800 px-4 py-2 flex items-center justify-between gap-4"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0">
+      <div class="flex items-center gap-3">
+        <svg class="w-5 h-5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+        <div class="text-sm">
+          <template x-if="!updateProgress">
+            <span>Version <span x-text="updateVersion" class="font-medium text-blue-300"></span> available</span>
+          </template>
+          <template x-if="updateProgress">
+            <div class="flex items-center gap-2">
+              <span x-text="updateProgress.message"></span>
+              <div class="w-24 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 transition-all duration-300" 
+                     :style="'width: ' + updateProgress.percentage + '%'"></div>
+              </div>
+              <span x-text="updateProgress.percentage + '%'" class="text-zinc-400 text-xs"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <template x-if="!updateProgress">
+          <>
+            <button @click="performUpdate()" 
+                    class="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors">
+              Update Now
+            </button>
+            <button @click="hide()" 
+                    class="px-3 py-1 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
+              Dismiss
+            </button>
+          </>
+        </template>
+        <template x-if="updateProgress && updateProgress.status === 'error'">
+          <button @click="clearProgress(); updateProgress = null" 
+                  class="px-3 py-1 text-sm text-red-400 hover:text-red-300 transition-colors">
+            Dismiss Error
+          </button>
+        </template>
+      </div>
+    </div>
+
     <!-- Page content -->
     <div class="flex-1 overflow-y-auto p-6">
       <!--#include "pages/dashboard.html"-->
@@ -54,6 +103,7 @@
 <script src="/assets/modules/images.js"></script>
 <script src="/assets/modules/domains.js"></script>
 <script src="/assets/modules/files.js"></script>
+<script src="/assets/modules/updateBanner.js"></script>
 <script src="/assets/app.js"></script>
 </body>
 </html>

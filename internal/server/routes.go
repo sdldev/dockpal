@@ -24,6 +24,7 @@ import (
 	"github.com/sdldev/dockpal/internal/git"
 	"github.com/sdldev/dockpal/internal/traefik"
 	"github.com/sdldev/dockpal/internal/tunnel"
+	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
@@ -80,7 +81,7 @@ func loadTemplates() ([]Template, error) {
 	return templates, nil
 }
 
-func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB) {
+func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService) {
 	api := r.Group("/api")
 
 	// Rate limiter for login endpoint
@@ -692,6 +693,16 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		c.JSON(http.StatusOK, info)
 	})
 
+	// Version (protected with auth)
+	protected.GET("/system/version", func(c *gin.Context) {
+		HandleGetVersion(c, versionService)
+	})
+
+	// Update (requires admin authentication)
+	protected.POST("/system/update", func(c *gin.Context) {
+		HandleUpdate(c, updateService, database)
+	})
+
 	// WebSocket stats streaming
 	protected.GET("/containers/:id/stats/ws", func(c *gin.Context) {
 		handleStatsStream(c, dockerClient)
@@ -930,4 +941,120 @@ func extractFirstPort(composeYAML string) int {
 		}
 	}
 	return 80
+}
+// HandleGetVersion handles the GET /api/system/version endpoint
+func HandleGetVersion(c *gin.Context, versionService *update.VersionService) {
+	if versionService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "version service not configured"})
+		return
+	}
+
+	versionInfo, err := versionService.GetVersionInfo(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, versionInfo)
+}
+// HandleUpdate handles the POST /api/system/update endpoint
+// It performs a streaming update with progress notifications
+func HandleUpdate(c *gin.Context, updateService *update.UpdateService, database *db.DB) {
+	if updateService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update service not configured"})
+		return
+	}
+
+	// Get username from context (set by auth middleware)
+	username, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Check if user is admin
+	user, err := database.GetUser(username.(string))
+	if err != nil || user.Username != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		DownloadURL string `json:"downloadUrl" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "downloadUrl is required"})
+		return
+	}
+
+	// Set up Server-Sent Events for streaming progress
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	// Helper to send progress updates
+	sendProgress := func(status, message string, percentage int) {
+		progress := update.UpdateProgress{
+			Status:     status,
+			Message:    message,
+			Percentage: percentage,
+		}
+		data, _ := json.Marshal(progress)
+		c.Writer.Write([]byte("data: "))
+		c.Writer.Write(data)
+		c.Writer.Write([]byte("\n\n"))
+		c.Writer.Flush()
+	}
+
+	// Send initial progress
+	sendProgress(update.StatusDownloading, "Starting download...", 0)
+
+	// Check sudo access first
+	hasSudo, err := updateService.CheckSudoAccess()
+	if err != nil {
+		sendProgress(update.StatusError, "Failed to check sudo access: " + err.Error(), 0)
+		return
+	}
+	if !hasSudo {
+		sendProgress(update.StatusError, "Update requires root privileges", 0)
+		return
+	}
+
+	// Download the update
+	downloadCtx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+
+	downloadedPath, err := updateService.DownloadUpdate(downloadCtx, req.DownloadURL)
+	if err != nil {
+		sendProgress(update.StatusError, "Failed to download update: " + err.Error(), 0)
+		return
+	}
+	defer os.Remove(downloadedPath)
+
+	sendProgress(update.StatusInstalling, "Download complete, verifying binary...", 50)
+
+	// Verify the binary
+	if err := updateService.VerifyBinary(downloadedPath); err != nil {
+		sendProgress(update.StatusError, "Binary verification failed: " + err.Error(), 0)
+		return
+	}
+
+	sendProgress(update.StatusInstalling, "Binary verified, installing...", 70)
+
+	// Install the binary
+	installCtx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+
+	if err := updateService.InstallBinary(installCtx, downloadedPath); err != nil {
+		sendProgress(update.StatusError, "Failed to install binary: " + err.Error(), 0)
+		return
+	}
+
+	sendProgress(update.StatusRestarting, "Service restarted successfully", 90)
+
+	// Final success message
+	time.Sleep(500 * time.Millisecond)
+	sendProgress(update.StatusComplete, "Update completed successfully", 100)
 }

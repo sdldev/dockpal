@@ -3,6 +3,7 @@ module github.com/sdldev/dockpal
 go 1.25.0
 
 require (
+	github.com/blang/semver v3.5.1+incompatible
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-git/go-git/v5 v5.19.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

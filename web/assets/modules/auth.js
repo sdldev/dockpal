@@ -11,6 +11,7 @@ Dockpal.auth = {
         if (resp.ok) {
           this.view = 'app';
           await this.loadDashboard();
+          await this.checkForUpdates();
           return;
         }
       } catch (e) {}
@@ -35,6 +36,7 @@ Dockpal.auth = {
       this.view = 'app';
       this.currentPage = 'dashboard';
       await this.loadDashboard();
+      await this.checkForUpdates();
     } catch (e) {
       this.error = 'Connection error';
     } finally {
