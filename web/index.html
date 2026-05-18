@@ -36,7 +36,7 @@
         </svg>
         <div class="text-sm">
           <template x-if="!updateProgress">
-            <span>Version <span x-text="updateVersion" class="font-medium text-blue-300"></span> available</span>
+            <span>Version <span x-text="'v' + updateVersion" class="font-medium text-blue-300"></span> available</span>
           </template>
           <template x-if="updateProgress">
             <div class="flex items-center gap-2">
@@ -52,7 +52,7 @@
       </div>
       <div class="flex items-center gap-2">
         <template x-if="!updateProgress">
-          <>
+          <div class="flex items-center gap-2">
             <button @click="performUpdate()" 
                     class="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors">
               Update Now
@@ -61,7 +61,7 @@
                     class="px-3 py-1 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
               Dismiss
             </button>
-          </>
+          </div>
         </template>
         <template x-if="updateProgress && updateProgress.status === 'error'">
           <button @click="clearProgress(); updateProgress = null" 

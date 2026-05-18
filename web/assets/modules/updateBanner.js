@@ -21,15 +21,20 @@ Dockpal.updateBanner = {
         });
         if (res.ok) {
           const data = await res.json();
+          // Always populate current version
+          this.currentVersion = (data.currentVersion || '').replace(/^v/, '');
+
           if (data.updateAvailable) {
-            this.updateAvailable = data.updateAvailable;
-            this.updateVersion = data.latestVersion;
+            this.updateAvailable = true;
+            this.updateVersion = (data.latestVersion || '').replace(/^v/, '');
             this.updateReleaseNotes = data.releaseNotes || '';
             this.updateDownloadUrl = data.downloadUrl || '';
-            
+
             // Check if user dismissed for this session
             const dismissed = localStorage.getItem('update_dismissed');
             this.updateDismissed = dismissed === 'true';
+          } else {
+            this.updateAvailable = false;
           }
         }
       } catch (e) {
