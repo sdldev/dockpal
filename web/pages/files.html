@@ -1,0 +1,42 @@
+      <!-- ===== FILES ===== -->
+      <div x-show="currentPage === 'files'">
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-white">File Manager</h2>
+          <p class="text-sm text-zinc-500">Browse files inside container volumes</p>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2 mb-4">
+          <select x-model="fileManager.containerId"
+            class="px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+            <option value="">Select container...</option>
+            <template x-for="c in containers" :key="c.id">
+              <option :value="c.id" x-text="c.name || c.id"></option>
+            </template>
+          </select>
+          <div class="flex flex-1 gap-2">
+            <input type="text" x-model="fileManager.path" placeholder="/"
+              class="flex-1 px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+            <button @click="browseFiles()" class="px-4 py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">Browse</button>
+          </div>
+        </div>
+        <div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-zinc-800">
+                <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Name</th>
+                <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 hidden sm:table-cell">Size</th>
+                <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 hidden md:table-cell">Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="f in fileManager.files" :key="f.name">
+                <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors cursor-pointer" @click="navigateFile(f)">
+                  <td class="px-4 py-2.5 text-sm text-white" x-text="f.is_dir ? '📁 ' + f.name : '📄 ' + f.name"></td>
+                  <td class="px-4 py-2.5 text-sm text-zinc-400 hidden sm:table-cell" x-text="f.is_dir ? '—' : f.size"></td>
+                  <td class="px-4 py-2.5 text-sm text-zinc-400 hidden md:table-cell" x-text="f.is_dir ? 'Directory' : 'File'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="fileManager.files.length === 0" class="text-center py-12 text-zinc-600 text-sm">No files — select a container and path</div>
+        </div>
+      </div>

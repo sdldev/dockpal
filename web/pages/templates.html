@@ -1,0 +1,44 @@
+      <!-- ===== TEMPLATES ===== -->
+      <div x-show="currentPage === 'templates'">
+        <div class="mb-6">
+          <h2 class="text-lg font-semibold text-white">Template Library</h2>
+          <p class="text-sm text-zinc-500">One-click deploy popular applications</p>
+        </div>
+
+        <!-- Search & category filter -->
+        <div class="flex flex-col sm:flex-row gap-3 mb-6">
+          <div class="relative flex-1">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" x-model="filters.templates.search" placeholder="Search templates..."
+              class="w-full pl-9 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+          </div>
+        </div>
+        <!-- Category chips -->
+        <div class="flex flex-wrap gap-1.5 mb-6">
+          <button @click="filters.templates.category = 'all'"
+            :class="filters.templates.category === 'all' ? 'bg-white text-zinc-900 border-white' : 'bg-zinc-900 text-zinc-400 hover:text-white border-zinc-800 hover:border-zinc-700'"
+            class="px-3 py-1.5 text-xs font-medium rounded-full border transition-colors">All</button>
+          <template x-for="cat in templateCategories" :key="cat">
+            <button @click="filters.templates.category = cat"
+              :class="filters.templates.category === cat ? 'bg-white text-zinc-900 border-white' : 'bg-zinc-900 text-zinc-400 hover:text-white border-zinc-800 hover:border-zinc-700'"
+              class="px-3 py-1.5 text-xs font-medium rounded-full border transition-colors capitalize" x-text="cat"></button>
+          </template>
+        </div>
+
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <template x-for="t in filteredTemplates" :key="t.id">
+            <div @click="deployTemplate(t)" class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 hover:border-zinc-700 hover:bg-zinc-800/50 transition-all cursor-pointer group">
+              <div class="flex items-start justify-between mb-3">
+                <span class="text-2xl" x-text="t.icon || '📦'"></span>
+                <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-zinc-800 text-zinc-500 border border-zinc-700 group-hover:border-zinc-600 transition-colors" x-text="t.category"></span>
+              </div>
+              <h3 class="text-sm font-medium text-white mb-1" x-text="t.name"></h3>
+              <p class="text-xs text-zinc-500 line-clamp-2" x-text="t.description"></p>
+            </div>
+          </template>
+        </div>
+        <div x-show="filteredTemplates.length === 0" class="text-center py-12 text-zinc-600">
+          <p class="text-sm" x-show="templates.length === 0">No templates available</p>
+          <p class="text-sm" x-show="templates.length > 0">No templates match your search</p>
+        </div>
+      </div>

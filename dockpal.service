@@ -1,0 +1,17 @@
+[Unit]
+Description=Dockpal — Docker Management Platform
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/dockpal
+ExecStart=/usr/local/bin/dockpal server
+Restart=always
+RestartSec=5
+Environment="PORT=3012"
+
+[Install]
+WantedBy=multi-user.target

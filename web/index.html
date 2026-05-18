@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dockpal</title>
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/vendor/tailwind.min.js"></script>
+<script defer src="/assets/vendor/alpine.min.js"></script>
+<script src="/assets/vendor/chart.umd.min.js"></script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐳</text></svg>">
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen antialiased" x-data="dockpalApp()" x-init="init()">
+
+<!--#include "partials/login.html"-->
+
+<!-- Main App View -->
+<div x-show="view === 'app'" x-cloak class="flex h-screen overflow-hidden">
+
+<!--#include "partials/sidebar.html"-->
+
+  <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+<!--#include "partials/header.html"-->
+
+    <!-- Page content -->
+    <div class="flex-1 overflow-y-auto p-6">
+      <!--#include "pages/dashboard.html"-->
+      <!--#include "pages/containers.html"-->
+      <!--#include "pages/container-detail.html"-->
+      <!--#include "pages/deploy.html"-->
+      <!--#include "pages/templates.html"-->
+      <!--#include "pages/template-config.html"-->
+      <!--#include "pages/images.html"-->
+      <!--#include "pages/files.html"-->
+      <!--#include "pages/domains.html"-->
+    </div>
+  </main>
+</div>
+
+<!--#include "partials/confirm-dialog.html"-->
+
+<!--#include "partials/toast.html"-->
+
+<script src="/assets/modules/state.js"></script>
+<script src="/assets/modules/ui.js"></script>
+<script src="/assets/modules/auth.js"></script>
+<script src="/assets/modules/charts.js"></script>
+<script src="/assets/modules/computed.js"></script>
+<script src="/assets/modules/dashboard.js"></script>
+<script src="/assets/modules/containers.js"></script>
+<script src="/assets/modules/templates.js"></script>
+<script src="/assets/modules/services.js"></script>
+<script src="/assets/modules/images.js"></script>
+<script src="/assets/modules/domains.js"></script>
+<script src="/assets/modules/files.js"></script>
+<script src="/assets/app.js"></script>
+</body>
+</html>

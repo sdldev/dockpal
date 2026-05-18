@@ -1,0 +1,43 @@
+# PBT Baseline Iteration Counts
+# This file records MaxCount values from property-based tests
+# Used to verify post-rebrand PBT counts >= baseline per Req 11.3
+
+# internal/logging/rotator_prop_test.go
+rotator_prop_test.go:67 - MaxCount: 200
+
+# internal/server/ratelimit_prop_test.go
+ratelimit_prop_test.go:51 - MaxCount: 500
+ratelimit_prop_test.go:103 - MaxCount: 500
+
+# internal/validator/validator_prop_test.go
+validator_prop_test.go:33 - MaxCount: 1000
+validator_prop_test.go:116 - MaxCount: 1000
+validator_prop_test.go:173 - MaxCount: 1000
+
+# internal/tunnel/cloudflare_prop_test.go
+cloudflare_prop_test.go:32 - MaxCount: 500
+cloudflare_prop_test.go:48 - MaxCount: 500
+
+# internal/docker/recovery_prop_test.go
+recovery_prop_test.go:54 - MaxCount: 1000
+recovery_prop_test.go:100 - MaxCount: 1000
+
+# internal/traefik/config_prop_test.go
+config_prop_test.go:93 - MaxCount: 1000
+config_prop_test.go:150 - MaxCount: 1000
+
+# internal/docker/compose_prop_test.go
+compose_prop_test.go:32 - MaxCount: 500
+compose_prop_test.go:58 - MaxCount: 500
+compose_prop_test.go:78 - MaxCount: 300
+compose_prop_test.go:103 - MaxCount: 300
+compose_prop_test.go:138 - MaxCount: 300
+compose_prop_test.go:202 - MaxCount: 500
+compose_prop_test.go:265 - MaxCount: 300
+compose_prop_test.go:320 - MaxCount: 200
+compose_prop_test.go:343 - MaxCount: 200
+
+# internal/auth/jwt_prop_test.go
+jwt_prop_test.go:66 - MaxCount: 100
+jwt_prop_test.go:129 - MaxCount: 500
+jwt_prop_test.go:196 - MaxCount: 100

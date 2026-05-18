@@ -1,0 +1,99 @@
+      <!-- ===== CONTAINERS ===== -->
+      <div x-show="currentPage === 'containers'">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Containers</h2>
+            <p class="text-sm text-zinc-500">Manage running and stopped containers</p>
+          </div>
+        </div>
+
+        <!-- Search & filter bar -->
+        <div class="flex flex-col sm:flex-row gap-3 mb-4">
+          <div class="relative flex-1">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" x-model="filters.containers.search" placeholder="Search by name, image, or ID..."
+              class="w-full pl-9 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+          </div>
+          <div class="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-sm p-1">
+            <template x-for="state in [{id:'all',label:'All'},{id:'running',label:'Running'},{id:'exited',label:'Stopped'}]" :key="state.id">
+              <button @click="filters.containers.state = state.id"
+                :class="filters.containers.state === state.id ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'"
+                class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5">
+                <span x-show="state.id === 'running'" class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                <span x-show="state.id === 'exited'" class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                <span x-text="state.label"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+
+        <div class="bg-zinc-900/80 backdrop-blur border border-zinc-800/60 rounded-sm overflow-hidden">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-zinc-800">
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Name</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden sm:table-cell">Status</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">Image</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">Ports</th>
+                <th class="text-right px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="c in filteredContainers" :key="c.id">
+                <tr class="border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors cursor-pointer" @click="selectContainer(c)">
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-3">
+                      <span :class="c.state==='running'?'bg-green-500':'bg-red-500'" class="status-dot shrink-0"></span>
+                      <div>
+                        <div class="text-sm font-medium text-white" x-text="c.name || c.id"></div>
+                        <div class="text-xs text-zinc-500 sm:hidden" x-text="c.state + ' — ' + c.image.split(':')[0]"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 hidden sm:table-cell">
+                    <span :class="c.state==='running'?'bg-green-500/10 text-green-400 border-green-500/20':'bg-red-500/10 text-red-400 border-red-500/20'"
+                      class="px-2 py-0.5 rounded-md text-xs font-medium border" x-text="c.state"></span>
+                  </td>
+                  <td class="px-4 py-3 hidden md:table-cell">
+                    <span class="text-sm text-zinc-400" x-text="c.image"></span>
+                  </td>
+                  <td class="px-4 py-3 hidden md:table-cell">
+                    <div class="flex flex-wrap gap-1">
+                      <template x-for="(p, idx) in c.ports" :key="idx">
+                        <span class="px-1.5 py-0.5 rounded-sm text-xs bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono"
+                          x-text="p.PublicPort ? (p.PublicPort + ':' + p.PrivatePort + '/' + p.Type) : (p.PrivatePort + '/' + p.Type)"></span>
+                      </template>
+                      <span x-show="!c.ports || c.ports.length===0" class="text-xs text-zinc-600">—</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-right" @click.stop>
+                    <div class="flex items-center justify-end gap-0.5">
+                      <template x-if="c.state !== 'running'">
+                        <button @click="containerAction(c.id,'start')" class="btn-action btn-success" data-tip="Start">
+                          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </button>
+                      </template>
+                      <template x-if="c.state === 'running'">
+                        <button @click="containerAction(c.id,'stop')" class="btn-action btn-warning" data-tip="Stop">
+                          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </button>
+                      </template>
+                      <button @click="containerAction(c.id,'restart')" class="btn-action btn-info" data-tip="Restart">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                      </button>
+                      <button @click="containerAction(c.id,'remove')" class="btn-action btn-danger" data-tip="Remove">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+          <div x-show="filteredContainers.length === 0" class="text-center py-12 text-zinc-600">
+            <div class="text-4xl mb-3">📦</div>
+            <p class="text-sm" x-show="containers.length === 0">No containers found</p>
+            <p class="text-sm" x-show="containers.length > 0">No containers match your filters</p>
+          </div>
+        </div>
+      </div>

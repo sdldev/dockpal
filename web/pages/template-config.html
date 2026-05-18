@@ -1,0 +1,273 @@
+      <!-- ===== TEMPLATE CONFIG PAGE ===== -->
+      <div x-show="currentPage === 'template-config'" class="max-w-5xl">
+        <!-- Header with back button -->
+        <div class="mb-6">
+          <button @click="currentPage='templates'" class="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors mb-4">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            <span>Back to templates</span>
+          </button>
+          <div class="flex items-center gap-4">
+            <div class="w-14 h-14 rounded-sm bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+              <span class="text-3xl" x-text="templateConfig.template?.icon || '📦'"></span>
+            </div>
+            <div>
+              <h2 class="text-xl font-semibold text-white" x-text="'Deploy ' + (templateConfig.template?.name || '')"></h2>
+              <p class="text-sm text-zinc-500" x-text="templateConfig.template?.description"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="border-b border-zinc-800 mb-6">
+          <nav class="flex gap-1">
+            <template x-for="tab in [
+              {id:'environment', label:'Environment', icon:'🔑'},
+              {id:'ports', label:'Ports', icon:'🔌'},
+              {id:'network', label:'Network', icon:'🌐'},
+              {id:'advanced', label:'Advanced', icon:'⚙️'},
+              {id:'logs', label:'Deploy Logs', icon:'📜'}
+            ]" :key="tab.id">
+              <button @click="templateConfig.activeTab=tab.id"
+                :class="templateConfig.activeTab===tab.id ? 'border-blue-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'"
+                class="px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2">
+                <span class="text-xs" x-text="tab.icon"></span>
+                <span x-text="tab.label"></span>
+              </button>
+            </template>
+          </nav>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <!-- Main config area -->
+          <div class="lg:col-span-2 bg-zinc-900/80 backdrop-blur border border-zinc-800/60 rounded-sm p-6 space-y-5">
+
+            <!-- Environment tab -->
+            <div x-show="templateConfig.activeTab === 'environment'" class="space-y-4">
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">Service Name</label>
+                <input type="text" x-model="templateConfig.name"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                <p class="text-[10px] text-zinc-600 mt-1">Used as container name prefix</p>
+              </div>
+              <template x-if="templateConfig.template?.env_required?.length > 0">
+                <div class="space-y-3">
+                  <div class="border-t border-zinc-800 pt-4 flex items-center justify-between">
+                    <div>
+                      <h3 class="text-sm font-semibold text-white mb-1">Environment Variables</h3>
+                      <p class="text-xs text-zinc-500">Required configuration for this service</p>
+                    </div>
+                    <!-- Mode toggle -->
+                    <div class="inline-flex bg-zinc-950 border border-zinc-800 rounded-sm p-0.5 text-xs">
+                      <button @click="switchEnvMode('form')"
+                        :class="templateConfig.envMode === 'form' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'"
+                        class="px-3 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+                        Form
+                      </button>
+                      <button @click="switchEnvMode('text')"
+                        :class="templateConfig.envMode === 'text' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'"
+                        class="px-3 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                        Editor
+                      </button>
+                    </div>
+                  </div>
+                  <!-- Form mode -->
+                  <div x-show="templateConfig.envMode === 'form'" class="space-y-3">
+                    <template x-for="key in templateConfig.template.env_required" :key="key">
+                      <div class="space-y-1">
+                        <label class="text-xs font-medium text-zinc-400 font-mono" x-text="key"></label>
+                        <input x-model="templateConfig.env[key]"
+                          :type="key.toLowerCase().includes('password') || key.toLowerCase().includes('secret') ? 'password' : 'text'"
+                          class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+                          :placeholder="key.toLowerCase().includes('password') ? '••••••••' : 'Enter value...'">
+                      </div>
+                    </template>
+                  </div>
+                  <!-- Text editor mode -->
+                  <div x-show="templateConfig.envMode === 'text'" class="space-y-2">
+                    <textarea x-model="templateConfig.envText" rows="10" spellcheck="false"
+                      class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono leading-relaxed placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-y"
+                      placeholder="KEY=value&#10;ANOTHER_KEY=value&#10;# Comments are supported"></textarea>
+                    <p class="text-[10px] text-zinc-600">One variable per line in <code class="text-zinc-400">KEY=value</code> format. Use <code class="text-zinc-400">#</code> for comments.</p>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!templateConfig.template?.env_required || templateConfig.template?.env_required?.length === 0">
+                <p class="text-sm text-zinc-500 italic">No environment variables required.</p>
+              </template>
+            </div>
+
+            <!-- Ports tab -->
+            <div x-show="templateConfig.activeTab === 'ports'" class="space-y-4">
+              <div>
+                <h3 class="text-sm font-semibold text-white mb-1">Port Mapping</h3>
+                <p class="text-xs text-zinc-500">Map host ports to container ports. Change host port if conflict occurs.</p>
+              </div>
+              <template x-if="templateConfig.template?.ports?.length > 0">
+                <div class="space-y-3">
+                  <template x-for="port in templateConfig.template.ports" :key="port.container_port">
+                    <div class="grid grid-cols-12 gap-3 items-end">
+                      <div class="col-span-5 space-y-1">
+                        <label class="text-xs font-medium text-zinc-400" x-text="port.label + ' (Host)'"></label>
+                        <input type="number" x-model.number="templateConfig.ports[port.container_port]" min="1" max="65535"
+                          class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                      </div>
+                      <div class="col-span-2 text-center text-zinc-600 pb-2">→</div>
+                      <div class="col-span-5 space-y-1">
+                        <label class="text-xs font-medium text-zinc-400">Container</label>
+                        <input type="number" disabled :value="port.container_port"
+                          class="w-full px-3 py-2 bg-zinc-950/50 border border-zinc-800 rounded-sm text-sm text-zinc-500 font-mono">
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="!templateConfig.template?.ports || templateConfig.template?.ports?.length === 0">
+                <p class="text-sm text-zinc-500 italic">No ports to configure.</p>
+              </template>
+            </div>
+
+            <!-- Network tab -->
+            <div x-show="templateConfig.activeTab === 'network'" class="space-y-4">
+              <div>
+                <h3 class="text-sm font-semibold text-white mb-1">Network Configuration</h3>
+                <p class="text-xs text-zinc-500">Configure how the container connects to networks</p>
+              </div>
+              <div class="space-y-2">
+                <label class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Network Mode</label>
+                <select x-model="templateConfig.networkMode"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                  <option value="bridge">bridge (default)</option>
+                  <option value="host">host</option>
+                  <option value="none">none (isolated)</option>
+                  <option value="custom">custom network</option>
+                </select>
+              </div>
+              <template x-if="templateConfig.networkMode === 'custom'">
+                <div class="space-y-2">
+                  <label class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Custom Network Name</label>
+                  <input type="text" x-model="templateConfig.customNetwork" placeholder="my-network"
+                    class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                </div>
+              </template>
+              <div class="border-t border-zinc-800 pt-4 space-y-2">
+                <label class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Domain (Traefik)</label>
+                <input type="text" x-model="templateConfig.domain" placeholder="app.example.com"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                <p class="text-[10px] text-zinc-600">Optional. Auto-generates Traefik config with SSL.</p>
+              </div>
+            </div>
+
+            <!-- Advanced tab -->
+            <div x-show="templateConfig.activeTab === 'advanced'" class="space-y-4">
+              <div>
+                <h3 class="text-sm font-semibold text-white mb-1">Advanced Options</h3>
+                <p class="text-xs text-zinc-500">Lifecycle and recovery settings</p>
+              </div>
+              <div class="space-y-2">
+                <label class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Restart Policy</label>
+                <select x-model="templateConfig.restartPolicy"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                  <option value="unless-stopped">unless-stopped (recommended)</option>
+                  <option value="always">always</option>
+                  <option value="on-failure">on-failure</option>
+                  <option value="no">no</option>
+                </select>
+              </div>
+              <div class="border-t border-zinc-800 pt-4">
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" x-model="templateConfig.autoRecover" class="w-4 h-4 rounded bg-zinc-950 border-zinc-700 text-blue-600 focus:ring-blue-600">
+                  <div>
+                    <div class="text-sm font-medium text-white">Auto-recovery</div>
+                    <div class="text-[10px] text-zinc-500">Dockpal will automatically restart this container if it exits unexpectedly</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Logs tab -->
+            <div x-show="templateConfig.activeTab === 'logs'" class="space-y-4">
+              <div>
+                <h3 class="text-sm font-semibold text-white mb-1">Deployment Log</h3>
+                <p class="text-xs text-zinc-500">Real-time deploy progress</p>
+              </div>
+              <div id="config-deploy-logs" class="bg-black/50 rounded-sm p-4 h-80 overflow-y-auto font-mono text-xs space-y-1.5 border border-zinc-800/50">
+                <template x-for="(log, idx) in templateConfig.logs" :key="idx">
+                  <div class="flex items-start gap-2">
+                    <span class="text-zinc-600 shrink-0" x-text="log.time"></span>
+                    <span x-show="log.step === 'hint'" class="text-amber-400" x-text="log.message"></span>
+                    <span x-show="log.step !== 'hint'" :class="log.status === 'error' ? 'text-red-400' : log.status === 'done' ? 'text-emerald-400' : 'text-blue-400'" x-text="log.message"></span>
+                  </div>
+                </template>
+                <div x-show="templateConfig.deploying" class="flex items-center gap-2 text-zinc-500">
+                  <svg class="animate-spin h-3 w-3" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  <span>Processing...</span>
+                </div>
+                <div x-show="!templateConfig.deploying && templateConfig.logs.length === 0" class="text-zinc-700 text-center py-12">
+                  Click "Deploy" to start
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sidebar summary -->
+          <div class="space-y-4">
+            <div class="bg-zinc-900/80 backdrop-blur border border-zinc-800/60 rounded-sm p-5">
+              <h3 class="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Summary</h3>
+              <div class="space-y-2.5 text-xs">
+                <div class="flex justify-between">
+                  <span class="text-zinc-500">Image</span>
+                  <span class="text-zinc-300 font-mono truncate ml-2" x-text="templateConfig.template?.id"></span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-zinc-500">Category</span>
+                  <span class="text-zinc-300" x-text="templateConfig.template?.category"></span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-zinc-500">Restart</span>
+                  <span class="text-zinc-300 font-mono" x-text="templateConfig.restartPolicy"></span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-zinc-500">Network</span>
+                  <span class="text-zinc-300 font-mono" x-text="templateConfig.networkMode === 'custom' ? templateConfig.customNetwork : templateConfig.networkMode"></span>
+                </div>
+                <template x-if="templateConfig.domain">
+                  <div class="flex justify-between">
+                    <span class="text-zinc-500">Domain</span>
+                    <span class="text-emerald-400 font-mono truncate ml-2" x-text="templateConfig.domain"></span>
+                  </div>
+                </template>
+                <template x-if="templateConfig.autoRecover">
+                  <div class="flex justify-between">
+                    <span class="text-zinc-500">Auto-recover</span>
+                    <span class="text-emerald-400">enabled</span>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- Error -->
+            <div x-show="templateConfig.error" class="bg-red-500/10 border border-red-500/20 rounded-sm p-4">
+              <p class="text-xs font-semibold text-red-400 uppercase tracking-wider mb-1">Error</p>
+              <p class="text-sm text-red-300" x-text="templateConfig.error"></p>
+            </div>
+
+            <!-- Action buttons -->
+            <div class="space-y-2">
+              <button @click="deployFromConfig()" :disabled="templateConfig.deploying"
+                class="w-full py-3 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-semibold transition-all active:scale-[0.98]">
+                <span x-show="!templateConfig.deploying">Deploy Stack</span>
+                <span x-show="templateConfig.deploying" class="flex items-center justify-center gap-2">
+                  <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Deploying...
+                </span>
+              </button>
+              <button @click="currentPage='templates'" :disabled="templateConfig.deploying"
+                class="w-full py-2.5 text-sm text-zinc-400 hover:text-white border border-zinc-800 hover:border-zinc-700 rounded-sm transition-colors disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>

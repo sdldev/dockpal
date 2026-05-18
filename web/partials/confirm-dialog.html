@@ -1,0 +1,23 @@
+<!-- Confirm Dialog -->
+<div x-show="confirmDialog.show" x-cloak class="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4" @click.self="confirmDialog.show=false" @keydown.escape.window="confirmDialog.show=false">
+  <div class="bg-zinc-900 border border-zinc-800 rounded-sm w-full max-w-md shadow-2xl" @click.stop>
+    <div class="p-6">
+      <div class="flex items-start gap-4">
+        <div :class="confirmDialog.danger ? 'bg-red-500/10 border-red-500/20' : 'bg-amber-500/10 border-amber-500/20'" class="w-10 h-10 rounded-full border flex items-center justify-center shrink-0">
+          <svg :class="confirmDialog.danger ? 'text-red-400' : 'text-amber-400'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h3 class="text-base font-semibold text-white" x-text="confirmDialog.title"></h3>
+          <p class="text-sm text-zinc-400 mt-1.5" x-text="confirmDialog.message"></p>
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-zinc-800 flex items-center justify-end gap-2">
+      <button @click="confirmDialog.show=false" class="px-4 py-2 text-sm text-zinc-400 hover:text-white transition-colors">Cancel</button>
+      <button @click="runConfirm()"
+        :class="confirmDialog.danger ? 'bg-red-600 hover:bg-red-500' : 'bg-amber-600 hover:bg-amber-500'"
+        class="px-4 py-2 text-sm font-medium text-white rounded-sm transition-all active:scale-[0.98]"
+        x-text="confirmDialog.confirmText"></button>
+    </div>
+  </div>
+</div>
