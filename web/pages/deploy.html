@@ -78,8 +78,27 @@
                 <input type="text" x-model="gitForm.branch" placeholder="main"
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
               </div>
-              <button @click="deployGit()" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">
-                Deploy from GitHub
+
+              <!-- Compose file selector (shown after clone finds multiple files) -->
+              <div x-show="composeFiles.length > 1" class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Compose File</label>
+                <select x-model="gitForm.compose_file"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                  <template x-for="f in composeFiles" :key="f">
+                    <option :value="f" x-text="f"></option>
+                  </template>
+                </select>
+              </div>
+              <div x-show="composeFiles.length === 1" class="text-xs text-zinc-500">
+                Compose file: <span class="text-zinc-400" x-text="composeFiles[0]"></span>
+              </div>
+
+              <button @click="deployGit()" :disabled="gitDeploying" class="w-full py-2.5 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">
+                <span x-show="!gitDeploying">Deploy from GitHub</span>
+                <span x-show="gitDeploying" class="flex items-center justify-center gap-2">
+                  <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Deploying...
+                </span>
               </button>
             </div>
           </div>
@@ -128,7 +147,28 @@
                 <input type="text" x-model="gitForm.branch" placeholder="main"
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
               </div>
-              <button type="submit" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">Deploy from Git</button>
+
+              <!-- Compose file selector (shown after clone finds multiple files) -->
+              <div x-show="composeFiles.length > 1" class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Compose File</label>
+                <select x-model="gitForm.compose_file"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                  <template x-for="f in composeFiles" :key="f">
+                    <option :value="f" x-text="f"></option>
+                  </template>
+                </select>
+              </div>
+              <div x-show="composeFiles.length === 1" class="text-xs text-zinc-500">
+                Compose file: <span class="text-zinc-400" x-text="composeFiles[0]"></span>
+              </div>
+
+              <button type="submit" :disabled="gitDeploying" class="w-full py-2.5 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">
+                <span x-show="!gitDeploying">Deploy from Git</span>
+                <span x-show="gitDeploying" class="flex items-center justify-center gap-2">
+                  <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Deploying...
+                </span>
+              </button>
             </form>
           </div>
         </div>

@@ -16,18 +16,35 @@ Dockpal.services = {
   },
 
   async deployGit() {
-    const payload = { repo: this.gitForm.repo, branch: this.gitForm.branch };
-    const resp = await this.api('POST', '/api/deploy/git', payload);
-    if (resp && resp.ok) {
-      this.toast('Git deploy started', 'success');
-      this.gitForm = { repo: '', branch: 'main' };
-      this.githubSearch = '';
-    } else {
-      const data = resp ? await resp.json().catch(() => ({})) : {};
-      this.toast(data.error || 'Deploy failed', 'error', 5000);
+    this.gitDeploying = true;
+    try {
+      const payload = {
+        repo: this.gitForm.repo,
+        branch: this.gitForm.branch,
+        compose_file: this.gitForm.compose_file || ''
+      };
+      const resp = await this.api('POST', '/api/deploy/git', payload);
+      if (resp && resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        if (data.status === 'select_compose') {
+          this.composeFiles = data.compose_files || [];
+          this.gitForm.compose_file = this.composeFiles[0] || '';
+          this.toast('Select a compose file to deploy', 'info', 3000);
+          return;
+        }
+        this.toast('Deployed successfully', 'success');
+        this.gitForm = { repo: '', branch: 'main', compose_file: '' };
+        this.githubSearch = '';
+        this.composeFiles = [];
+      } else {
+        const data = resp ? await resp.json().catch(() => ({})) : {};
+        this.toast(data.error || 'Deploy failed', 'error', 5000);
+      }
+      await this.loadDashboard();
+      await this.loadServices();
+    } finally {
+      this.gitDeploying = false;
     }
-    await this.loadDashboard();
-    await this.loadServices();
   },
 
   async loadGithubRepos() {
@@ -53,6 +70,8 @@ Dockpal.services = {
   selectGithubRepo(repo) {
     this.gitForm.repo = repo.clone_url;
     this.gitForm.branch = repo.default_branch || 'main';
+    this.gitForm.compose_file = '';
+    this.composeFiles = [];
   },
 
   async loadServices() {

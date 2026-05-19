@@ -12,9 +12,10 @@ import (
 )
 
 type RepoInfo struct {
-	Path        string `json:"path"`
-	Branch      string `json:"branch"`
-	ComposeFile string `json:"compose_file,omitempty"`
+	Path         string   `json:"path"`
+	Branch       string   `json:"branch"`
+	ComposeFile  string   `json:"compose_file,omitempty"`
+	ComposeFiles []string `json:"compose_files,omitempty"`
 }
 
 func Clone(repoURL, branch, token string) (*RepoInfo, error) {
@@ -51,12 +52,17 @@ func Clone(repoURL, branch, token string) (*RepoInfo, error) {
 		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
 
-	composeFile := detectComposeFile(repoPath)
+	composeFiles := detectComposeFiles(repoPath)
+	var composeFile string
+	if len(composeFiles) == 1 {
+		composeFile = composeFiles[0]
+	}
 
 	return &RepoInfo{
-		Path:        repoPath,
-		Branch:      branch,
-		ComposeFile: composeFile,
+		Path:         repoPath,
+		Branch:       branch,
+		ComposeFile:  composeFile,
+		ComposeFiles: composeFiles,
 	}, nil
 }
 
@@ -97,20 +103,20 @@ func extractRepoName(url string) string {
 	return "repo"
 }
 
-func detectComposeFile(path string) string {
-	candidates := []string{
-		"docker-compose.yml",
-		"docker-compose.yaml",
-		"compose.yml",
-		"compose.yaml",
+func detectComposeFiles(repoPath string) []string {
+	var found []string
+	entries, err := os.ReadDir(repoPath)
+	if err != nil {
+		return nil
 	}
-
-	for _, c := range candidates {
-		fullPath := filepath.Join(path, c)
-		if _, err := os.Stat(fullPath); err == nil {
-			return fullPath
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.ToLower(e.Name())
+		if strings.Contains(name, "compose") && (strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".yaml")) {
+			found = append(found, e.Name())
 		}
 	}
-
-	return ""
+	return found
 }
