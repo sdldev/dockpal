@@ -272,6 +272,106 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
 	})
 
+	// Container edit (in-place + recreate)
+	protected.PUT("/containers/:id", func(c *gin.Context) {
+		containerID := c.Param("id")
+
+		var req docker.ContainerEditRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+
+		// Validate name if provided
+		if req.Name != nil {
+			if err := validator.ValidateContainerName(*req.Name); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
+				return
+			}
+		}
+
+		// Validate restart policy if provided
+		if req.RestartPolicy != nil {
+			validPolicies := map[string]bool{"no": true, "always": true, "unless-stopped": true, "on-failure": true}
+			if !validPolicies[*req.RestartPolicy] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid restart policy: must be one of no, always, unless-stopped, on-failure"})
+				return
+			}
+		}
+
+		// Validate memory limit if provided (must be non-negative)
+		if req.MemoryLimit != nil && *req.MemoryLimit < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "memory limit must be non-negative"})
+			return
+		}
+
+		// Validate CPU limit if provided (must be positive)
+		if req.CPULimit != nil && *req.CPULimit <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "CPU limit must be positive"})
+			return
+		}
+
+		// Validate env vars if provided
+		if req.Env != nil {
+			for _, env := range *req.Env {
+				if err := validator.ValidateEnvVarValue(env); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var: %s", err.Error())})
+					return
+				}
+			}
+		}
+
+		// Validate ports if provided
+		if req.Ports != nil {
+			for _, pm := range *req.Ports {
+				if pm.ContainerPort < 1 || pm.ContainerPort > 65535 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid container port: %d", pm.ContainerPort)})
+					return
+				}
+				if pm.HostPort < 1 || pm.HostPort > 65535 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid host port: %d", pm.HostPort)})
+					return
+				}
+				if pm.Protocol != "tcp" && pm.Protocol != "udp" && pm.Protocol != "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid protocol: %s (must be tcp or udp)", pm.Protocol)})
+					return
+				}
+			}
+		}
+
+		// Validate volumes if provided
+		if req.Volumes != nil {
+			for _, vm := range *req.Volumes {
+				if vm.ContainerPath == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "volume container path cannot be empty"})
+					return
+				}
+				if vm.HostPath == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "volume host path cannot be empty"})
+					return
+				}
+			}
+		}
+
+		// Warn if recreate is needed
+		needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
+
+		detail, err := dockerClient.EditContainer(c.Request.Context(), containerID, req)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		response := gin.H{
+			"status":  "updated",
+			"container": detail,
+		}
+		if needsRecreate {
+			response["recreated"] = true
+		}
+		c.JSON(http.StatusOK, response)
+	})
+
 	protected.GET("/containers/:id/stats", func(c *gin.Context) {
 		stats, err := dockerClient.GetContainerStats(c.Request.Context(), c.Param("id"))
 		if err != nil {

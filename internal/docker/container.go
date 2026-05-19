@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/netip"
+	"strings"
 
 	"github.com/moby/moby/api/types/container"
+	apinetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 )
 
@@ -71,12 +74,12 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 
 type ContainerDetail struct {
 	ContainerInfo
-	Platform      string                 `json:"platform"`
-	Env           []string               `json:"env"`
-	Mounts        []container.MountPoint `json:"mounts"`
-	NetworkMode   string                 `json:"network_mode"`
-	RestartPolicy string                 `json:"restart_policy"`
-	Networks      map[string]string      `json:"networks"`
+	Platform      string                            `json:"platform"`
+	Env           []string                          `json:"env"`
+	Mounts        []container.MountPoint            `json:"mounts"`
+	NetworkMode   string                            `json:"network_mode"`
+	RestartPolicy string                            `json:"restart_policy"`
+	Networks      map[string]string                 `json:"networks"`
 }
 
 func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDetail, error) {
@@ -233,4 +236,258 @@ func (c *Client) GetContainerStats(ctx context.Context, id string) (*ContainerSt
 	}
 
 	return stats, nil
+}
+
+// RenameContainer renames a container.
+func (c *Client) RenameContainer(ctx context.Context, id, newName string) error {
+	_, err := c.cli.ContainerRename(ctx, id, client.ContainerRenameOptions{NewName: newName})
+	return err
+}
+
+// UpdateContainer applies in-place updates (restart policy, resource limits).
+func (c *Client) UpdateContainer(ctx context.Context, id string, opts client.ContainerUpdateOptions) error {
+	_, err := c.cli.ContainerUpdate(ctx, id, opts)
+	return err
+}
+
+// ContainerEditRequest represents the set of changes to apply to a container.
+// In-place fields (name, restart_policy, memory_limit, cpu_limit) are applied
+// without recreation. Recreate fields (image, env, ports, volumes) require
+// stopping and recreating the container.
+type ContainerEditRequest struct {
+	// In-place fields
+	Name          *string `json:"name,omitempty"`
+	RestartPolicy *string `json:"restart_policy,omitempty"`
+	MemoryLimit   *int64  `json:"memory_limit,omitempty"`   // bytes, 0 = unlimited
+	CPULimit      *float64 `json:"cpu_limit,omitempty"`     // fractional CPUs, e.g. 1.5
+
+	// Recreate fields
+	Image   *string             `json:"image,omitempty"`
+	Env     *[]string           `json:"env,omitempty"`
+	Ports   *[]PortMapping      `json:"ports,omitempty"`
+	Volumes *[]VolumeMapping    `json:"volumes,omitempty"`
+}
+
+// PortMapping represents a host:container port mapping.
+type PortMapping struct {
+	HostPort      int    `json:"host_port"`
+	ContainerPort int    `json:"container_port"`
+	Protocol      string `json:"protocol"` // tcp or udp
+}
+
+// VolumeMapping represents a host:container volume mount.
+type VolumeMapping struct {
+	HostPath      string `json:"host_path"`
+	ContainerPath string `json:"container_path"`
+	ReadOnly      bool   `json:"read_only"`
+}
+
+// EditContainer applies edits to a container. It determines which changes
+// require in-place updates vs recreation and applies them accordingly.
+func (c *Client) EditContainer(ctx context.Context, id string, req ContainerEditRequest) (*ContainerDetail, error) {
+	needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
+
+	// Apply in-place updates first
+	if req.Name != nil {
+		if err := c.RenameContainer(ctx, id, *req.Name); err != nil {
+			return nil, fmt.Errorf("failed to rename container: %w", err)
+		}
+	}
+
+	if req.RestartPolicy != nil || req.MemoryLimit != nil || req.CPULimit != nil {
+		updateOpts := client.ContainerUpdateOptions{}
+		if req.RestartPolicy != nil {
+			updateOpts.RestartPolicy = &container.RestartPolicy{Name: container.RestartPolicyMode(*req.RestartPolicy)}
+		}
+		if req.MemoryLimit != nil || req.CPULimit != nil {
+			resources := container.Resources{}
+			if req.MemoryLimit != nil {
+				resources.Memory = *req.MemoryLimit
+			}
+			if req.CPULimit != nil {
+				resources.NanoCPUs = int64(*req.CPULimit * 1e9)
+			}
+			updateOpts.Resources = &resources
+		}
+		if err := c.UpdateContainer(ctx, id, updateOpts); err != nil {
+			return nil, fmt.Errorf("failed to update container: %w", err)
+		}
+	}
+
+	if needsRecreate {
+		if err := c.recreateContainer(ctx, id, req); err != nil {
+			return nil, fmt.Errorf("failed to recreate container: %w", err)
+		}
+	}
+
+	// Return updated detail — after recreate the ID may have changed,
+	// so we look up by name if provided, otherwise by original ID.
+	lookupID := id
+	if req.Name != nil {
+		lookupID = *req.Name
+	}
+	return c.InspectContainer(ctx, lookupID)
+}
+
+// recreateContainer stops, removes, and recreates a container with merged config.
+func (c *Client) recreateContainer(ctx context.Context, id string, req ContainerEditRequest) error {
+	// Inspect current container to get full config
+	result, err := c.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to inspect container for recreation: %w", err)
+	}
+
+	ctr := result.Container
+	if ctr.Config == nil || ctr.HostConfig == nil {
+		return fmt.Errorf("container inspect returned incomplete data")
+	}
+
+	// Determine the container name
+	name := ctr.Name
+	if len(name) > 0 && name[0] == '/' {
+		name = name[1:]
+	}
+	if req.Name != nil {
+		name = *req.Name
+	}
+
+	// Merge environment variables
+	env := ctr.Config.Env
+	if req.Env != nil {
+		env = *req.Env
+	}
+
+	// Merge image
+	image := ctr.Config.Image
+	if req.Image != nil {
+		image = *req.Image
+	}
+
+	// Merge port bindings
+	portBindings := ctr.HostConfig.PortBindings
+	exposedPorts := ctr.Config.ExposedPorts
+	if req.Ports != nil {
+		portBindings = apinetwork.PortMap{}
+		exposedPorts = apinetwork.PortSet{}
+		for _, pm := range *req.Ports {
+			proto := pm.Protocol
+			if proto == "" {
+				proto = "tcp"
+			}
+			portKey, _ := apinetwork.ParsePort(fmt.Sprintf("%d/%s", pm.ContainerPort, proto))
+			exposedPorts[portKey] = struct{}{}
+			portBindings[portKey] = append(portBindings[portKey], apinetwork.PortBinding{
+				HostIP:   netip.IPv4Unspecified(),
+				HostPort: fmt.Sprintf("%d", pm.HostPort),
+			})
+		}
+	}
+
+	// Merge volume bindings
+	binds := ctr.HostConfig.Binds
+	if req.Volumes != nil {
+		binds = make([]string, 0, len(*req.Volumes))
+		for _, vm := range *req.Volumes {
+			bind := vm.HostPath + ":" + vm.ContainerPath
+			if vm.ReadOnly {
+				bind += ":ro"
+			}
+			binds = append(binds, bind)
+		}
+	}
+
+	// Build new container config
+	newConfig := &container.Config{
+		Image:        image,
+		Env:          env,
+		ExposedPorts: exposedPorts,
+		Labels:       ctr.Config.Labels,
+		Cmd:          ctr.Config.Cmd,
+		Entrypoint:   ctr.Config.Entrypoint,
+		WorkingDir:   ctr.Config.WorkingDir,
+		User:         ctr.Config.User,
+		Tty:          ctr.Config.Tty,
+		OpenStdin:    ctr.Config.OpenStdin,
+		AttachStdin:  ctr.Config.AttachStdin,
+		AttachStdout: ctr.Config.AttachStdout,
+		AttachStderr: ctr.Config.AttachStderr,
+	}
+
+	// Build new host config
+	restartPolicy := ctr.HostConfig.RestartPolicy
+	if req.RestartPolicy != nil {
+		restartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(*req.RestartPolicy)}
+	}
+
+	newHostConfig := &container.HostConfig{
+		RestartPolicy: restartPolicy,
+		PortBindings:  portBindings,
+		Binds:         binds,
+		NetworkMode:   ctr.HostConfig.NetworkMode,
+		Privileged:    ctr.HostConfig.Privileged,
+		CapAdd:        ctr.HostConfig.CapAdd,
+		CapDrop:       ctr.HostConfig.CapDrop,
+		ExtraHosts:    ctr.HostConfig.ExtraHosts,
+	}
+
+	// Apply resource limits from request
+	if req.MemoryLimit != nil {
+		newHostConfig.Memory = *req.MemoryLimit
+	} else if ctr.HostConfig.Memory > 0 {
+		newHostConfig.Memory = ctr.HostConfig.Memory
+	}
+	if req.CPULimit != nil {
+		newHostConfig.NanoCPUs = int64(*req.CPULimit * 1e9)
+	} else if ctr.HostConfig.NanoCPUs != 0 {
+		newHostConfig.NanoCPUs = ctr.HostConfig.NanoCPUs
+	}
+
+	// Build network config (preserve existing network connections)
+	var networkConfig *apinetwork.NetworkingConfig
+	if ctr.NetworkSettings != nil && len(ctr.NetworkSettings.Networks) > 0 {
+		endpointsConfig := make(map[string]*apinetwork.EndpointSettings)
+		for netName := range ctr.NetworkSettings.Networks {
+			endpointsConfig[netName] = &apinetwork.EndpointSettings{}
+		}
+		networkConfig = &apinetwork.NetworkingConfig{
+			EndpointsConfig: endpointsConfig,
+		}
+	}
+
+	// Check if container was running before recreation
+	wasRunning := ctr.State != nil && strings.ToLower(string(ctr.State.Status)) == "running"
+
+	// Stop and remove the old container
+	if wasRunning {
+		timeout := 10
+		c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
+	}
+	removeOpts := client.ContainerRemoveOptions{
+		RemoveVolumes: false, // preserve volumes
+		Force:        true,
+	}
+	if _, err := c.cli.ContainerRemove(ctx, id, removeOpts); err != nil {
+		return fmt.Errorf("failed to remove old container: %w", err)
+	}
+
+	// Create new container
+	createOpts := client.ContainerCreateOptions{
+		Name:             name,
+		Config:           newConfig,
+		HostConfig:       newHostConfig,
+		NetworkingConfig: networkConfig,
+	}
+	createResult, err := c.cli.ContainerCreate(ctx, createOpts)
+	if err != nil {
+		return fmt.Errorf("failed to create new container: %w", err)
+	}
+
+	// Start the new container if the old one was running
+	if wasRunning {
+		if _, err := c.cli.ContainerStart(ctx, createResult.ID, client.ContainerStartOptions{}); err != nil {
+			return fmt.Errorf("container created but failed to start: %w", err)
+		}
+	}
+
+	return nil
 }

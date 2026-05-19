@@ -35,6 +35,11 @@
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                 Restart
               </button>
+              <button @click="showEditContainerModal = true; editContainerForm = { name: selectedContainer?.name || '', image: '', restart_policy: '', memory_mb: 0, cpu_limit: 0, env: [], ports: [], volumes: [] }"
+                class="px-3 py-1.5 text-xs font-medium rounded-sm bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 border border-violet-500/20 hover:border-violet-500/30 transition-colors flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                Edit
+              </button>
               <button @click="containerAction(selectedContainer.id,'remove')"
                 class="px-3 py-1.5 text-xs font-medium rounded-sm bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 transition-colors flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -319,5 +324,180 @@
         <div x-show="containerDetailTab === 'inspect'" class="bg-zinc-900/80 backdrop-blur border border-zinc-800/60 rounded-sm p-5">
           <h3 class="text-sm font-semibold text-white mb-3">Raw Container Data</h3>
           <pre class="bg-black border border-zinc-800 rounded-sm p-4 font-mono text-xs text-zinc-300 overflow-auto max-h-[600px]" x-text="JSON.stringify(selectedContainer, null, 2)"></pre>
+        </div>
+
+        <!-- Edit Container Modal -->
+        <div x-show="showEditContainerModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4"
+          x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+          x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0">
+          <div class="fixed inset-0 bg-black/60 backdrop-blur-sm" @click="showEditContainerModal = false"></div>
+          <div class="relative bg-zinc-900 border border-zinc-800 rounded-sm w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-2xl"
+            @click.stop>
+            <!-- Modal header -->
+            <div class="flex items-center justify-between p-5 border-b border-zinc-800">
+              <div>
+                <h3 class="text-lg font-semibold text-white">Edit Container</h3>
+                <p class="text-xs text-zinc-500 mt-0.5" x-text="selectedContainer?.name || selectedContainer?.id"></p>
+              </div>
+              <button @click="showEditContainerModal = false" class="text-zinc-500 hover:text-white transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <!-- Modal body -->
+            <div class="p-5 space-y-5">
+              <!-- Recreate warning -->
+              <div class="bg-amber-500/10 border border-amber-500/20 rounded-sm p-3 text-xs text-amber-400">
+                <strong>Note:</strong> Changing image, environment variables, ports, or volumes will <strong>recreate</strong> the container (stop, remove, re-create with new config). Name, restart policy, and resource limits are applied in-place without downtime.
+              </div>
+
+              <!-- Name -->
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1.5">Container Name</label>
+                <input type="text" x-model="editContainerForm.name"
+                  :placeholder="selectedContainer?.name || ''"
+                  class="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-600 focus:border-transparent">
+              </div>
+
+              <!-- Image -->
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1.5">Image <span class="text-amber-500">(recreate)</span></label>
+                <input type="text" x-model="editContainerForm.image"
+                  :placeholder="selectedContainer?.image || ''"
+                  class="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-600 focus:border-transparent">
+              </div>
+
+              <!-- Restart Policy -->
+              <div>
+                <label class="block text-xs font-medium text-zinc-400 mb-1.5">Restart Policy</label>
+                <select x-model="editContainerForm.restart_policy"
+                  class="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-600 focus:border-transparent">
+                  <option value="">— no change —</option>
+                  <option value="no" :selected="selectedContainer?.restart_policy === 'no'">no</option>
+                  <option value="always" :selected="selectedContainer?.restart_policy === 'always'">always</option>
+                  <option value="unless-stopped" :selected="selectedContainer?.restart_policy === 'unless-stopped'">unless-stopped</option>
+                  <option value="on-failure" :selected="selectedContainer?.restart_policy === 'on-failure'">on-failure</option>
+                </select>
+              </div>
+
+              <!-- Resource Limits -->
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-medium text-zinc-400 mb-1.5">Memory Limit (MB)</label>
+                  <input type="number" x-model.number="editContainerForm.memory_mb" min="0" step="64"
+                    placeholder="0 = unlimited"
+                    class="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-600 focus:border-transparent">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-zinc-400 mb-1.5">CPU Limit (cores)</label>
+                  <input type="number" x-model.number="editContainerForm.cpu_limit" min="0.1" step="0.1"
+                    placeholder="e.g. 1.5"
+                    class="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-violet-600 focus:border-transparent">
+                </div>
+              </div>
+
+              <!-- Environment Variables -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-xs font-medium text-zinc-400">Environment Variables <span class="text-amber-500">(recreate)</span></label>
+                  <button @click="editContainerForm.env.push({key:'', value:''})"
+                    class="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    Add
+                  </button>
+                </div>
+                <div class="space-y-2">
+                  <template x-for="(ev, idx) in editContainerForm.env" :key="idx">
+                    <div class="flex gap-2 items-center">
+                      <input type="text" x-model="ev.key" placeholder="KEY"
+                        class="flex-1 px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-600">
+                      <input type="text" x-model="ev.value" placeholder="value"
+                        class="flex-1 px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-600">
+                      <button @click="editContainerForm.env.splice(idx, 1)" class="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                  </template>
+                  <p x-show="editContainerForm.env.length === 0" class="text-xs text-zinc-600 italic">Leave empty to keep current env vars</p>
+                </div>
+              </div>
+
+              <!-- Port Mappings -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-xs font-medium text-zinc-400">Port Mappings <span class="text-amber-500">(recreate)</span></label>
+                  <button @click="editContainerForm.ports.push({host_port:'', container_port:'', protocol:'tcp'})"
+                    class="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    Add
+                  </button>
+                </div>
+                <div class="space-y-2">
+                  <template x-for="(pm, idx) in editContainerForm.ports" :key="idx">
+                    <div class="flex gap-2 items-center">
+                      <input type="number" x-model.number="pm.host_port" placeholder="Host" min="1" max="65535"
+                        class="w-20 px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-600">
+                      <span class="text-zinc-600 text-xs">:</span>
+                      <input type="number" x-model.number="pm.container_port" placeholder="Container" min="1" max="65535"
+                        class="w-20 px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-600">
+                      <select x-model="pm.protocol"
+                        class="px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white focus:outline-none focus:ring-1 focus:ring-violet-600">
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                      </select>
+                      <button @click="editContainerForm.ports.splice(idx, 1)" class="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                  </template>
+                  <p x-show="editContainerForm.ports.length === 0" class="text-xs text-zinc-600 italic">Leave empty to keep current ports</p>
+                </div>
+              </div>
+
+              <!-- Volume Mappings -->
+              <div>
+                <div class="flex items-center justify-between mb-1.5">
+                  <label class="text-xs font-medium text-zinc-400">Volume Mappings <span class="text-amber-500">(recreate)</span></label>
+                  <button @click="editContainerForm.volumes.push({host_path:'', container_path:'', read_only:false})"
+                    class="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    Add
+                  </button>
+                </div>
+                <div class="space-y-2">
+                  <template x-for="(vm, idx) in editContainerForm.volumes" :key="idx">
+                    <div class="flex gap-2 items-center">
+                      <input type="text" x-model="vm.host_path" placeholder="/host/path"
+                        class="flex-1 px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-600">
+                      <span class="text-zinc-600 text-xs">:</span>
+                      <input type="text" x-model="vm.container_path" placeholder="/container/path"
+                        class="flex-1 px-2 py-1.5 bg-zinc-800 border border-zinc-700 rounded-sm text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-600">
+                      <label class="flex items-center gap-1 text-xs text-zinc-500 shrink-0">
+                        <input type="checkbox" x-model="vm.read_only" class="rounded border-zinc-700">
+                        ro
+                      </label>
+                      <button @click="editContainerForm.volumes.splice(idx, 1)" class="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                      </button>
+                    </div>
+                  </template>
+                  <p x-show="editContainerForm.volumes.length === 0" class="text-xs text-zinc-600 italic">Leave empty to keep current volumes</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Modal footer -->
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-zinc-800">
+              <button @click="showEditContainerModal = false"
+                class="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white transition-colors">
+                Cancel
+              </button>
+              <button @click="submitContainerEdit()"
+                class="px-4 py-2 text-sm font-medium rounded-sm bg-violet-600 hover:bg-violet-500 text-white transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                Save Changes
+              </button>
+            </div>
+          </div>
         </div>
       </div>
