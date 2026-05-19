@@ -34,7 +34,6 @@ func NewHealthMonitor(client *Client) *HealthMonitor {
 // Start begins the background health monitoring goroutine.
 func (hm *HealthMonitor) Start() {
 	go hm.run()
-	log.Println("[recovery] Health monitor started (60s interval)")
 }
 
 // Stop terminates the health monitoring goroutine.

@@ -1307,7 +1307,6 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 	// Send initial stats immediately
 	stats, err := dockerClient.GetContainerStats(ctx, containerID)
 	if err != nil {
-		log.Printf("[ERROR] stats stream: %v", err)
 		conn.WriteJSON(gin.H{"error": "failed to get container stats"})
 		return
 	}
@@ -1322,7 +1321,6 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 		case <-ticker.C:
 			stats, err := dockerClient.GetContainerStats(ctx, containerID)
 			if err != nil {
-				log.Printf("[ERROR] stats stream: %v", err)
 				conn.WriteJSON(gin.H{"error": "failed to get container stats"})
 				return
 			}

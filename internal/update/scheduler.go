@@ -36,7 +36,6 @@ func (s *VersionCheckScheduler) Start(ctx context.Context, interval time.Duratio
 
 	// Prevent starting multiple instances
 	if s.running {
-		log.Println("Version checker: already running")
 		return
 	}
 	s.running = true
@@ -48,11 +47,8 @@ func (s *VersionCheckScheduler) Start(ctx context.Context, interval time.Duratio
 // It waits for any in-progress check to complete before returning
 func (s *VersionCheckScheduler) Stop() {
 	if !s.running {
-		log.Println("Version checker: not running")
 		return
 	}
-
-	log.Println("Version checker: stopping...")
 	close(s.stopCh)
 	s.running = false
 }
@@ -69,10 +65,8 @@ func (s *VersionCheckScheduler) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Version checker: context cancelled, stopping")
 			return
 		case <-s.stopCh:
-			log.Println("Version checker: stopped")
 			return
 		case <-ticker.C:
 			s.checkVersion(ctx)
@@ -82,23 +76,15 @@ func (s *VersionCheckScheduler) run(ctx context.Context) {
 
 // checkVersion performs the version check and updates the cache
 func (s *VersionCheckScheduler) checkVersion(ctx context.Context) {
-	log.Println("Version checker: running background version check...")
-
 	info, err := s.versionService.GetVersionInfo(ctx)
 	if err != nil {
-		log.Printf("Version checker: failed to check version: %v\n", err)
+		log.Printf("[WARN] version check failed: %v", err)
 		return
 	}
 
 	if info.UpdateAvailable {
-		log.Printf("Version checker: update available - current: %s, latest: %s\n",
-			info.CurrentVersion, info.LatestVersion)
-	} else {
-		log.Printf("Version checker: no update available - version: %s\n",
-			info.CurrentVersion)
+		log.Printf("[INFO] update available: %s → %s", info.CurrentVersion, info.LatestVersion)
 	}
-
-	log.Println("Version checker: background check completed")
 }
 
 // GetInterval returns the current check interval

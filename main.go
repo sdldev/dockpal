@@ -100,7 +100,6 @@ func runServer() {
 	if err != nil {
 		log.Fatalf("Failed to load or generate JWT secret: %v", err)
 	}
-	log.Println("JWT secret loaded successfully")
 
 	database, err := db.New(dbPath)
 	if err != nil {
@@ -123,7 +122,6 @@ func runServer() {
 	if err := dockerClient.Ping(context.Background()); err != nil {
 		log.Fatalf("Failed to connect to Docker daemon: %v", err)
 	}
-	log.Println("Connected to Docker daemon")
 
 	// Start container auto-recovery health monitor
 	healthMonitor := docker.NewHealthMonitor(dockerClient)
