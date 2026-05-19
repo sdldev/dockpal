@@ -496,20 +496,23 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. Add a GitHub credential in Settings > Registry with registry 'github.com' and a PAT with repo scope."})
 				return
 			}
-			internalError(c, err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to clone repository: %s", errMsg)})
 			return
 		}
 
-		if info.ComposeFile != "" {
-			composeData, err := os.ReadFile(info.ComposeFile)
-			if err != nil {
-				internalError(c, err)
-				return
-			}
-			if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
-				internalError(c, err)
-				return
-			}
+		if info.ComposeFile == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no docker-compose file found in repository. The repository must contain a docker-compose.yml, docker-compose.yaml, compose.yml, or compose.yaml file."})
+			return
+		}
+
+		composeData, err := os.ReadFile(info.ComposeFile)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
+			return
+		}
+		if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
+			return
 		}
 
 		database.SaveService(db.Service{
