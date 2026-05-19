@@ -1,0 +1,15 @@
+{
+  "id": "redis",
+  "name": "Redis",
+  "description": "In-memory data store \u0026 cache",
+  "category": "cache",
+  "icon": "⚡",
+  "ports": [
+    {
+      "label": "Redis",
+      "default": 6379,
+      "container_port": 6379
+    }
+  ],
+  "compose": "services:\n  redis:\n    image: redis:alpine\n    ports:\n      - '6379:6379'\n    volumes:\n      - redis-data:/data\nvolumes:\n  redis-data:"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "portainer-agent",
+  "name": "Portainer Agent",
+  "description": "Docker remote management agent",
+  "category": "devtools",
+  "icon": "🔌",
+  "ports": [
+    {
+      "label": "Agent",
+      "default": 9001,
+      "container_port": 9001
+    }
+  ],
+  "compose": "services:\n  agent:\n    image: portainer/agent:latest\n    ports:\n      - '9001:9001'\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - /var/lib/docker/volumes:/var/lib/docker/volumes"
+}

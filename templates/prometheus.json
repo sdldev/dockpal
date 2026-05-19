@@ -1,0 +1,15 @@
+{
+  "id": "prometheus",
+  "name": "Prometheus",
+  "description": "Metrics collection \u0026 alerting",
+  "category": "monitoring",
+  "icon": "�",
+  "ports": [
+    {
+      "label": "Web UI",
+      "default": 9090,
+      "container_port": 9090
+    }
+  ],
+  "compose": "services:\n  prometheus:\n    image: prom/prometheus:latest\n    ports:\n      - '9090:9090'\n    volumes:\n      - prom-data:/prometheus\nvolumes:\n  prom-data:"
+}

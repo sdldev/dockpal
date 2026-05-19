@@ -1,0 +1,15 @@
+{
+  "id": "grafana",
+  "name": "Grafana",
+  "description": "Monitoring \u0026 observability dashboard",
+  "category": "monitoring",
+  "icon": "📊",
+  "ports": [
+    {
+      "label": "Web UI",
+      "default": 3000,
+      "container_port": 3000
+    }
+  ],
+  "compose": "services:\n  grafana:\n    image: grafana/grafana:latest\n    ports:\n      - '3000:3000'\n    volumes:\n      - grafana-data:/var/lib/grafana\nvolumes:\n  grafana-data:"
+}

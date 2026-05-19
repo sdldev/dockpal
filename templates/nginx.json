@@ -1,0 +1,15 @@
+{
+  "id": "nginx",
+  "name": "Nginx",
+  "description": "Web server \u0026 reverse proxy",
+  "category": "web",
+  "icon": "🌐",
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 80,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  nginx:\n    image: nginx:alpine\n    ports:\n      - '80:80'\n    volumes:\n      - nginx-data:/usr/share/nginx/html\nvolumes:\n  nginx-data:"
+}

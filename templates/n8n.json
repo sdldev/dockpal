@@ -1,0 +1,15 @@
+{
+  "id": "n8n",
+  "name": "n8n",
+  "description": "Workflow automation platform",
+  "category": "automation",
+  "icon": "�",
+  "ports": [
+    {
+      "label": "Web UI",
+      "default": 5678,
+      "container_port": 5678
+    }
+  ],
+  "compose": "services:\n  n8n:\n    image: n8nio/n8n\n    ports:\n      - '5678:5678'\n    volumes:\n      - n8n-data:/home/node/.n8n\nvolumes:\n  n8n-data:"
+}

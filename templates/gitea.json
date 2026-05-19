@@ -1,0 +1,20 @@
+{
+  "id": "gitea",
+  "name": "Gitea",
+  "description": "Lightweight Git hosting",
+  "category": "devtools",
+  "icon": "🍵",
+  "ports": [
+    {
+      "label": "Web",
+      "default": 3000,
+      "container_port": 3000
+    },
+    {
+      "label": "SSH",
+      "default": 2222,
+      "container_port": 22
+    }
+  ],
+  "compose": "services:\n  gitea:\n    image: gitea/gitea:latest\n    ports:\n      - '3000:3000'\n      - '2222:22'\n    volumes:\n      - gitea-data:/data\nvolumes:\n  gitea-data:"
+}

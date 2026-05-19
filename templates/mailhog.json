@@ -1,0 +1,20 @@
+{
+  "id": "mailhog",
+  "name": "MailHog",
+  "description": "Email testing tool for development",
+  "category": "devtools",
+  "icon": "📬",
+  "ports": [
+    {
+      "label": "SMTP",
+      "default": 1025,
+      "container_port": 1025
+    },
+    {
+      "label": "Web UI",
+      "default": 8025,
+      "container_port": 8025
+    }
+  ],
+  "compose": "services:\n  mailhog:\n    image: mailhog/mailhog:latest\n    ports:\n      - '1025:1025'\n      - '8025:8025'"
+}

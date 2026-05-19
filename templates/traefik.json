@@ -1,0 +1,20 @@
+{
+  "id": "traefik",
+  "name": "Traefik",
+  "description": "Cloud-native reverse proxy \u0026 load balancer",
+  "category": "web",
+  "icon": "🔀",
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 80,
+      "container_port": 80
+    },
+    {
+      "label": "Dashboard",
+      "default": 8080,
+      "container_port": 8080
+    }
+  ],
+  "compose": "services:\n  traefik:\n    image: traefik:v3.0\n    command:\n      - '--api.insecure=true'\n      - '--providers.docker=true'\n    ports:\n      - '80:80'\n      - '8080:8080'\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro"
+}

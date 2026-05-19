@@ -1,0 +1,15 @@
+{
+  "id": "nextcloud",
+  "name": "Nextcloud",
+  "description": "Self-hosted cloud \u0026 file sync",
+  "category": "storage",
+  "icon": "☁️",
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8081,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  nextcloud:\n    image: nextcloud:latest\n    ports:\n      - '8081:80'\n    volumes:\n      - nc-data:/var/www/html\nvolumes:\n  nc-data:"
+}

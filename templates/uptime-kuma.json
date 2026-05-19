@@ -1,0 +1,15 @@
+{
+  "id": "uptime-kuma",
+  "name": "Uptime Kuma",
+  "description": "Self-hosted uptime monitoring",
+  "category": "monitoring",
+  "icon": "🟢",
+  "ports": [
+    {
+      "label": "Web UI",
+      "default": 3001,
+      "container_port": 3001
+    }
+  ],
+  "compose": "services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:1\n    ports:\n      - '3001:3001'\n    volumes:\n      - kuma-data:/app/data\nvolumes:\n  kuma-data:"
+}

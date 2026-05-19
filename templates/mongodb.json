@@ -1,0 +1,19 @@
+{
+  "id": "mongodb",
+  "name": "MongoDB 7",
+  "description": "NoSQL document database",
+  "category": "database",
+  "icon": "🍃",
+  "env_required": [
+    "MONGO_INITDB_ROOT_USERNAME",
+    "MONGO_INITDB_ROOT_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "MongoDB",
+      "default": 27017,
+      "container_port": 27017
+    }
+  ],
+  "compose": "services:\n  mongo:\n    image: mongo:7\n    environment:\n      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}\n      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}\n    ports:\n      - '27017:27017'\n    volumes:\n      - mongo-data:/data/db\nvolumes:\n  mongo-data:"
+}

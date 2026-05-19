@@ -1,0 +1,20 @@
+{
+  "id": "rabbitmq",
+  "name": "RabbitMQ",
+  "description": "Message broker with management UI",
+  "category": "messaging",
+  "icon": "🐰",
+  "ports": [
+    {
+      "label": "AMQP",
+      "default": 5672,
+      "container_port": 5672
+    },
+    {
+      "label": "Management",
+      "default": 15672,
+      "container_port": 15672
+    }
+  ],
+  "compose": "services:\n  rabbitmq:\n    image: rabbitmq:3-management-alpine\n    ports:\n      - '5672:5672'\n      - '15672:15672'\n    volumes:\n      - rabbitmq-data:/var/lib/rabbitmq\nvolumes:\n  rabbitmq-data:"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "caddy",
+  "name": "Caddy",
+  "description": "Web server with automatic HTTPS",
+  "category": "web",
+  "icon": "🔒",
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 80,
+      "container_port": 80
+    },
+    {
+      "label": "HTTPS",
+      "default": 443,
+      "container_port": 443
+    }
+  ],
+  "compose": "services:\n  caddy:\n    image: caddy:alpine\n    ports:\n      - '80:80'\n      - '443:443'\n    volumes:\n      - caddy-data:/data\n      - caddy-config:/config\nvolumes:\n  caddy-data:\n  caddy-config:"
+}

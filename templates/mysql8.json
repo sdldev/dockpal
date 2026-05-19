@@ -1,0 +1,19 @@
+{
+  "id": "mysql8",
+  "name": "MySQL 8",
+  "description": "Relational database",
+  "category": "database",
+  "icon": "🗄️",
+  "env_required": [
+    "MYSQL_ROOT_PASSWORD",
+    "MYSQL_DATABASE"
+  ],
+  "ports": [
+    {
+      "label": "MySQL",
+      "default": 3306,
+      "container_port": 3306
+    }
+  ],
+  "compose": "services:\n  mysql:\n    image: mysql:8\n    environment:\n      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}\n      MYSQL_DATABASE: ${MYSQL_DATABASE}\n    ports:\n      - '3306:3306'\n    volumes:\n      - mysql-data:/var/lib/mysql\nvolumes:\n  mysql-data:"
+}

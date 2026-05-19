@@ -1,0 +1,15 @@
+{
+  "id": "plausible",
+  "name": "Plausible Analytics",
+  "description": "Privacy-friendly web analytics",
+  "category": "analytics",
+  "icon": "�",
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8000,
+      "container_port": 8000
+    }
+  ],
+  "compose": "services:\n  plausible:\n    image: ghcr.io/plausible/community-edition:latest\n    ports:\n      - '8000:8000'\n    environment:\n      BASE_URL: http://localhost:8000\n      SECRET_KEY_BASE: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n    volumes:\n      - plausible-data:/var/lib/plausible\nvolumes:\n  plausible-data:"
+}
