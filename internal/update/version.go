@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/blang/semver"
@@ -119,7 +121,7 @@ func (s *VersionService) GetVersionInfo(ctx context.Context) (*VersionInfo, erro
 		LastChecked:   time.Now().UTC(),
 		LatestVersion: release.TagName,
 		ReleaseNotes:  release.Body,
-		DownloadURL:   release.Asset.GetBrowserDownloadURL(),
+		DownloadURL:   release.GetBrowserDownloadURL(),
 	}
 	if err := WriteCache(cachePath, cacheData); err != nil {
 		// Log but don't fail
@@ -131,7 +133,7 @@ func (s *VersionService) GetVersionInfo(ctx context.Context) (*VersionInfo, erro
 		LatestVersion:   release.TagName,
 		UpdateAvailable: updateAvailable,
 		ReleaseNotes:    release.Body,
-		DownloadURL:     release.Asset.GetBrowserDownloadURL(),
+		DownloadURL:     release.GetBrowserDownloadURL(),
 	}, nil
 }
 
@@ -148,9 +150,9 @@ func (s *VersionService) GetCachePath() string {
 
 // GitHubRelease represents the GitHub API release response
 type GitHubRelease struct {
-	TagName string       `json:"tag_name"`
-	Body    string       `json:"body"`
-	Asset   GitHubAsset  `json:"assets"`
+	TagName string        `json:"tag_name"`
+	Body    string        `json:"body"`
+	Assets  []GitHubAsset `json:"assets"`
 }
 
 // GitHubAsset represents a release asset in the GitHub API response
@@ -160,9 +162,33 @@ type GitHubAsset struct {
 	Size               int64  `json:"size"`
 }
 
-// GetBrowserDownloadURL returns the browser download URL
-func (a GitHubAsset) GetBrowserDownloadURL() string {
-	return a.BrowserDownloadURL
+// GetBrowserDownloadURL returns the browser download URL for the asset
+// matching the current OS and architecture. Falls back to the first asset.
+func (r *GitHubRelease) GetBrowserDownloadURL() string {
+	if len(r.Assets) == 0 {
+		return ""
+	}
+	suffix := assetSuffix()
+	for _, a := range r.Assets {
+		if strings.Contains(a.Name, suffix) {
+			return a.BrowserDownloadURL
+		}
+	}
+	return r.Assets[0].BrowserDownloadURL
+}
+
+// assetSuffix returns the expected filename suffix for the current GOOS/GOARCH.
+func assetSuffix() string {
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "amd64"
+	case "arm64":
+		arch = "arm64"
+	case "arm":
+		arch = "armv7"
+	}
+	return "-" + runtime.GOOS + "-" + arch
 }
 
 // fetchFromGitHub fetches the latest release from GitHub API
