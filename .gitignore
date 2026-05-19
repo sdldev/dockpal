@@ -9,3 +9,12 @@
 .worktrees/
 .security-key
 logs/security/
+
+# Local development data
+.data/
+
+# Binary builds
+dockpal
+dockpal-linux-amd64
+dockpal-linux-arm64
+dockara

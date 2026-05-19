@@ -19,7 +19,7 @@ Bahasa implementasi: **Go 1.25** untuk semua source code, **Bash** untuk `instal
     - Verifikasi `go build ./...` exit code 0
     - _Requirements: 1.1, 1.2, 1.3, 1.5, 1.6, 11.1_
 
-- [ ] 2. Update path constants dan environment variables (Layer 2)
+- [x] 2. Update path constants dan environment variables (Layer 2)
   - [x] 2.1 Update `main.go` path constants, env var lookups, dan tambahkan `mustAbs` helper
     - Edit konstanta lines 24-27: `defaultDataDir = "/opt/dockpal/data"`, `defaultDBPath = "/opt/dockpal/data/dockpal.db"`, `defaultLogPath = "/opt/dockpal/data/dockpal.log"` (biarkan `version` di task 14.1)
     - Ganti `os.Getenv("DOCKARA_DATA_DIR")` → `os.Getenv("DOCKPAL_DATA_DIR")` di line 66
@@ -29,7 +29,7 @@ Bahasa implementasi: **Go 1.25** untuk semua source code, **Bash** untuk `instal
     - Update `os.MkdirAll(dataDir, 0755)` menjadi `0750` per Req 4.9
     - _Requirements: 3.1, 3.2, 3.3, 3.5, 3.6, 3.7, 3.8, 3.9, 4.1, 4.3, 4.4, 4.9, 4.10_
 
-  - [-] 2.2 Property test untuk validasi absolute path env var
+  - [x] 2.2 Property test untuk validasi absolute path env var
     - Refactor `mustAbs` ke package baru `internal/pathvalidate` (atau test main package via subprocess) agar dapat di-PBT-kan
     - Buat file `internal/pathvalidate/path_prop_test.go`
     - **Property 1: Path validation rejects non-absolute env values**
@@ -76,13 +76,13 @@ Bahasa implementasi: **Go 1.25** untuk semua source code, **Bash** untuk `instal
     - Edit string `Dockara may need elevated privileges` di line 176: `Dockara` → `Dockpal`
     - _Requirements: 12.1_
 
-- [ ] 4. Implement dual-read untuk legacy label `dockara.*` (Layer 3, read-side)
+- [x] 4. Implement dual-read untuk legacy label `dockara.*` (Layer 3, read-side)
   - [x] 4.1 Tambahkan helper `ListContainersWithAnyLabel` di `internal/docker/recovery.go`
     - Tambahkan method baru pada `*Client`: `ListContainersWithAnyLabel(ctx context.Context, labels []string) ([]ContainerInfo, error)` yang memanggil `ListContainersWithLabel` per label dan mendeduplikasi by container ID (lihat snippet di §Architecture design.md)
     - Tempatkan komentar `// LEGACY-DOCKARA: dual-read mendukung container yang ter-deploy oleh Dockara pra-rebrand; akan dihapus pada v0.3.0` di atas helper
     - _Requirements: 5.4, 5.5, 12.2_
 
-  - [~] 4.2 Property test untuk dual-label union dengan deduplikasi
+  - [x] 4.2 Property test untuk dual-label union dengan deduplikasi
     - Extend `internal/docker/recovery_prop_test.go` dengan in-memory fake `Client` yang implement subset moby `ContainerList`
     - **Property 3: Dual-label reads return unique union of containers**
     - Gunakan `testing/quick` dengan `MaxCount ≥ 200`; generator menghasilkan set container dengan kombinasi label `{∅, labelA, labelB, both}`
@@ -95,7 +95,7 @@ Bahasa implementasi: **Go 1.25** untuk semua source code, **Bash** untuk `instal
     - Tempatkan `// LEGACY-DOCKARA: backward-compat read untuk container Dockara pra-rebrand` di atas pemanggilan
     - _Requirements: 5.4, 12.2_
 
-  - [~] 4.4 Property test untuk HealthMonitor scan tanpa duplikasi
+  - [x] 4.4 Property test untuk HealthMonitor scan tanpa duplikasi
     - Extend `internal/docker/recovery_prop_test.go`
     - **Property 4: HealthMonitor scan evaluates each eligible container exactly once**
     - Gunakan `testing/quick` dengan `MaxCount ≥ 100`; generator container set di mana eligible subset `E` memiliki kombinasi label
@@ -108,14 +108,14 @@ Bahasa implementasi: **Go 1.25** untuk semua source code, **Bash** untuk `instal
     - Tempatkan komentar `// LEGACY-DOCKARA: dual-read backward-compat untuk container Dockara pra-rebrand; akan dihapus pada v0.3.0` di atas tiap dual-filter loop
     - _Requirements: 5.5, 12.2_
 
-  - [~] 4.6 Property test untuk StopCompose/RemoveCompose unique union
+  - [x] 4.6 Property test untuk StopCompose/RemoveCompose unique union
     - Extend `internal/docker/compose_prop_test.go` dengan in-memory fake Docker client
     - **Property 5: StopCompose/RemoveCompose target unique union by project label**
     - Gunakan `testing/quick` dengan `MaxCount ≥ 100` per direction (Stop dan Remove sebagai sub-tests `t.Run`)
     - Tandai legacy fixture dengan `// LEGACY-DOCKARA: ...`
     - **Validates: Requirements 5.5**
 
-  - [~] 4.7 Property test untuk container label writes verbatim
+  - [x] 4.7 Property test untuk container label writes verbatim
     - Extend `internal/docker/compose_prop_test.go`
     - **Property 2: Container label writes preserve input verbatim**
     - Gunakan `testing/quick` dengan `MaxCount ≥ 100`; generator string ASCII-printable non-kosong untuk `(projectName, svcName, composePath)`
@@ -180,14 +180,14 @@ Bahasa implementasi: **Go 1.25** untuk semua source code, **Bash** untuk `instal
     - Verifikasi `grep -i dockara dockpal.service` mengembalikan kosong
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
 
-- [ ] 12. Rewrite installer dengan Fresh + Upgrade paths (S2)
+- [x] 12. Rewrite installer dengan Fresh + Upgrade paths (S2)
   - [x] 12.1 Implement Go-side conflict detection di `internal/installer/conflict.go`
     - Buat package `internal/installer` dengan file `conflict.go`
     - Export `func DetectConflicts(srcRoot, dstRoot string) (path, reason string, conflict bool, err error)` yang walk `srcRoot` dengan `filepath.WalkDir`, bandingkan setiap entry dengan counterpart di `dstRoot`: type mismatch (file vs dir) atau byte-content mismatch via `bytes.Equal` setelah `os.ReadFile`
     - Gunakan `os.Lstat` untuk type check; skip path yang absent di dst (no conflict)
     - _Requirements: 9.9_
 
-  - [~] 12.2 Property test untuk conflict detection
+  - [x] 12.2 Property test untuk conflict detection
     - Buat file `internal/installer/conflict_prop_test.go`
     - **Property 6: Conflict detection identifies all type/content mismatches**
     - Generator: synthetic file tree pair `(srcTree, dstTree)` sebagai map `path → {type, content}` materialized ke `t.TempDir()` lalu invoke `DetectConflicts`

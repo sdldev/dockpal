@@ -78,6 +78,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now dockpal
 ```
 
+### Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for setting up the file-watching development workflow with reflex.
+
 ---
 
 ## 🔧 Configuration
