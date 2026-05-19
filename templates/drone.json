@@ -1,0 +1,21 @@
+{
+  "id": "drone",
+  "name": "Drone CI",
+  "description": "Container-native CI/CD",
+  "category": "devtools",
+  "icon": "🚀",
+  "env_required": [
+    "DRONE_GITEA_SERVER",
+    "DRONE_GITEA_CLIENT_ID",
+    "DRONE_GITEA_CLIENT_SECRET",
+    "DRONE_RPC_SECRET"
+  ],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8084,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  drone:\n    image: drone/drone:latest\n    ports:\n      - '8084:80'\n    environment:\n      DRONE_GITEA_SERVER: ${DRONE_GITEA_SERVER}\n      DRONE_GITEA_CLIENT_ID: ${DRONE_GITEA_CLIENT_ID}\n      DRONE_GITEA_CLIENT_SECRET: ${DRONE_GITEA_CLIENT_SECRET}\n      DRONE_RPC_SECRET: ${DRONE_RPC_SECRET}\n      DRONE_SERVER_HOST: localhost:8084\n      DRONE_SERVER_PROTO: http\n    volumes:\n      - drone-data:/data\nvolumes:\n  drone-data:"
+}

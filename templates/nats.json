@@ -1,0 +1,20 @@
+{
+  "id": "nats",
+  "name": "NATS",
+  "description": "High-performance messaging system",
+  "category": "messaging",
+  "icon": "📨",
+  "ports": [
+    {
+      "label": "Client",
+      "default": 4222,
+      "container_port": 4222
+    },
+    {
+      "label": "HTTP",
+      "default": 8222,
+      "container_port": 8222
+    }
+  ],
+  "compose": "services:\n  nats:\n    image: nats:latest\n    ports:\n      - '4222:4222'\n      - '8222:8222'\n    command: '--http_port 8222'"
+}

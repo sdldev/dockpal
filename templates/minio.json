@@ -1,0 +1,24 @@
+{
+  "id": "minio",
+  "name": "MinIO",
+  "description": "S3-compatible object storage",
+  "category": "storage",
+  "icon": "🪣",
+  "env_required": [
+    "MINIO_ROOT_USER",
+    "MINIO_ROOT_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "API",
+      "default": 9000,
+      "container_port": 9000
+    },
+    {
+      "label": "Console",
+      "default": 9001,
+      "container_port": 9001
+    }
+  ],
+  "compose": "services:\n  minio:\n    image: minio/minio\n    command: server /data --console-address ':9001'\n    ports:\n      - '9000:9000'\n      - '9001:9001'\n    environment:\n      MINIO_ROOT_USER: ${MINIO_ROOT_USER}\n      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}\n    volumes:\n      - minio-data:/data\nvolumes:\n  minio-data:"
+}

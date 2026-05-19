@@ -1,0 +1,18 @@
+{
+  "id": "wordpress",
+  "name": "WordPress",
+  "description": "CMS with MySQL database",
+  "category": "web",
+  "icon": "�",
+  "env_required": [
+    "MYSQL_ROOT_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8085,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  wordpress:\n    image: wordpress:latest\n    ports:\n      - '8085:80'\n    environment:\n      WORDPRESS_DB_HOST: db\n      WORDPRESS_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}\n    depends_on:\n      - db\n  db:\n    image: mysql:8\n    environment:\n      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}\n      MYSQL_DATABASE: wordpress\n    volumes:\n      - wp-db:/var/lib/mysql\nvolumes:\n  wp-db:"
+}

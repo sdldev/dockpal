@@ -1,0 +1,15 @@
+{
+  "id": "vaultwarden",
+  "name": "Vaultwarden",
+  "description": "Self-hosted password manager",
+  "category": "security",
+  "icon": "🔐",
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8083,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  vaultwarden:\n    image: vaultwarden/server:latest\n    ports:\n      - '8083:80'\n    volumes:\n      - vw-data:/data\nvolumes:\n  vw-data:"
+}

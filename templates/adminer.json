@@ -1,0 +1,15 @@
+{
+  "id": "adminer",
+  "name": "Adminer",
+  "description": "Database management UI",
+  "category": "devtools",
+  "icon": "🛠️",
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8082,
+      "container_port": 8080
+    }
+  ],
+  "compose": "services:\n  adminer:\n    image: adminer:latest\n    ports:\n      - '8082:8080'"
+}

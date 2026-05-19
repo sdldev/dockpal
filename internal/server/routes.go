@@ -67,17 +67,56 @@ type Template struct {
 }
 
 func loadTemplates() ([]Template, error) {
-	data, err := os.ReadFile("templates/templates.json")
+	// Try local templates directory first
+	templates, err := loadTemplatesFromDir("templates")
+	if err == nil && len(templates) > 0 {
+		return templates, nil
+	}
+
+	// Fallback to system-wide directory
+	templates, err = loadTemplatesFromDir("/opt/dockpal/templates")
 	if err != nil {
-		data, err = os.ReadFile("/opt/dockpal/templates.json")
-		if err != nil {
-			return nil, err
-		}
+		return nil, fmt.Errorf("no templates available: %w", err)
 	}
+	if len(templates) == 0 {
+		return nil, fmt.Errorf("no template files found in fallback directory")
+	}
+
+	return templates, nil
+}
+
+// loadTemplatesFromDir reads all .json files in the given directory,
+// unmarshals each into a Template, and returns the collected slice.
+func loadTemplatesFromDir(dir string) ([]Template, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading templates directory %s: %w", dir, err)
+	}
+
 	var templates []Template
-	if err := json.Unmarshal(data, &templates); err != nil {
-		return nil, err
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+
+		filePath := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("reading template file %s: %w", filePath, err)
+		}
+
+		var tmpl Template
+		if err := json.Unmarshal(data, &tmpl); err != nil {
+			return nil, fmt.Errorf("parsing template file %s: %w", filePath, err)
+		}
+
+		templates = append(templates, tmpl)
 	}
+
 	return templates, nil
 }
 

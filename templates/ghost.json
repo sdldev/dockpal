@@ -1,0 +1,15 @@
+{
+  "id": "ghost",
+  "name": "Ghost",
+  "description": "Professional publishing platform",
+  "category": "web",
+  "icon": "👻",
+  "ports": [
+    {
+      "label": "Web",
+      "default": 2368,
+      "container_port": 2368
+    }
+  ],
+  "compose": "services:\n  ghost:\n    image: ghost:5-alpine\n    ports:\n      - '2368:2368'\n    volumes:\n      - ghost-data:/var/lib/ghost/content\nvolumes:\n  ghost-data:"
+}
