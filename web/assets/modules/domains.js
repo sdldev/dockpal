@@ -1,13 +1,24 @@
 // Domains: list, add, delete (Traefik routing).
+// Note: Domains are local-only features - requires isLocalInstance (Requirement 12.9)
 window.Dockpal = window.Dockpal || {};
 
 Dockpal.domains = {
   async loadDomains() {
+    // Only load domains for local instance (local-only feature)
+    if (!this.isLocalInstance) {
+      this.domains = [];
+      return;
+    }
     const resp = await this.api('GET', '/api/domains');
     if (resp) this.domains = await resp.json();
   },
 
   async addDomain() {
+    // Only allow domains for local instance
+    if (!this.isLocalInstance) {
+      this.toast('Domains are only available for local instance', 'error', 5000);
+      return;
+    }
     const resp = await this.api('POST', '/api/domains', this.domainForm);
     if (resp && resp.ok) {
       this.toast('Domain added', 'success');

@@ -3,6 +3,7 @@ window.Dockpal = window.Dockpal || {};
 
 Dockpal.templates = {
   async loadTemplates() {
+    // Templates are global (not instance-scoped) - they are defined on the server
     const resp = await this.api('GET', '/api/templates');
     if (resp) this.templates = await resp.json();
   },
@@ -93,7 +94,8 @@ Dockpal.templates = {
     const portsInt = {};
     for (const cp in tc.ports) portsInt[cp] = parseInt(tc.ports[cp]);
 
-    const resp = await this.api('POST', '/api/templates/' + tc.template.id + '/deploy/stream', {
+    // Use instanceApi for template deploy (Requirements 12.4)
+    const resp = await this.instanceApi('POST', '/templates/' + tc.template.id + '/deploy/stream', {
       env, ports: portsInt, custom_name: tc.name,
       restart_policy: tc.restartPolicy, auto_recover: tc.autoRecover, domain: tc.domain
     });
@@ -105,8 +107,9 @@ Dockpal.templates = {
     }
     const { deploy_id } = await resp.json();
 
+    // Use instance-scoped WebSocket path (Requirement 12.8)
     const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(wsProto + '//' + location.host + '/api/deploy/stream/' + deploy_id + '?token=' + this.token);
+    const ws = new WebSocket(wsProto + '//' + location.host + '/api/instances/' + this.selectedInstance + '/deploy/stream/' + deploy_id + '?token=' + this.token);
 
     ws.onmessage = (e) => {
       const event = JSON.parse(e.data);

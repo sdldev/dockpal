@@ -7,8 +7,22 @@ Dockpal.auth = {
     if (saved) {
       this.token = saved;
       try {
-        const resp = await fetch('/api/containers', { headers: { Authorization: 'Bearer ' + this.token } });
-        if (resp.ok) {
+        // Load instances first to get the instance list
+        await this.loadInstances();
+        
+        // Try to access the selected instance's containers
+        const resp = await this.instanceApi('GET', '/containers');
+        if (resp && resp.ok) {
+          this.view = 'app';
+          await this.loadDashboard();
+          await this.checkForUpdates();
+          return;
+        }
+        // If instance-scoped call fails, try local for backward compatibility
+        const localResp = await fetch('/api/containers', { headers: { Authorization: 'Bearer ' + this.token } });
+        if (localResp.ok) {
+          // Reset to local instance if the selected instance is not accessible
+          this.selectedInstance = 'local';
           this.view = 'app';
           await this.loadDashboard();
           await this.checkForUpdates();
@@ -35,6 +49,8 @@ Dockpal.auth = {
       localStorage.setItem('dockpal_token', this.token);
       this.view = 'app';
       this.currentPage = 'dashboard';
+      // Load instances after login
+      await this.loadInstances();
       await this.loadDashboard();
       await this.checkForUpdates();
     } catch (e) {
@@ -53,6 +69,26 @@ Dockpal.auth = {
     if (this.sysResourceInterval) clearInterval(this.sysResourceInterval);
     if (Dockpal._charts.cpu) { Dockpal._charts.cpu.destroy(); Dockpal._charts.cpu = null; }
     if (Dockpal._charts.ram) { Dockpal._charts.ram.destroy(); Dockpal._charts.ram = null; }
+  },
+
+  // Load all instances from the server (Requirement 10.5)
+  async loadInstances() {
+    try {
+      const resp = await this.api('GET', '/api/instances');
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        // Ensure local instance is always in the list
+        const hasLocal = (data.instances || []).some(i => i.id === 'local');
+        if (!hasLocal) {
+          data.instances = [{ id: 'local', name: 'This Server', status: 'online' }, ...(data.instances || [])];
+        }
+        this.instances = data.instances || [];
+      }
+    } catch (e) {
+      console.error('Failed to load instances:', e);
+      // On error, show local instance as default
+      this.instances = [{ id: 'local', name: 'This Server', status: 'online' }];
+    }
   },
 
   async api(method, path, body) {

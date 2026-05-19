@@ -15,7 +15,7 @@ function dockpalApp() {
   // Merge plain methods from each module (preserves getters via descriptors).
   const modules = [D.ui, D.auth, D.charts, D.computed, D.dashboard,
                    D.containers, D.templates, D.services, D.images,
-                   D.domains, D.files, D.updateBanner, D.registry];
+                   D.domains, D.files, D.updateBanner, D.registry, D.instances];
   for (const mod of modules) {
     const descriptors = Object.getOwnPropertyDescriptors(mod);
     Object.defineProperties(target, descriptors);

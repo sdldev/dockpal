@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
@@ -137,7 +138,13 @@ func runServer() {
 	// Initialize update service
 	updateService := update.NewUpdateService("v" + version)
 
-	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService)
+	// Initialize agent manager (for multi-instance support)
+	agentMgr, err := agent.NewManager(database, dockerClient, jwtSecret)
+	if err != nil {
+		log.Fatalf("Failed to create agent manager: %v", err)
+	}
+
+	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr)
 
 	// Initialize and start background version check scheduler (6-hour interval)
 	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)

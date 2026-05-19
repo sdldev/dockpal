@@ -5,7 +5,8 @@ Dockpal.registry = {
   async loadRegistries() {
     this.registryLoading = true;
     try {
-      const resp = await this.api('GET', '/api/registries');
+      // Use instanceApi for instance-scoped registry listing
+      const resp = await this.instanceApi('GET', '/registries');
       if (resp && resp.ok) this.registries = await resp.json();
     } finally {
       this.registryLoading = false;
@@ -48,7 +49,8 @@ Dockpal.registry = {
 
     this.registryLoading = true;
     try {
-      const resp = await this.api('POST', '/api/registries', {
+      // Use instanceApi for adding registry credentials
+      const resp = await this.instanceApi('POST', '/registries', {
         registry: this.registryForm.registry.trim(),
         username: this.registryForm.username.trim(),
         token: this.registryForm.token.trim()
@@ -75,7 +77,8 @@ Dockpal.registry = {
       message: 'Remove credentials for "' + (reg?.registry || id) + '"? This cannot be undone.',
       confirmText: 'Delete',
       onConfirm: async () => {
-        const resp = await this.api('DELETE', '/api/registries/' + id);
+        // Use instanceApi for deleting registry credentials
+        const resp = await this.instanceApi('DELETE', '/registries/' + id);
         if (resp && resp.ok) {
           this.toast('Registry credential deleted', 'success');
         } else {
@@ -91,7 +94,8 @@ Dockpal.registry = {
     this.registryTestResult = null;
     this.registryTesting = id;
     try {
-      const resp = await this.api('POST', '/api/registries/' + id + '/test');
+      // Use instanceApi for testing registry connections
+      const resp = await this.instanceApi('POST', '/registries/' + id + '/test');
       if (resp && resp.ok) {
         const data = await resp.json();
         this.registryTestResult = { id, ...data };

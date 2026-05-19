@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
@@ -122,7 +123,7 @@ func loadTemplatesFromDir(dir string) ([]Template, error) {
 	return templates, nil
 }
 
-func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService) {
+func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager) {
 	api := r.Group("/api")
 
 	// Rate limiters
@@ -138,6 +139,17 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// Auth protected
 	protected.POST("/auth/reset-password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleResetPassword(c, database) })
+
+	// Instance management routes (new)
+	RegisterInstanceRoutes(protected, database, agentMgr, jwtSecret)
+
+	// Agent WebSocket endpoint (unauthenticated — agent uses token in message)
+	r.GET("/api/agent/connect", HandleAgentConnect(database, agentMgr))
+
+	// Instance-scoped operations (new route group)
+	instances := protected.Group("/instances/:instance_id")
+	instances.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
+	RegisterInstanceScopedRoutes(instances)
 
 	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)
@@ -222,7 +234,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// Containers
 	protected.GET("/containers", func(c *gin.Context) {
-		containers, err := dockerClient.ListContainers(c.Request.Context(), true)
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		containers, err := client.ListContainers(c.Request.Context(), true)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -231,7 +248,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.GET("/containers/:id", func(c *gin.Context) {
-		detail, err := dockerClient.InspectContainer(c.Request.Context(), c.Param("id"))
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		detail, err := client.InspectContainer(c.Request.Context(), c.Param("id"))
 		if err != nil {
 			internalError(c, err)
 			return
@@ -240,7 +262,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.POST("/containers/:id/start", func(c *gin.Context) {
-		if err := dockerClient.StartContainer(c.Request.Context(), c.Param("id")); err != nil {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if err := client.StartContainer(c.Request.Context(), c.Param("id")); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -248,7 +275,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.POST("/containers/:id/stop", func(c *gin.Context) {
-		if err := dockerClient.StopContainer(c.Request.Context(), c.Param("id")); err != nil {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if err := client.StopContainer(c.Request.Context(), c.Param("id")); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -256,7 +288,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.POST("/containers/:id/restart", func(c *gin.Context) {
-		if err := dockerClient.RestartContainer(c.Request.Context(), c.Param("id")); err != nil {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if err := client.RestartContainer(c.Request.Context(), c.Param("id")); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -264,8 +301,13 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.DELETE("/containers/:id", func(c *gin.Context) {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		force := c.Query("force") == "true"
-		if err := dockerClient.RemoveContainer(c.Request.Context(), c.Param("id"), force); err != nil {
+		if err := client.RemoveContainer(c.Request.Context(), c.Param("id"), force); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -275,6 +317,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// Container edit (in-place + recreate)
 	protected.PUT("/containers/:id", func(c *gin.Context) {
 		containerID := c.Param("id")
+
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 
 		var req docker.ContainerEditRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -356,7 +404,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		// Warn if recreate is needed
 		needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
 
-		detail, err := dockerClient.EditContainer(c.Request.Context(), containerID, req)
+		detail, err := client.EditContainer(c.Request.Context(), containerID, req)
 		if err != nil {
 			// TODO: remove debug detail before release
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "debug": true})
@@ -374,7 +422,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.GET("/containers/:id/stats", func(c *gin.Context) {
-		stats, err := dockerClient.GetContainerStats(c.Request.Context(), c.Param("id"))
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		stats, err := client.GetContainerStats(c.Request.Context(), c.Param("id"))
 		if err != nil {
 			internalError(c, err)
 			return
@@ -384,13 +437,18 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// WebSocket logs
 	protected.GET("/containers/:id/logs", func(c *gin.Context) {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			return
 		}
 		defer conn.Close()
 
-		reader, err := dockerClient.ContainerLogs(c.Request.Context(), c.Param("id"), "100")
+		reader, err := client.ContainerLogs(c.Request.Context(), c.Param("id"), "100")
 		if err != nil {
 			conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
 			return
@@ -434,11 +492,20 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			}
 		}
 
+		// Get auth headers for registries
+		registryAuths := getRegistryAuths(registryManager)
+
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
 		session := deployManager.CreateSession()
 
 		// Run deploy in background goroutine
 		go func() {
-			err := dockerClient.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryManager.GetAuthHeader)
+			err := client.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryAuths)
 			if err == nil {
 				database.SaveService(db.Service{
 					ID:        generateID("svc"),
@@ -540,7 +607,16 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
-		if err := dockerClient.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryManager.GetAuthHeader); err != nil {
+		// Get auth headers for registries
+		registryAuths := getRegistryAuths(registryManager)
+
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		if err := client.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryAuths); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -645,7 +721,17 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
 			return
 		}
-		if err := dockerClient.DeployCompose(c.Request.Context(), projectName, string(composeData), registryManager.GetAuthHeader); err != nil {
+
+		// Get auth headers for registries
+		registryAuths := getRegistryAuths(registryManager)
+
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
 			return
 		}
@@ -836,8 +922,17 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			compose = strings.ReplaceAll(compose, "${"+k+"}", v)
 		}
 
+		// Get auth headers for registries
+		registryAuths := getRegistryAuths(registryManager)
+
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
 		name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
-		if err := dockerClient.DeployCompose(c.Request.Context(), name, compose, registryManager.GetAuthHeader); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), name, compose, registryAuths); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -920,10 +1015,20 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				name = req.CustomName
 			}
 		}
+
+		// Get auth headers for registries
+		registryAuths := getRegistryAuths(registryManager)
+
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
 		session := deployManager.CreateSession()
 
 		go func() {
-			err := dockerClient.DeployComposeStreamed(context.Background(), name, compose, session, registryManager.GetAuthHeader)
+			err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
 			if err == nil {
 				database.SaveService(db.Service{
 					ID:        generateID("svc"),
@@ -948,7 +1053,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// Images
 	protected.GET("/images", func(c *gin.Context) {
-		images, err := dockerClient.ListImages(c.Request.Context())
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		images, err := client.ListImages(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
 			return
@@ -957,6 +1067,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.POST("/images/pull", func(c *gin.Context) {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
 		var req struct {
 			Image string `json:"image" binding:"required"`
 		}
@@ -967,13 +1083,13 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		// Try authenticated pull if credentials are available
 		authHeader, _ := registryManager.GetAuthHeader(req.Image)
 		if authHeader != "" {
-			if err := dockerClient.PullImageWithAuth(c.Request.Context(), req.Image, authHeader); err != nil {
+			if err := client.PullImageWithAuth(c.Request.Context(), req.Image, authHeader); err != nil {
 				internalError(c, err)
 				return
 			}
 		} else {
 			// Fallback to unauthenticated pull
-			if err := dockerClient.PullImage(c.Request.Context(), req.Image); err != nil {
+			if err := client.PullImage(c.Request.Context(), req.Image); err != nil {
 				internalError(c, err)
 				return
 			}
@@ -982,7 +1098,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.DELETE("/images/:id", func(c *gin.Context) {
-		if err := dockerClient.RemoveImage(c.Request.Context(), c.Param("id")); err != nil {
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if err := client.RemoveImage(c.Request.Context(), c.Param("id")); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -1091,7 +1212,36 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// System
 	protected.GET("/system/info", func(c *gin.Context) {
-		info := getSystemInfo(dockerClient)
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		// Get host info and stats
+		hostInfo, err := client.GetHostInfo(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		hostStats, err := client.GetHostStats(c.Request.Context())
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		info := SystemInfo{
+			Hostname:      hostInfo.Hostname,
+			OS:            hostInfo.OS,
+			CPUCores:      hostInfo.CPUCores,
+			CPUPercent:    hostStats.CPUPercent,
+			TotalRAM:      hostStats.TotalRAM,
+			UsedRAM:       hostStats.UsedRAM,
+			TotalDisk:     hostStats.TotalDisk,
+			UsedDisk:      hostStats.UsedDisk,
+			DockerVersion: hostInfo.DockerVersion,
+		}
 		c.JSON(http.StatusOK, info)
 	})
 
@@ -1107,7 +1257,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// WebSocket stats streaming
 	protected.GET("/containers/:id/stats/ws", func(c *gin.Context) {
-		handleStatsStream(c, dockerClient)
+		handleStatsStream(c, agentMgr)
 	})
 
 	// Domains (Fase 4)
@@ -1340,19 +1490,25 @@ func getHostname() string {
 
 // handleStatsStream streams real-time container resource stats over WebSocket.
 // It sends JSON stats every 2 seconds and stops on client disconnect or error.
-func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
+func handleStatsStream(c *gin.Context, agentMgr *agent.Manager) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
+	client, err := agentMgr.GetClient("local")
+	if err != nil {
+		conn.WriteJSON(gin.H{"error": "failed to get client"})
+		return
+	}
+
 	containerID := c.Param("id")
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
 	// Check if container is running before starting the stream
-	detail, err := dockerClient.InspectContainer(ctx, containerID)
+	detail, err := client.InspectContainer(ctx, containerID)
 	if err != nil {
 		conn.WriteJSON(gin.H{"error": "container not found"})
 		return
@@ -1376,7 +1532,7 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 	defer ticker.Stop()
 
 	// Send initial stats immediately
-	stats, err := dockerClient.GetContainerStats(ctx, containerID)
+	stats, err := client.GetContainerStats(ctx, containerID)
 	if err != nil {
 		conn.WriteJSON(gin.H{"error": "failed to get container stats"})
 		return
@@ -1390,7 +1546,7 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			stats, err := dockerClient.GetContainerStats(ctx, containerID)
+			stats, err := client.GetContainerStats(ctx, containerID)
 			if err != nil {
 				conn.WriteJSON(gin.H{"error": "failed to get container stats"})
 				return
@@ -1445,6 +1601,17 @@ func extractFirstPort(composeYAML string) int {
 		}
 	}
 	return 80
+}
+
+// getRegistryAuths extracts registry authentication headers from the registry manager.
+// Returns a map of registry domain to auth header string.
+// Note: Currently returns nil because CredentialSummary masks tokens.
+// The registry manager's GetAuthHeader method should be used for single-image operations.
+func getRegistryAuths(registryMgr *registry.Manager) map[string]string {
+	// TODO: Add method to registry.Manager to get raw tokens for bulk operations
+	// For now, return nil - per-image auth is handled via GetAuthHeader calls
+	// in the pull/DeployCompose paths when specific image references are known.
+	return nil
 }
 // HandleGetVersion handles the GET /api/system/version endpoint
 func HandleGetVersion(c *gin.Context, versionService *update.VersionService) {

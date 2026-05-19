@@ -18,30 +18,51 @@ type User struct {
 }
 
 type Service struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	Domain    string `json:"domain,omitempty"`
-	Compose   string `json:"compose,omitempty"`
-	Repo      string `json:"repo,omitempty"`
-	CreatedAt int64  `json:"created_at"`
+	ID          string `json:"id"`
+	InstanceID  string `json:"instance_id,omitempty"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Domain      string `json:"domain,omitempty"`
+	Compose     string `json:"compose,omitempty"`
+	Repo        string `json:"repo,omitempty"`
+	CreatedAt   int64  `json:"created_at"`
 }
 
 type Domain struct {
-	ID      string `json:"id"`
-	Domain  string `json:"domain"`
-	Service string `json:"service"`
-	Port    int    `json:"port"`
+	ID         string `json:"id"`
+	InstanceID string `json:"instance_id,omitempty"`
+	Domain     string `json:"domain"`
+	Service    string `json:"service"`
+	Port       int    `json:"port"`
 }
 
 type RegistryCredential struct {
 	ID              string `json:"id"`
+	InstanceID      string `json:"instance_id,omitempty"`
 	Registry        string `json:"registry"`
 	Username        string `json:"username"`
 	EncryptedToken  []byte `json:"encrypted_token"`
 	CreatedAt       int64  `json:"created_at"`
 	UpdatedAt       int64  `json:"updated_at"`
 	LastValidatedAt int64  `json:"last_validated_at,omitempty"`
+}
+
+type Instance struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Host                string `json:"host"`
+	Port                int    `json:"port"`
+	Mode                string `json:"mode"`
+	AgentTokenHash      string `json:"agent_token_hash"`
+	AgentTokenEncrypted []byte `json:"agent_token_encrypted"`
+	AgentVersion        string `json:"agent_version"`
+	Status              string `json:"status"`
+	DockerVersion       string `json:"docker_version"`
+	OS                  string `json:"os"`
+	CPUCores            int    `json:"cpu_cores"`
+	TotalMemory         int64  `json:"total_memory"`
+	LastSeen            int64  `json:"last_seen"`
+	CreatedAt           int64  `json:"created_at"`
 }
 
 type DB struct {
@@ -53,6 +74,7 @@ var (
 	bucketServices   = []byte("services")
 	bucketDomains    = []byte("domains")
 	bucketRegistries = []byte("registries")
+	bucketInstances  = []byte("instances")
 )
 
 func New(path string) (*DB, error) {
@@ -62,7 +84,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -224,6 +246,33 @@ func (d *DB) DeleteService(id string) error {
 	})
 }
 
+// ListServicesByInstance returns services scoped to a specific instance.
+// For "local" instance, returns services with empty InstanceID.
+// For other instances, returns services with matching InstanceID.
+func (d *DB) ListServicesByInstance(instanceID string) ([]Service, error) {
+	var services []Service
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketServices)
+		return b.ForEach(func(k, v []byte) error {
+			var svc Service
+			if err := json.Unmarshal(v, &svc); err != nil {
+				return err
+			}
+			// For "local" instance, match empty InstanceID
+			// For other instances, match exact InstanceID
+			if instanceID == "local" {
+				if svc.InstanceID == "" {
+					services = append(services, svc)
+				}
+			} else if svc.InstanceID == instanceID {
+				services = append(services, svc)
+			}
+			return nil
+		})
+	})
+	return services, err
+}
+
 // Domains
 func (d *DB) SaveDomain(domain Domain) error {
 	return d.db.Update(func(tx *bbolt.Tx) error {
@@ -256,6 +305,33 @@ func (d *DB) DeleteDomain(id string) error {
 	return d.db.Update(func(tx *bbolt.Tx) error {
 		return tx.Bucket(bucketDomains).Delete([]byte(id))
 	})
+}
+
+// ListDomainsByInstance returns domains scoped to a specific instance.
+// For "local" instance, returns domains with empty InstanceID.
+// For other instances, returns domains with matching InstanceID.
+func (d *DB) ListDomainsByInstance(instanceID string) ([]Domain, error) {
+	var domains []Domain
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketDomains)
+		return b.ForEach(func(k, v []byte) error {
+			var dom Domain
+			if err := json.Unmarshal(v, &dom); err != nil {
+				return err
+			}
+			// For "local" instance, match empty InstanceID
+			// For other instances, match exact InstanceID
+			if instanceID == "local" {
+				if dom.InstanceID == "" {
+					domains = append(domains, dom)
+				}
+			} else if dom.InstanceID == instanceID {
+				domains = append(domains, dom)
+			}
+			return nil
+		})
+	})
+	return domains, err
 }
 
 // Registry Credentials
@@ -331,4 +407,164 @@ func (d *DB) FindRegistryCredentialByDomain(domain string) (*RegistryCredential,
 		return nil, err
 	}
 	return match, nil
+}
+
+// FindRegistryCredentialByDomainAndInstance finds a registry credential by domain with instance scoping.
+// It first attempts to find a credential matching both domain and instanceID.
+// If not found, it falls back to a global credential (empty InstanceID) with matching domain.
+// Returns the most recently updated match based on UpdatedAt timestamp.
+func (d *DB) FindRegistryCredentialByDomainAndInstance(domain string, instanceID string) (*RegistryCredential, error) {
+	var instanceMatch *RegistryCredential
+	var globalMatch *RegistryCredential
+
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketRegistries)
+		return b.ForEach(func(k, v []byte) error {
+			var cred RegistryCredential
+			if err := json.Unmarshal(v, &cred); err != nil {
+				return err
+			}
+			if strings.EqualFold(cred.Registry, domain) {
+				// Check for instance-specific match
+				if cred.InstanceID == instanceID {
+					if instanceMatch == nil || cred.UpdatedAt > instanceMatch.UpdatedAt {
+						c := cred
+						instanceMatch = &c
+					}
+				}
+				// Check for global fallback (empty InstanceID)
+				if cred.InstanceID == "" {
+					if globalMatch == nil || cred.UpdatedAt > globalMatch.UpdatedAt {
+						c := cred
+						globalMatch = &c
+					}
+				}
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Return instance-specific match if found, otherwise fall back to global
+	if instanceMatch != nil {
+		return instanceMatch, nil
+	}
+	return globalMatch, nil
+}
+
+// Instances
+
+// SaveInstance saves an instance to the database
+func (d *DB) SaveInstance(instance Instance) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketInstances)
+		data, err := json.Marshal(instance)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(instance.ID), data)
+	})
+}
+
+// GetInstance retrieves an instance by ID
+func (d *DB) GetInstance(id string) (*Instance, error) {
+	var instance Instance
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketInstances)
+		data := b.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("instance not found")
+		}
+		return json.Unmarshal(data, &instance)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &instance, nil
+}
+
+// ListInstances returns all instances
+func (d *DB) ListInstances() ([]Instance, error) {
+	var instances []Instance
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketInstances)
+		return b.ForEach(func(k, v []byte) error {
+			var instance Instance
+			if err := json.Unmarshal(v, &instance); err != nil {
+				return err
+			}
+			instances = append(instances, instance)
+			return nil
+		})
+	})
+	return instances, err
+}
+
+// DeleteInstance deletes an instance by ID
+func (d *DB) DeleteInstance(id string) error {
+	// Reject deletion of the "local" instance
+	if id == "local" {
+		return fmt.Errorf("cannot delete the local instance")
+	}
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketInstances)
+		data := b.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("instance not found")
+		}
+		return b.Delete([]byte(id))
+	})
+}
+
+// UpdateInstanceStatus updates the status of an instance
+func (d *DB) UpdateInstanceStatus(id string, status string) error {
+	instance, err := d.GetInstance(id)
+	if err != nil {
+		return err
+	}
+	instance.Status = status
+	return d.SaveInstance(*instance)
+}
+
+// UpdateInstanceLastSeen updates the last seen timestamp of an instance
+func (d *DB) UpdateInstanceLastSeen(id string, timestamp int64) error {
+	instance, err := d.GetInstance(id)
+	if err != nil {
+		return err
+	}
+	instance.LastSeen = timestamp
+	return d.SaveInstance(*instance)
+}
+
+// UpdateInstanceInfo updates instance information (DockerVersion, OS, CPUCores, TotalMemory)
+func (d *DB) UpdateInstanceInfo(id string, info Instance) error {
+	instance, err := d.GetInstance(id)
+	if err != nil {
+		return err
+	}
+	instance.DockerVersion = info.DockerVersion
+	instance.OS = info.OS
+	instance.CPUCores = info.CPUCores
+	instance.TotalMemory = info.TotalMemory
+	return d.SaveInstance(*instance)
+}
+
+// EnsureLocalInstance creates the local instance if it doesn't exist
+func (d *DB) EnsureLocalInstance() error {
+	_, err := d.GetInstance("local")
+	if err != nil {
+		if err.Error() == "instance not found" {
+			return d.SaveInstance(Instance{
+				ID:        "local",
+				Name:      "This Server",
+				Mode:      "local",
+				Status:    "online",
+				CreatedAt: time.Now().Unix(),
+			})
+		}
+		return err
+	}
+	return nil
 }

@@ -3,12 +3,13 @@ window.Dockpal = window.Dockpal || {};
 
 Dockpal.dashboard = {
   async loadDashboard() {
-    const resp = await this.api('GET', '/api/containers');
+    // Use instanceApi for instance-scoped container and system info requests
+    const resp = await this.instanceApi('GET', '/containers');
     if (!resp) return;
     this.containers = await resp.json();
 
     if (this.sysResourceHistory.labels.length === 0) {
-      const sysResp = await this.api('GET', '/api/system/info');
+      const sysResp = await this.instanceApi('GET', '/system/info');
       if (sysResp) this.systemInfo = await sysResp.json();
       // Pre-fill chart with synthetic baseline so the line is visible immediately
       const baseCpu = this.systemInfo?.cpu_percent || 0;
@@ -26,7 +27,8 @@ Dockpal.dashboard = {
   },
 
   async fetchSystemInfo() {
-    const sysResp = await this.api('GET', '/api/system/info');
+    // Use instanceApi for instance-scoped system info
+    const sysResp = await this.instanceApi('GET', '/system/info');
     if (sysResp) {
       this.systemInfo = await sysResp.json();
       const now = new Date().toLocaleTimeString();

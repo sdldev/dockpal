@@ -10,7 +10,12 @@ Dockpal.initialState = function() {
     token: '',
     username: '',
     error: '',
+    instanceError: '',  // Error message for instance unavailability
     loading: false,
+
+    // Instance state (Requirements 10.4, 10.5, 12.1)
+    instances: [],
+    selectedInstance: localStorage.getItem('dockpal_selected_instance') || 'local',
 
     containers: [],
     containerDetailTab: 'overview',
@@ -75,6 +80,10 @@ Dockpal.initialState = function() {
       domains: { search: '' }
     },
 
+    // Instance management modal state (Requirement 11)
+    addInstanceModalVisible: false,
+    instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' },
+
     // Update modal state
     updateAvailable: false,
     updateVersion: '',
@@ -99,6 +108,190 @@ Dockpal.initialState = function() {
       { id: 'domains', label: 'Domains', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>' },
       { type: 'group', label: 'Settings' },
       { id: 'registry', label: 'Registry', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>' },
+      { id: 'instances', label: 'Instances', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>' },
     ],
   };
+};
+
+// Instance management module (Requirements 10.4, 10.5, 12.1)
+// This will be merged into the initial state in app.js
+Dockpal.instances = {
+  // Compute if selected instance is local
+  get isLocalInstance() {
+    return this.selectedInstance === 'local';
+  },
+
+  // Instance API helper - prepends instance path to resource path
+  // Uses the auth.api method for making requests
+  async instanceApi(method, path, body) {
+    const instancePath = `/api/instances/${this.selectedInstance}${path}`;
+    let resp;
+    // Call auth.api which is available as 'this.api' in the merged target
+    if (this.api) {
+      resp = await this.api(method, instancePath, body);
+    } else {
+      // Fallback to Dockpal.auth.api if not in target context
+      resp = await Dockpal.auth.api(method, instancePath, body);
+    }
+    
+    // Handle instance offline/unreachable errors (Requirement 12.11)
+    if (resp && (resp.status === 503 || resp.status === 404)) {
+      const errorData = await resp.json().catch(() => ({}));
+      const errorMsg = errorData.error || 'Instance unavailable';
+      
+      // Show toast error
+      if (this.toast) {
+        this.toast(errorMsg + ' - ' + (this.selectedInstance === 'local' ? 'Local server' : 'Remote instance'), 'error', 5000);
+      }
+      
+      // Set instance error state for display in page
+      this.instanceError = errorMsg;
+    } else if (resp && resp.ok) {
+      // Clear error on successful response
+      this.instanceError = '';
+    }
+    
+    return resp;
+  },
+
+  // Select an instance and reload the dashboard
+  async selectInstance(instanceId) {
+    this.selectedInstance = instanceId;
+    localStorage.setItem('dockpal_selected_instance', instanceId);
+    
+    // Reset page state and reload dashboard
+    this.containers = [];
+    this.systemInfo = null;
+    this.images = [];
+    this.domains = [];
+    this.templates = [];
+    this.services = [];
+    
+    // Reload dashboard data using the same method as auth module
+    if (this.loadDashboard) {
+      await this.loadDashboard();
+    }
+  },
+
+  // Load all instances from the server
+  async loadInstances() {
+    try {
+      const resp = await Dockpal.auth.api('GET', '/api/instances');
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        this.instances = data.instances || [];
+      }
+    } catch (e) {
+      console.error('Failed to load instances:', e);
+      // On error, keep default local instance
+      this.instances = [{ id: 'local', name: 'Local' }];
+    }
+  },
+
+  // Instance management functions (Requirements 11.2-11.7)
+  showAddInstanceModal() {
+    this.instanceForm = { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' };
+    this.addInstanceModalVisible = true;
+  },
+
+  async addInstance() {
+    const form = this.instanceForm;
+    const payload = {
+      name: form.name,
+      mode: form.mode
+    };
+    
+    if (form.mode === 'direct') {
+      payload.host = form.host;
+      payload.port = form.port || 9273;
+    }
+
+    try {
+      const resp = await this.api('POST', '/api/instances', payload);
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        // Show install command
+        this.instanceForm.installCommand = data.install_command || '';
+        // Reload instances list
+        await this.loadInstances();
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        this.toast(data.error || 'Failed to add instance', 'error', 5000);
+      }
+    } catch (e) {
+      this.toast('Failed to connect to server', 'error', 5000);
+    }
+  },
+
+  async testInstanceConnection(instanceId) {
+    this.toast('Testing connection...', 'info', 2000);
+    try {
+      const resp = await this.api('POST', '/api/instances/' + instanceId + '/test');
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        if (data.status === 'ok') {
+          this.toast('Connection successful', 'success');
+        } else {
+          this.toast(data.message || 'Connection failed', 'error', 5000);
+        }
+      } else {
+        const data = await resp.json().catch(() => ({}));
+        this.toast(data.error || 'Connection test failed', 'error', 5000);
+      }
+    } catch (e) {
+      this.toast('Connection test failed', 'error', 5000);
+    }
+    // Reload instances to get updated status
+    await this.loadInstances();
+  },
+
+  removeInstance(instanceId) {
+    const inst = this.instances.find(i => i.id === instanceId);
+    this.showConfirm({
+      title: 'Remove Instance',
+      message: 'Remove "' + (inst?.name || instanceId) + '"? This will stop managing this Docker host.',
+      confirmText: 'Remove',
+      onConfirm: async () => {
+        try {
+          const resp = await this.api('DELETE', '/api/instances/' + instanceId);
+          if (resp && resp.ok) {
+            this.toast('Instance removed', 'success');
+            // If we removed the selected instance, switch to local
+            if (this.selectedInstance === instanceId) {
+              this.selectedInstance = 'local';
+              localStorage.setItem('dockpal_selected_instance', 'local');
+            }
+            await this.loadInstances();
+          } else {
+            const data = await resp.json().catch(() => ({}));
+            this.toast(data.error || 'Failed to remove instance', 'error', 5000);
+          }
+        } catch (e) {
+          this.toast('Failed to remove instance', 'error', 5000);
+        }
+      }
+    });
+  },
+
+  copyInstallCommand() {
+    const cmd = this.instanceForm.installCommand;
+    if (cmd) {
+      navigator.clipboard.writeText(cmd).then(() => {
+        this.toast('Copied to clipboard', 'success', 2000);
+      }).catch(() => {
+        this.toast('Failed to copy', 'error', 2000);
+      });
+    }
+  },
+
+  // Format relative time (e.g., "2 minutes ago")
+  formatRelativeTime(timestamp) {
+    if (!timestamp) return '—';
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestamp;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + ' minutes ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + ' hours ago';
+    return Math.floor(diff / 86400) + ' days ago';
+  },
 };

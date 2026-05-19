@@ -3,7 +3,8 @@ window.Dockpal = window.Dockpal || {};
 
 Dockpal.services = {
   async deployCompose() {
-    const resp = await this.api('POST', '/api/deploy/compose', this.deployForm);
+    // Use instanceApi for compose deploy
+    const resp = await this.instanceApi('POST', '/deploy/compose', this.deployForm);
     if (resp && resp.ok) {
       this.toast('Stack deployed', 'success');
       this.deployForm = { name: '', domain: '', compose: '' };
@@ -24,7 +25,8 @@ Dockpal.services = {
         compose_file: this.gitForm.compose_file || '',
         name: this.gitForm.name || ''
       };
-      const resp = await this.api('POST', '/api/deploy/git', payload);
+      // Use instanceApi for git deploy
+      const resp = await this.instanceApi('POST', '/deploy/git', payload);
       if (resp && resp.ok) {
         const data = await resp.json().catch(() => ({}));
         if (data.status === 'select_compose') {
@@ -49,6 +51,7 @@ Dockpal.services = {
   },
 
   async loadGithubRepos() {
+    // This is a global endpoint, not instance-scoped
     this.githubLoading = true;
     this.githubError = '';
     try {
@@ -77,7 +80,8 @@ Dockpal.services = {
   },
 
   async loadServices() {
-    const resp = await this.api('GET', '/api/services');
+    // Use instanceApi for instance-scoped service listing
+    const resp = await this.instanceApi('GET', '/services');
     if (resp) this.services = await resp.json();
   },
 
@@ -88,7 +92,8 @@ Dockpal.services = {
       message: 'Remove "' + (svc?.name || id) + '"? This will stop and remove all containers in this stack along with the compose configuration.',
       confirmText: 'Delete',
       onConfirm: async () => {
-        const resp = await this.api('DELETE', '/api/services/' + id);
+        // Use instanceApi for service deletion
+        const resp = await this.instanceApi('DELETE', '/services/' + id);
         if (resp && !resp.ok) {
           const data = await resp.json().catch(() => ({}));
           this.toast(data.error || 'Failed to delete service', 'error', 5000);

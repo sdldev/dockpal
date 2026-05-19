@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
+	"github.com/sdldev/dockpal/internal/registry"
 )
 
 func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
@@ -66,6 +68,48 @@ func CORSMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		c.Next()
+	}
+}
+
+// InstanceMiddleware resolves the instance from the URL parameter and validates it's available.
+// It sets "instance_id", "agent_client", "database", and "registry_manager" in the Gin context for downstream handlers.
+func InstanceMiddleware(agentMgr *agent.Manager, database *db.DB, jwtSecret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		instanceID := c.Param("instance_id")
+		if instanceID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing instance_id parameter"})
+			c.Abort()
+			return
+		}
+
+		client, err := agentMgr.GetClient(instanceID)
+		if err != nil {
+			// Check if instance not found (404) takes priority
+			if strings.Contains(err.Error(), "instance not found") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
+				c.Abort()
+				return
+			}
+			// Check if instance is offline (503)
+			if strings.Contains(err.Error(), "instance offline") || strings.Contains(err.Error(), "no edge connection") {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "instance offline"})
+				c.Abort()
+				return
+			}
+			// Generic error
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.Abort()
+			return
+		}
+
+		// Create a registry manager for this context
+		registryMgr := registry.NewManager(database, jwtSecret)
+
+		c.Set("instance_id", instanceID)
+		c.Set("agent_client", client)
+		c.Set("database", database)
+		c.Set("registry_manager", registryMgr)
 		c.Next()
 	}
 }

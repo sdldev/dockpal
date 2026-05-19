@@ -151,11 +151,15 @@
                     class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
                 </div>
               </template>
-              <div class="border-t border-zinc-800 pt-4 space-y-2">
+              <!-- Domain (Traefik) - only available for local instance (Requirement 12.9) -->
+              <div x-show="isLocalInstance" class="border-t border-zinc-800 pt-4 space-y-2">
                 <label class="text-xs font-medium text-zinc-400 uppercase tracking-wider">Domain (Traefik)</label>
                 <input type="text" x-model="templateConfig.domain" placeholder="app.example.com"
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
                 <p class="text-[10px] text-zinc-600">Optional. Auto-generates Traefik config with SSL.</p>
+              </div>
+              <div x-show="!isLocalInstance" class="border-t border-zinc-800 pt-4 text-sm text-zinc-500 italic">
+                Domain management is only available for the local instance
               </div>
             </div>
 
@@ -175,7 +179,8 @@
                   <option value="no">no</option>
                 </select>
               </div>
-              <div class="border-t border-zinc-800 pt-4">
+              <!-- Auto-recovery - only available for local instance (Requirement 12.9) -->
+              <div x-show="isLocalInstance" class="border-t border-zinc-800 pt-4">
                 <label class="flex items-center gap-3 cursor-pointer">
                   <input type="checkbox" x-model="templateConfig.autoRecover" class="w-4 h-4 rounded bg-zinc-950 border-zinc-700 text-blue-600 focus:ring-blue-600">
                   <div>
@@ -183,6 +188,9 @@
                     <div class="text-[10px] text-zinc-500">Dockpal will automatically restart this container if it exits unexpectedly</div>
                   </div>
                 </label>
+              </div>
+              <div x-show="!isLocalInstance" class="border-t border-zinc-800 pt-4 text-sm text-zinc-500 italic">
+                Auto-recovery is only available for the local instance
               </div>
             </div>
 

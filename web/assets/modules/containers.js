@@ -16,7 +16,8 @@ Dockpal.containers = {
   },
 
   async selectContainer(c) {
-    const resp = await this.api('GET', '/api/containers/' + c.id);
+    // Use instanceApi for container operations
+    const resp = await this.instanceApi('GET', '/containers/' + c.id);
     if (!resp || !resp.ok) return;
     this.selectedContainer = await resp.json();
     this.logs = [];
@@ -35,7 +36,8 @@ Dockpal.containers = {
     if (!this.selectedContainer) return;
     setTimeout(async () => {
       const lookup = this.selectedContainer.name || this.selectedContainer.id;
-      const resp = await this.api('GET', '/api/containers/' + lookup);
+      // Use instanceApi for container inspect
+      const resp = await this.instanceApi('GET', '/containers/' + lookup);
       if (resp && resp.ok) this.selectedContainer = await resp.json();
     }, 500);
   },
@@ -44,7 +46,8 @@ Dockpal.containers = {
     if (this.statsInterval) clearInterval(this.statsInterval);
     this.statsHistory = { cpu: [], mem: [], rx: [], tx: [], labels: [] };
     const fetchStats = async () => {
-      const resp = await this.api('GET', '/api/containers/' + id + '/stats');
+      // Use instanceApi for container stats
+      const resp = await this.instanceApi('GET', '/containers/' + id + '/stats');
       if (!resp) return;
       this.containerStats = await resp.json();
       const now = new Date().toLocaleTimeString();
@@ -65,7 +68,9 @@ Dockpal.containers = {
   async startLogStream(id) {
     try {
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(wsProto + '//' + location.host + '/api/containers/' + id + '/logs');
+      // Use instance-scoped WebSocket path (Requirement 12.8)
+      const wsUrl = wsProto + '//' + location.host + '/api/instances/' + this.selectedInstance + '/containers/' + id + '/logs?token=' + this.token;
+      const ws = new WebSocket(wsUrl);
       ws.onmessage = (e) => {
         const lines = e.data.split('\n').filter(l => l.trim());
         this.logs = [...this.logs.slice(-200), ...lines];
@@ -82,7 +87,8 @@ Dockpal.containers = {
         message: 'This will stop and permanently remove the container. Volumes and data may be lost.',
         confirmText: 'Remove',
         onConfirm: async () => {
-          const resp = await this.api('DELETE', '/api/containers/' + id + '?force=true');
+          // Use instanceApi for container deletion
+          const resp = await this.instanceApi('DELETE', '/containers/' + id + '?force=true');
           if (resp && !resp.ok) {
             const data = await resp.json().catch(() => ({}));
             this.toast(data.error || 'Failed to remove container', 'error', 5000);
@@ -94,7 +100,8 @@ Dockpal.containers = {
       });
       return;
     }
-    const resp = await this.api('POST', '/api/containers/' + id + '/' + action);
+    // Use instanceApi for container actions
+    const resp = await this.instanceApi('POST', '/containers/' + id + '/' + action);
     if (resp && !resp.ok) {
       const data = await resp.json().catch(() => ({}));
       this.toast(data.error || ('Failed to ' + action), 'error', 5000);
@@ -144,10 +151,10 @@ Dockpal.containers = {
   async enterContainerEditMode() {
     const c = this.selectedContainer;
     if (!c) return;
-    // Ensure systemInfo is loaded for memory/CPU dropdown limits
+    // Ensure systemInfo is loaded for memory/CPU dropdown limits - use instanceApi
     if (!this.systemInfo) {
       try {
-        const resp = await this.api('GET', '/api/system/info');
+        const resp = await this.instanceApi('GET', '/system/info');
         if (resp && resp.ok) this.systemInfo = await resp.json();
       } catch (e) {}
     }
@@ -234,7 +241,8 @@ Dockpal.containers = {
     }
 
     this.containerEditSaving = true;
-    const resp = await this.api('PUT', '/api/containers/' + (c.name || c.id), body);
+    // Use instanceApi for container edit
+    const resp = await this.instanceApi('PUT', '/containers/' + (c.name || c.id), body);
     if (!resp || !resp.ok) {
       this.containerEditSaving = false;
       const data = await resp?.json?.().catch(() => ({}));

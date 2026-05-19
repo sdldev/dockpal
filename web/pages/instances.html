@@ -1,0 +1,155 @@
+<!-- ===== INSTANCES ===== -->
+<!-- Instance management page (Requirements 11.1-11.9) -->
+<div x-show="currentPage === 'instances'" x-cloak>
+  <div class="mb-6 flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-semibold text-white">Instances</h2>
+      <p class="text-sm text-zinc-500">Manage Docker hosts</p>
+    </div>
+    <button @click="showAddInstanceModal()" class="px-4 py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all">
+      Add Instance
+    </button>
+  </div>
+
+  <!-- Instance list -->
+  <div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
+    <table class="w-full">
+      <thead>
+        <tr class="border-b border-zinc-800">
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Name</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 hidden sm:table-cell">Host</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 hidden md:table-cell">Mode</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Status</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 hidden lg:table-cell">Last Seen</th>
+          <th class="text-right px-4 py-2.5 text-xs font-medium text-zinc-500">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="inst in instances" :key="inst.id">
+          <tr class="border-b border-zinc-800/50">
+            <td class="px-4 py-2.5">
+              <div class="flex items-center gap-2">
+                <span x-show="inst.id === 'local'" class="text-lg">⚙️</span>
+                <span x-show="inst.id !== 'local'" class="w-2 h-2 rounded-full"
+                  :class="inst.status === 'online' ? 'bg-green-500' : inst.status === 'offline' ? 'bg-red-500' : 'bg-yellow-500'"></span>
+                <span class="text-sm text-white font-medium" x-text="inst.id === 'local' ? 'This Server' : inst.name"></span>
+                <span x-show="inst.status === 'offline'" class="px-1.5 py-0.5 bg-red-500/20 text-red-400 text-[10px] font-medium rounded">OFFLINE</span>
+              </div>
+            </td>
+            <td class="px-4 py-2.5 text-sm text-zinc-400 hidden sm:table-cell" x-text="inst.host || '—'"></td>
+            <td class="px-4 py-2.5 text-sm text-zinc-400 hidden md:table-cell">
+              <span x-show="inst.id === 'local'" class="text-zinc-500">local</span>
+              <span x-show="inst.id !== 'local'" x-text="inst.mode || 'direct'"></span>
+            </td>
+            <td class="px-4 py-2.5">
+              <span class="text-sm" :class="inst.status === 'online' ? 'text-green-400' : inst.status === 'offline' ? 'text-red-400' : 'text-yellow-400'" 
+                x-text="inst.status || 'unknown'"></span>
+            </td>
+            <td class="px-4 py-2.5 text-sm text-zinc-500 hidden lg:table-cell" x-text="formatRelativeTime(inst.last_seen)"></td>
+            <td class="px-4 py-2.5 text-right">
+              <div class="flex items-center justify-end gap-2">
+                <!-- Test Connection - only for non-local and when online -->
+                <button x-show="inst.id !== 'local' && inst.status === 'online'" 
+                  @click="testInstanceConnection(inst.id)"
+                  class="p-1.5 text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded transition-colors" title="Test Connection">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                  </svg>
+                </button>
+                <!-- Remove - only for non-local -->
+                <button x-show="inst.id !== 'local'" 
+                  @click="removeInstance(inst.id)"
+                  :disabled="inst.status === 'offline'"
+                  class="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed" title="Remove">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                  </svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+    
+    <!-- Empty state -->
+    <div x-show="instances.length === 0" class="text-center py-12 text-zinc-600 text-sm">
+      <p>No instances found</p>
+      <button @click="showAddInstanceModal()" class="mt-2 text-blue-400 hover:text-blue-300">Add your first instance</button>
+    </div>
+  </div>
+  
+  <!-- Info notice -->
+  <div class="mt-6 p-4 bg-zinc-900/50 border border-zinc-800 rounded-sm">
+    <h3 class="text-sm font-semibold text-white mb-2">About Instances</h3>
+    <p class="text-xs text-zinc-500">
+      "This Server" is the local Docker daemon where DockPal is running. Add remote instances to manage Docker hosts from a single dashboard.
+      Remote instances connect via DockPal Agent - a lightweight proxy that runs on each remote host.
+    </p>
+  </div>
+
+  <!-- Add Instance Modal -->
+  <div x-show="addInstanceModalVisible" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <!-- Backdrop -->
+    <div x-show="addInstanceModalVisible" @click="addInstanceModalVisible = false" class="absolute inset-0 bg-black/70"></div>
+    <!-- Modal -->
+    <div x-show="addInstanceModalVisible" class="relative bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-full max-w-md">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+        <h3 class="text-base font-semibold text-white">Add Instance</h3>
+        <button @click="addInstanceModalVisible = false" class="text-zinc-500 hover:text-white">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <form @submit.prevent="addInstance()" class="p-6 space-y-4">
+        <div class="space-y-1.5">
+          <label class="text-xs text-zinc-400">Name</label>
+          <input type="text" x-model="instanceForm.name" required minlength="1" maxlength="64"
+            class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            placeholder="my-docker-host">
+        </div>
+        <div class="space-y-1.5">
+          <label class="text-xs text-zinc-400">Mode</label>
+          <select x-model="instanceForm.mode" @change="instanceForm.host = ''; instanceForm.port = 9273;"
+            class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
+            <option value="direct">Direct (agent reachable via HTTP)</option>
+            <option value="edge">Edge (agent connects to server)</option>
+          </select>
+        </div>
+        <!-- Host and port - only for direct mode -->
+        <template x-if="instanceForm.mode === 'direct'">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="col-span-2 space-y-1.5">
+              <label class="text-xs text-zinc-400">Host</label>
+              <input type="text" x-model="instanceForm.host" :required="instanceForm.mode === 'direct'"
+                class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                placeholder="192.168.1.100">
+            </div>
+            <div class="space-y-1.5">
+              <label class="text-xs text-zinc-400">Port</label>
+              <input type="number" x-model.number="instanceForm.port" min="1" max="65535"
+                class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                placeholder="9273">
+            </div>
+          </div>
+        </template>
+        <!-- Install command display -->
+        <div x-show="instanceForm.installCommand" class="space-y-1.5">
+          <label class="text-xs text-zinc-400">Install Command</label>
+          <div class="flex gap-2">
+            <code class="flex-1 px-3 py-2 bg-black/50 border border-zinc-800 rounded-sm text-xs text-blue-400 font-mono overflow-x-auto" x-text="instanceForm.installCommand"></code>
+            <button type="button" @click="copyInstallCommand()" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-sm text-xs">
+              Copy
+            </button>
+          </div>
+        </div>
+        <div class="flex justify-end gap-3 pt-4">
+          <button type="button" @click="addInstanceModalVisible = false" class="px-4 py-2 text-sm text-zinc-400 hover:text-white">Cancel</button>
+          <button x-show="!instanceForm.installCommand" type="submit" :disabled="!instanceForm.name || (instanceForm.mode === 'direct' && !instanceForm.host)"
+            class="px-4 py-2 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium">
+            Add Instance
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
