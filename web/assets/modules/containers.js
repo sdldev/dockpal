@@ -32,7 +32,8 @@ Dockpal.containers = {
   async refreshContainerDetail() {
     if (!this.selectedContainer) return;
     setTimeout(async () => {
-      const resp = await this.api('GET', '/api/containers/' + this.selectedContainer.id);
+      const lookup = this.selectedContainer.name || this.selectedContainer.id;
+      const resp = await this.api('GET', '/api/containers/' + lookup);
       if (resp && resp.ok) this.selectedContainer = await resp.json();
     }, 500);
   },
@@ -101,9 +102,53 @@ Dockpal.containers = {
     await this.loadDashboard();
   },
 
-  enterContainerEditMode() {
+  // Generate memory limit dropdown options capped at host total RAM.
+  // Returns [{value, label}] with recommended values in MB.
+  memoryLimitOptions() {
+    const totalMB = Math.floor((this.systemInfo?.total_ram || 0) / (1024 * 1024));
+    if (totalMB === 0) return [];
+    // Standard memory tiers (MB)
+    const tiers = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+    const opts = [];
+    for (const mb of tiers) {
+      if (mb >= totalMB) break;
+      const label = mb >= 1024 ? (mb / 1024) + ' GB' : mb + ' MB';
+      const recommended = mb === 512 || mb === 1024;
+      opts.push({ value: mb, label: label + (recommended ? ' ★' : '') });
+    }
+    // Add host max as final option
+    if (totalMB > 0) {
+      const label = totalMB >= 1024 ? (totalMB / 1024).toFixed(0) + ' GB' : totalMB + ' MB';
+      opts.push({ value: totalMB, label: label + ' (host max)' });
+    }
+    return opts;
+  },
+
+  // Generate CPU limit dropdown options capped at host CPU cores.
+  // Returns [{value, label}] with recommended values.
+  cpuLimitOptions() {
+    const maxCores = this.systemInfo?.cpu_cores || 0;
+    if (maxCores === 0) return [];
+    const opts = [];
+    // Offer 0.5 increments up to host max
+    for (let c = 0.5; c <= maxCores; c += 0.5) {
+      const label = (c % 1 === 0 ? c.toFixed(0) : c.toFixed(1)) + ' core' + (c > 1 ? 's' : '');
+      const recommended = c === 1 || c === 2;
+      opts.push({ value: c, label: label + (recommended ? ' ★' : '') });
+    }
+    return opts;
+  },
+
+  async enterContainerEditMode() {
     const c = this.selectedContainer;
     if (!c) return;
+    // Ensure systemInfo is loaded for memory/CPU dropdown limits
+    if (!this.systemInfo) {
+      try {
+        const resp = await this.api('GET', '/api/system/info');
+        if (resp && resp.ok) this.systemInfo = await resp.json();
+      } catch (e) {}
+    }
     // Parse current env vars into key/value pairs
     const envPairs = (c.env || []).map(e => {
       const idx = e.indexOf('=');
@@ -126,7 +171,7 @@ Dockpal.containers = {
       name: c.name || '',
       image: c.image || '',
       restart_policy: c.restart_policy || '',
-      memory_mb: 0, // we don't have current memory limit in inspect, user sets if needed
+      memory_mb: 0,
       cpu_limit: 0,
       env: envPairs,
       ports: ports,
@@ -147,8 +192,10 @@ Dockpal.containers = {
     if (form.name && form.name !== (c?.name || '')) body.name = form.name;
     if (form.image && form.image !== (c?.image || '')) body.image = form.image;
     if (form.restart_policy && form.restart_policy !== (c?.restart_policy || '')) body.restart_policy = form.restart_policy;
-    if (form.memory_mb > 0) body.memory_limit = form.memory_mb * 1024 * 1024;
-    if (form.cpu_limit > 0) body.cpu_limit = form.cpu_limit;
+    const memMB = Number(form.memory_mb) || 0;
+    const cpuLim = Number(form.cpu_limit) || 0;
+    if (memMB > 0) body.memory_limit = memMB * 1024 * 1024;
+    if (cpuLim > 0) body.cpu_limit = cpuLim;
 
     const validEnv = form.env.filter(e => e.key.trim() !== '');
     if (validEnv.length > 0) body.env = validEnv.map(e => e.key + '=' + e.value);
@@ -173,7 +220,7 @@ Dockpal.containers = {
       return;
     }
 
-    const resp = await this.api('PUT', '/api/containers/' + c.id, body);
+    const resp = await this.api('PUT', '/api/containers/' + (c.name || c.id), body);
     if (!resp || !resp.ok) {
       const data = await resp?.json?.().catch(() => ({}));
       this.toast(data.error || 'Failed to update container', 'error', 5000);
