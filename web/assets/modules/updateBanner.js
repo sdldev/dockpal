@@ -14,7 +14,8 @@ Dockpal.updateBanner = {
   updateProgress: null,  // { status, message, percentage }
   updateChecking: false,
 
-  // Check if update is available by fetching from API
+  // Silent check — called after login. Shows modal only if update available.
+  // Does NOT show toast if already up-to-date.
   async checkForUpdates() {
     if (!this.token) return;
     this.updateChecking = true;
@@ -34,16 +35,49 @@ Dockpal.updateBanner = {
 
           // Check if user skipped this specific version
           const skipped = localStorage.getItem('update_skipped_version');
-          if (skipped === this.updateVersion) {
-            this.updateDismissed = true;
-          } else {
+          if (skipped !== this.updateVersion) {
             this.updateDismissed = false;
             this.updateModalVisible = true;
+          } else {
+            this.updateDismissed = true;
           }
+        } else {
+          this.updateAvailable = false;
+        }
+      }
+    } catch (e) {
+      // Silent fail on auto-check
+    } finally {
+      this.updateChecking = false;
+    }
+  },
+
+  // Manual check — triggered by user clicking refresh button.
+  // Shows toast feedback regardless of result.
+  async manualCheckForUpdates() {
+    if (!this.token) return;
+    this.updateChecking = true;
+    try {
+      const res = await fetch('/api/system/version', {
+        headers: { 'Authorization': 'Bearer ' + this.token }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.currentVersion = (data.currentVersion || '').replace(/^v/, '');
+
+        if (data.updateAvailable) {
+          this.updateAvailable = true;
+          this.updateVersion = (data.latestVersion || '').replace(/^v/, '');
+          this.updateReleaseNotes = data.releaseNotes || '';
+          this.updateDownloadUrl = data.downloadUrl || '';
+          this.updateDismissed = false;
+          this.updateModalVisible = true;
         } else {
           this.updateAvailable = false;
           this.toast('You are on the latest version (v' + this.currentVersion + ')', 'success');
         }
+      } else {
+        this.toast('Failed to check for updates', 'error');
       }
     } catch (e) {
       this.toast('Failed to check for updates', 'error');
@@ -75,7 +109,7 @@ Dockpal.updateBanner = {
     if (this.updateAvailable) {
       this.showUpdateModal();
     } else {
-      this.checkForUpdates();
+      this.manualCheckForUpdates();
     }
   },
 
