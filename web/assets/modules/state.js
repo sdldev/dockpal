@@ -75,13 +75,15 @@ Dockpal.initialState = function() {
       domains: { search: '' }
     },
 
-    // Update banner state
+    // Update modal state
     updateAvailable: false,
     updateVersion: '',
     updateReleaseNotes: '',
     updateDownloadUrl: '',
     updateDismissed: false,
+    updateModalVisible: false,
     updateProgress: null,
+    updateChecking: false,
     currentVersion: '',
 
     navItems: [

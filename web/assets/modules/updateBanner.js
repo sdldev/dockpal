@@ -1,4 +1,4 @@
-// Update Banner module: Shows notification when new version is available.
+// Update Modal module: Shows modal dialog when new version is available.
 // Integrates with version check API and handles update workflow.
 
 window.Dockpal = window.Dockpal || {};
@@ -10,54 +10,77 @@ Dockpal.updateBanner = {
   updateReleaseNotes: '',
   updateDownloadUrl: '',
   updateDismissed: false,
+  updateModalVisible: false,
   updateProgress: null,  // { status, message, percentage }
+  updateChecking: false,
 
   // Check if update is available by fetching from API
   async checkForUpdates() {
-    if (this.token) {
-      try {
-        const res = await fetch('/api/system/version', {
-          headers: { 'Authorization': 'Bearer ' + this.token }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          // Always populate current version
-          this.currentVersion = (data.currentVersion || '').replace(/^v/, '');
+    if (!this.token) return;
+    this.updateChecking = true;
+    try {
+      const res = await fetch('/api/system/version', {
+        headers: { 'Authorization': 'Bearer ' + this.token }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.currentVersion = (data.currentVersion || '').replace(/^v/, '');
 
-          if (data.updateAvailable) {
-            this.updateAvailable = true;
-            this.updateVersion = (data.latestVersion || '').replace(/^v/, '');
-            this.updateReleaseNotes = data.releaseNotes || '';
-            this.updateDownloadUrl = data.downloadUrl || '';
+        if (data.updateAvailable) {
+          this.updateAvailable = true;
+          this.updateVersion = (data.latestVersion || '').replace(/^v/, '');
+          this.updateReleaseNotes = data.releaseNotes || '';
+          this.updateDownloadUrl = data.downloadUrl || '';
 
-            // Check if user dismissed for this session
-            const dismissed = localStorage.getItem('update_dismissed');
-            this.updateDismissed = dismissed === 'true';
+          // Check if user skipped this specific version
+          const skipped = localStorage.getItem('update_skipped_version');
+          if (skipped === this.updateVersion) {
+            this.updateDismissed = true;
           } else {
-            this.updateAvailable = false;
+            this.updateDismissed = false;
+            this.updateModalVisible = true;
           }
+        } else {
+          this.updateAvailable = false;
+          this.toast('You are on the latest version (v' + this.currentVersion + ')', 'success');
         }
-      } catch (e) {
-        console.error('Failed to check for updates:', e);
       }
+    } catch (e) {
+      this.toast('Failed to check for updates', 'error');
+    } finally {
+      this.updateChecking = false;
     }
   },
 
-  // Show the update banner
-  show() {
+  // Show the update modal
+  showUpdateModal() {
+    this.updateModalVisible = true;
     this.updateDismissed = false;
   },
 
-  // Hide the update banner (dismiss)
-  hide() {
-    this.updateAvailable = false;
-    this.updateDismissed = true;
-    localStorage.setItem('update_dismissed', 'true');
+  // Close the modal without action
+  closeUpdateModal() {
+    this.updateModalVisible = false;
   },
 
-  // Update progress during update process
-  updateProgress(status, message, percentage) {
-    this.updateProgress = { status, message, percentage };
+  // Skip this version — won't show modal again for this version
+  skipVersion() {
+    localStorage.setItem('update_skipped_version', this.updateVersion);
+    this.updateDismissed = true;
+    this.updateModalVisible = false;
+  },
+
+  // Legacy show/hide for sidebar link
+  show() {
+    if (this.updateAvailable) {
+      this.showUpdateModal();
+    } else {
+      this.checkForUpdates();
+    }
+  },
+
+  hide() {
+    this.closeUpdateModal();
   },
 
   // Handle Update Now button click
@@ -67,8 +90,6 @@ Dockpal.updateBanner = {
       return;
     }
 
-    // Set updating state
-    this.updateProgress = { status: 'starting', message: 'Starting update...', percentage: 0 };
     this.updateProgress = { status: 'downloading', message: 'Downloading update...', percentage: 10 };
 
     try {
@@ -81,35 +102,51 @@ Dockpal.updateBanner = {
         body: JSON.stringify({ downloadUrl: this.updateDownloadUrl })
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message || 'Update failed');
+      if (!res.ok && !res.headers.get('content-type')?.includes('text/event-stream')) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Update failed');
       }
 
-      const data = await res.json();
-      
-      // Handle progress updates
-      if (data.status === 'downloading') {
-        this.updateProgress('downloading', data.message || 'Downloading...', 30);
-      }
-      if (data.status === 'installing') {
-        this.updateProgress('installing', data.message || 'Installing...', 60);
-      }
-      if (data.status === 'restarting') {
-        this.updateProgress('restarting', data.message || 'Restarting service...', 80);
-      }
-      if (data.status === 'complete') {
-        this.updateProgress('complete', 'Update complete! Reloading...', 100);
-        this.toast('Update successful! Reloading...', 'success');
-        setTimeout(() => window.location.reload(), 2000);
-        return;
-      }
-      if (data.status === 'error') {
-        throw new Error(data.message || 'Update failed');
+      // Handle SSE stream
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const event = JSON.parse(line.slice(6));
+              this.updateProgress = {
+                status: event.status || 'downloading',
+                message: event.message || '',
+                percentage: event.percentage || 0
+              };
+              if (event.status === 'complete') {
+                this.toast('Update complete! Reloading...', 'success');
+                setTimeout(() => window.location.reload(), 2000);
+                return;
+              }
+              if (event.status === 'error') {
+                throw new Error(event.message || 'Update failed');
+              }
+            } catch (parseErr) {
+              if (parseErr.message && parseErr.message !== 'Update failed') continue;
+              throw parseErr;
+            }
+          }
+        }
       }
     } catch (e) {
-      this.updateProgress('error', e.message, 0);
-      this.toast('Update failed: ' + e.message, 'error');
+      this.updateProgress = { status: 'error', message: e.message, percentage: 0 };
+      this.toast('Update failed: ' + e.message, 'error', 8000);
     }
   },
 
