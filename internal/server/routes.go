@@ -22,6 +22,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/git"
+	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
 	"github.com/sdldev/dockpal/internal/tunnel"
 	"github.com/sdldev/dockpal/internal/update"
@@ -136,6 +137,87 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// Auth protected
 	protected.POST("/auth/reset-password", func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
+	// Registry credentials
+	registryManager := registry.NewManager(database, jwtSecret)
+
+	protected.GET("/registries", func(c *gin.Context) {
+		list, err := registryManager.List()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, list)
+	})
+
+	protected.POST("/registries", func(c *gin.Context) {
+		var req registry.CreateRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: registry, username, and token are required"})
+			return
+		}
+		cred, err := registryManager.Create(req)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, cred)
+	})
+
+	protected.GET("/registries/:id", func(c *gin.Context) {
+		cred, err := registryManager.Get(c.Param("id"))
+		if err != nil {
+			if err.Error() == "credential not found" {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, cred)
+	})
+
+	protected.PUT("/registries/:id", func(c *gin.Context) {
+		var req registry.UpdateRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		if err := registryManager.Update(c.Param("id"), req); err != nil {
+			if err.Error() == "credential not found" {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "updated"})
+	})
+
+	protected.DELETE("/registries/:id", func(c *gin.Context) {
+		if err := registryManager.Delete(c.Param("id")); err != nil {
+			if err.Error() == "credential not found" {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+	})
+
+	protected.POST("/registries/:id/test", func(c *gin.Context) {
+		result, err := registryManager.TestConnection(c.Param("id"))
+		if err != nil {
+			if err.Error() == "credential not found" {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	})
+
 	// Containers
 	protected.GET("/containers", func(c *gin.Context) {
 		containers, err := dockerClient.ListContainers(c.Request.Context(), true)
@@ -247,7 +329,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		// Run deploy in background goroutine
 		go func() {
-			err := dockerClient.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session)
+			err := dockerClient.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryManager.GetAuthHeader)
 			if err == nil {
 				database.SaveService(db.Service{
 					ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
@@ -335,7 +417,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
-		if err := dockerClient.DeployCompose(c.Request.Context(), req.Name, req.Compose); err != nil {
+		if err := dockerClient.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryManager.GetAuthHeader); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -387,7 +469,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData)); err != nil {
+			if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
@@ -498,7 +580,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
-		if err := dockerClient.DeployCompose(c.Request.Context(), name, compose); err != nil {
+		if err := dockerClient.DeployCompose(c.Request.Context(), name, compose, registryManager.GetAuthHeader); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -576,7 +658,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		session := deployManager.CreateSession()
 
 		go func() {
-			err := dockerClient.DeployComposeStreamed(context.Background(), name, compose, session)
+			err := dockerClient.DeployComposeStreamed(context.Background(), name, compose, session, registryManager.GetAuthHeader)
 			if err == nil {
 				database.SaveService(db.Service{
 					ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
@@ -617,9 +699,19 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
-		if err := dockerClient.PullImage(c.Request.Context(), req.Image); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+		// Try authenticated pull if credentials are available
+		authHeader, _ := registryManager.GetAuthHeader(req.Image)
+		if authHeader != "" {
+			if err := dockerClient.PullImageWithAuth(c.Request.Context(), req.Image, authHeader); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		} else {
+			// Fallback to unauthenticated pull
+			if err := dockerClient.PullImage(c.Request.Context(), req.Image); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "pulled"})
 	})

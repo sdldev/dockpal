@@ -47,6 +47,14 @@ Dockpal.initialState = function() {
 
     fileManager: { containerId: '', path: '/', files: [] },
 
+    registries: [],
+    registryForm: { registry: 'ghcr.io', username: '', token: '' },
+    registryFormVisible: false,
+    registryFormErrors: { registry: '', username: '', token: '' },
+    registryTestResult: null,
+    registryLoading: false,
+    registryTesting: null,
+
     confirmDialog: { show: false, title: '', message: '', confirmText: 'Delete', danger: true, onConfirm: null },
     toasts: [],
 
@@ -77,6 +85,8 @@ Dockpal.initialState = function() {
       { id: 'files', label: 'Volumes', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>' },
       { type: 'group', label: 'Networking' },
       { id: 'domains', label: 'Domains', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>' },
+      { type: 'group', label: 'Settings' },
+      { id: 'registry', label: 'Registry', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>' },
     ],
   };
 };

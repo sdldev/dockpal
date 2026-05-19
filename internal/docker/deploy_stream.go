@@ -82,7 +82,8 @@ func (s *DeploySession) Emit(step, message, status string) {
 }
 
 // DeployComposeStreamed deploys services with progress streaming.
-func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, composeYAML string, session *DeploySession) error {
+// If getAuthHeader is non-nil, it will be called per image to get registry credentials.
+func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, composeYAML string, session *DeploySession, getAuthHeader AuthHeaderFunc) error {
 	defer close(session.Done)
 
 	session.Emit("parse", "Parsing compose file...", "running")
@@ -120,11 +121,26 @@ func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, compose
 	for _, svcName := range startOrder {
 		svc := cf.Services[svcName]
 		session.Emit("pull", fmt.Sprintf("Pulling %s...", svc.Image), "running")
-		if err := c.pullImageIfNeeded(ctx, svc.Image); err != nil {
+
+		registryAuth := ""
+		if getAuthHeader != nil {
+			auth, err := getAuthHeader(svc.Image)
+			if err == nil {
+				registryAuth = auth
+			}
+		}
+
+		if err := c.pullImageIfNeeded(ctx, svc.Image, registryAuth); err != nil {
 			suggestion := diagnoseDeployError(err.Error())
 			session.Emit("pull", fmt.Sprintf("Failed to pull %s: %s", svc.Image, err), "error")
 			if suggestion != "" {
 				session.Emit("hint", suggestion, "error")
+			}
+			// Add auth failure hint if credentials were used
+			if registryAuth != "" && (strings.Contains(err.Error(), "authentication failed") ||
+				strings.Contains(err.Error(), "unauthorized") || strings.Contains(err.Error(), "denied")) {
+				domain := extractImageDomain(svc.Image)
+				session.Emit("hint", fmt.Sprintf("💡 Authentication failed for %s — credentials may be expired. Update them in Settings > Registry.", domain), "error")
 			}
 			return fmt.Errorf("failed to pull image for %s: %w", svcName, err)
 		}

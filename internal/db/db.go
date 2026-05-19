@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.etcd.io/bbolt"
@@ -33,14 +34,25 @@ type Domain struct {
 	Port    int    `json:"port"`
 }
 
+type RegistryCredential struct {
+	ID              string `json:"id"`
+	Registry        string `json:"registry"`
+	Username        string `json:"username"`
+	EncryptedToken  []byte `json:"encrypted_token"`
+	CreatedAt       int64  `json:"created_at"`
+	UpdatedAt       int64  `json:"updated_at"`
+	LastValidatedAt int64  `json:"last_validated_at,omitempty"`
+}
+
 type DB struct {
 	db *bbolt.DB
 }
 
 var (
-	bucketUsers    = []byte("users")
-	bucketServices = []byte("services")
-	bucketDomains  = []byte("domains")
+	bucketUsers      = []byte("users")
+	bucketServices   = []byte("services")
+	bucketDomains    = []byte("domains")
+	bucketRegistries = []byte("registries")
 )
 
 func New(path string) (*DB, error) {
@@ -50,7 +62,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -222,4 +234,79 @@ func (d *DB) DeleteDomain(id string) error {
 	return d.db.Update(func(tx *bbolt.Tx) error {
 		return tx.Bucket(bucketDomains).Delete([]byte(id))
 	})
+}
+
+// Registry Credentials
+
+func (d *DB) SaveRegistryCredential(cred RegistryCredential) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketRegistries)
+		data, err := json.Marshal(cred)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(cred.ID), data)
+	})
+}
+
+func (d *DB) GetRegistryCredential(id string) (*RegistryCredential, error) {
+	var cred RegistryCredential
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketRegistries)
+		data := b.Get([]byte(id))
+		if data == nil {
+			return fmt.Errorf("registry credential not found")
+		}
+		return json.Unmarshal(data, &cred)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &cred, nil
+}
+
+func (d *DB) ListRegistryCredentials() ([]RegistryCredential, error) {
+	var creds []RegistryCredential
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketRegistries)
+		return b.ForEach(func(k, v []byte) error {
+			var cred RegistryCredential
+			if err := json.Unmarshal(v, &cred); err != nil {
+				return err
+			}
+			creds = append(creds, cred)
+			return nil
+		})
+	})
+	return creds, err
+}
+
+func (d *DB) DeleteRegistryCredential(id string) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketRegistries).Delete([]byte(id))
+	})
+}
+
+func (d *DB) FindRegistryCredentialByDomain(domain string) (*RegistryCredential, error) {
+	var match *RegistryCredential
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketRegistries)
+		return b.ForEach(func(k, v []byte) error {
+			var cred RegistryCredential
+			if err := json.Unmarshal(v, &cred); err != nil {
+				return err
+			}
+			if strings.EqualFold(cred.Registry, domain) {
+				if match == nil || cred.UpdatedAt > match.UpdatedAt {
+					c := cred
+					match = &c
+				}
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return match, nil
 }
