@@ -469,6 +469,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			Repo        string `json:"repo" binding:"required"`
 			Branch      string `json:"branch"`
 			ComposeFile string `json:"compose_file"`
+			Name        string `json:"name"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -531,20 +532,26 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
+		// Use repo name as project name (not full path), or user-provided name
+		projectName := req.Name
+		if projectName == "" {
+			projectName = filepath.Base(info.Path)
+		}
+
 		composePath := filepath.Join(info.Path, selectedFile)
 		composeData, err := os.ReadFile(composePath)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
 			return
 		}
-		if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
+		if err := dockerClient.DeployCompose(c.Request.Context(), projectName, string(composeData), registryManager.GetAuthHeader); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
 			return
 		}
 
 		database.SaveService(db.Service{
 			ID:        generateID("svc"),
-			Name:      info.Path,
+			Name:      projectName,
 			Type:      "git",
 			Repo:      req.Repo,
 			CreatedAt: time.Now().Unix(),
