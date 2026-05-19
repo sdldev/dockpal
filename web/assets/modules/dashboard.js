@@ -54,7 +54,7 @@ Dockpal.dashboard = {
     else if (page === 'templates') await this.loadTemplates();
     else if (page === 'images') await this.loadImages();
     else if (page === 'containers') await this.loadDashboard();
-    else if (page === 'deploy') await this.loadServices();
+    else if (page === 'deploy') { await this.loadServices(); this.loadGithubRepos(); }
     else if (page === 'domains') await this.loadDomains();
     else if (page === 'registry') await this.loadRegistries();
   },

@@ -27,7 +27,12 @@ Dockpal.initialState = function() {
 
     loginForm: { username: '', password: '' },
     deployForm: { name: '', domain: '', compose: '' },
-    gitForm: { repo: '', branch: 'main', token: '' },
+    gitForm: { repo: '', branch: 'main' },
+    deploySource: 'github',
+    githubRepos: [],
+    githubLoading: false,
+    githubError: '',
+    githubSearch: '',
     services: [],
 
     templates: [],
