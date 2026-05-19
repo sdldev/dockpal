@@ -17,16 +17,18 @@ Dockpal.containers = {
 
   async selectContainer(c) {
     const resp = await this.api('GET', '/api/containers/' + c.id);
-    if (!resp) return;
+    if (!resp || !resp.ok) return;
     this.selectedContainer = await resp.json();
     this.logs = [];
     this.statsHistory = { cpu: [], mem: [], rx: [], tx: [], labels: [] };
     this.containerStats = null;
     this.containerDetailTab = 'overview';
+    this.containerEditMode = false;
+    this.containerEditSaving = false;
     this.currentPage = 'container-detail';
     this.destroyChart();
-    this.startStatsPolling(c.id);
-    this.startLogStream(c.id);
+    this.startStatsPolling(this.selectedContainer.id);
+    this.startLogStream(this.selectedContainer.id);
   },
 
   async refreshContainerDetail() {
