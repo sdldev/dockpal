@@ -285,13 +285,27 @@ type VolumeMapping struct {
 // EditContainer applies edits to a container. It determines which changes
 // require in-place updates vs recreation and applies them accordingly.
 func (c *Client) EditContainer(ctx context.Context, id string, req ContainerEditRequest) (*ContainerDetail, error) {
+	// First, inspect the container to verify it exists and get the full ID + name.
+	// This handles truncated IDs (12-char) by letting Docker resolve them early.
+	preInspect, err := c.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container: %w", err)
+	}
+	// Use the full container ID for all subsequent operations
+	fullID := preInspect.Container.ID
+	containerName := preInspect.Container.Name
+	if len(containerName) > 0 && containerName[0] == '/' {
+		containerName = containerName[1:]
+	}
+
 	needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
 
 	// Apply in-place updates first
 	if req.Name != nil {
-		if err := c.RenameContainer(ctx, id, *req.Name); err != nil {
+		if err := c.RenameContainer(ctx, fullID, *req.Name); err != nil {
 			return nil, fmt.Errorf("failed to rename container: %w", err)
 		}
+		containerName = *req.Name
 	}
 
 	if req.RestartPolicy != nil || req.MemoryLimit != nil || req.CPULimit != nil {
@@ -303,30 +317,29 @@ func (c *Client) EditContainer(ctx context.Context, id string, req ContainerEdit
 			resources := container.Resources{}
 			if req.MemoryLimit != nil {
 				resources.Memory = *req.MemoryLimit
+				// Docker requires MemorySwap >= Memory; set to -1 (unlimited swap)
+				// to avoid "Memory limit should be smaller than memoryswap limit" errors.
+				resources.MemorySwap = -1
 			}
 			if req.CPULimit != nil {
 				resources.NanoCPUs = int64(*req.CPULimit * 1e9)
 			}
 			updateOpts.Resources = &resources
 		}
-		if err := c.UpdateContainer(ctx, id, updateOpts); err != nil {
+		if err := c.UpdateContainer(ctx, fullID, updateOpts); err != nil {
 			return nil, fmt.Errorf("failed to update container: %w", err)
 		}
 	}
 
 	if needsRecreate {
-		if err := c.recreateContainer(ctx, id, req); err != nil {
+		if err := c.recreateContainer(ctx, fullID, req); err != nil {
 			return nil, fmt.Errorf("failed to recreate container: %w", err)
 		}
 	}
 
-	// Return updated detail — after recreate the ID may have changed,
-	// so we look up by name if provided, otherwise by original ID.
-	lookupID := id
-	if req.Name != nil {
-		lookupID = *req.Name
-	}
-	return c.InspectContainer(ctx, lookupID)
+	// Return updated detail — after recreate the ID has changed,
+	// so look up by container name which is stable across recreations.
+	return c.InspectContainer(ctx, containerName)
 }
 
 // recreateContainer stops, removes, and recreates a container with merged config.
@@ -433,8 +446,14 @@ func (c *Client) recreateContainer(ctx context.Context, id string, req Container
 	// Apply resource limits from request
 	if req.MemoryLimit != nil {
 		newHostConfig.Memory = *req.MemoryLimit
+		newHostConfig.MemorySwap = -1 // unlimited swap to satisfy Docker constraint
 	} else if ctr.HostConfig.Memory > 0 {
 		newHostConfig.Memory = ctr.HostConfig.Memory
+		if ctr.HostConfig.MemorySwap != 0 {
+			newHostConfig.MemorySwap = ctr.HostConfig.MemorySwap
+		} else {
+			newHostConfig.MemorySwap = -1
+		}
 	}
 	if req.CPULimit != nil {
 		newHostConfig.NanoCPUs = int64(*req.CPULimit * 1e9)
