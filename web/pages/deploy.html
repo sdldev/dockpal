@@ -42,6 +42,12 @@
                 <input type="text" x-model="gitForm.branch" placeholder="main"
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
               </div>
+              <div class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Access Token <span class="text-zinc-600">(required for private repos)</span></label>
+                <input type="password" x-model="gitForm.token" placeholder="ghp_xxxxxxxxxxxx"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                <p class="text-xs text-zinc-600">GitHub PAT with <code class="text-zinc-500">repo</code> scope for private repositories</p>
+              </div>
               <button type="submit" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">Deploy from Git</button>
             </form>
           </div>

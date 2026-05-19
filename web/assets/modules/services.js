@@ -19,7 +19,7 @@ Dockpal.services = {
     const resp = await this.api('POST', '/api/deploy/git', this.gitForm);
     if (resp && resp.ok) {
       this.toast('Git deploy started', 'success');
-      this.gitForm = { repo: '', branch: 'main' };
+      this.gitForm = { repo: '', branch: 'main', token: '' };
     } else {
       const data = resp ? await resp.json().catch(() => ({})) : {};
       this.toast(data.error || 'Deploy failed', 'error', 5000);
