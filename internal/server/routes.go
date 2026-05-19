@@ -466,8 +466,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.POST("/deploy/git", func(c *gin.Context) {
 		var req struct {
-			Repo   string `json:"repo" binding:"required"`
-			Branch string `json:"branch"`
+			Repo        string `json:"repo" binding:"required"`
+			Branch      string `json:"branch"`
+			ComposeFile string `json:"compose_file"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -496,20 +497,49 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. Add a GitHub credential in Settings > Registry with registry 'github.com' and a PAT with repo scope."})
 				return
 			}
-			internalError(c, err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to clone repository: %s", errMsg)})
 			return
 		}
 
-		if info.ComposeFile != "" {
-			composeData, err := os.ReadFile(info.ComposeFile)
-			if err != nil {
-				internalError(c, err)
-				return
+		if len(info.ComposeFiles) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no docker-compose file found in repository"})
+			return
+		}
+
+		// If multiple compose files and none selected, return list for user to choose
+		if len(info.ComposeFiles) > 1 && req.ComposeFile == "" {
+			c.JSON(http.StatusOK, gin.H{"status": "select_compose", "compose_files": info.ComposeFiles, "info": info})
+			return
+		}
+
+		// Determine which compose file to use
+		selectedFile := req.ComposeFile
+		if selectedFile == "" {
+			selectedFile = info.ComposeFiles[0]
+		}
+
+		// Validate selected file exists in the list
+		validFile := false
+		for _, f := range info.ComposeFiles {
+			if f == selectedFile {
+				validFile = true
+				break
 			}
-			if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
-				internalError(c, err)
-				return
-			}
+		}
+		if !validFile {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("compose file '%s' not found in repository", selectedFile)})
+			return
+		}
+
+		composePath := filepath.Join(info.Path, selectedFile)
+		composeData, err := os.ReadFile(composePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
+			return
+		}
+		if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
+			return
 		}
 
 		database.SaveService(db.Service{
