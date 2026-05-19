@@ -101,61 +101,79 @@ Dockpal.containers = {
     await this.loadDashboard();
   },
 
+  enterContainerEditMode() {
+    const c = this.selectedContainer;
+    if (!c) return;
+    // Parse current env vars into key/value pairs
+    const envPairs = (c.env || []).map(e => {
+      const idx = e.indexOf('=');
+      return idx >= 0 ? { key: e.substring(0, idx), value: e.substring(idx + 1) } : { key: e, value: '' };
+    });
+    // Parse current ports from PortSummary format
+    const ports = this.dedupePorts(c.ports || []).map(p => ({
+      host_port: p.PublicPort || '',
+      container_port: p.PrivatePort || '',
+      protocol: p.Type || 'tcp'
+    }));
+    // Parse current volumes from mounts
+    const volumes = (c.mounts || []).filter(m => m.Source && m.Destination).map(m => ({
+      host_path: m.Source,
+      container_path: m.Destination,
+      read_only: m.RW === false
+    }));
+
+    this.editContainerForm = {
+      name: c.name || '',
+      image: c.image || '',
+      restart_policy: c.restart_policy || '',
+      memory_mb: 0, // we don't have current memory limit in inspect, user sets if needed
+      cpu_limit: 0,
+      env: envPairs,
+      ports: ports,
+      volumes: volumes
+    };
+    this.containerEditMode = true;
+  },
+
+  cancelContainerEdit() {
+    this.containerEditMode = false;
+  },
+
   async submitContainerEdit() {
     const form = this.editContainerForm;
+    const c = this.selectedContainer;
     const body = {};
 
-    // Only include fields that the user actually changed
-    if (form.name && form.name !== (this.selectedContainer?.name || '')) {
-      body.name = form.name;
-    }
-    if (form.image && form.image !== (this.selectedContainer?.image || '')) {
-      body.image = form.image;
-    }
-    if (form.restart_policy) {
-      body.restart_policy = form.restart_policy;
-    }
-    if (form.memory_mb > 0) {
-      body.memory_limit = form.memory_mb * 1024 * 1024; // MB → bytes
-    }
-    if (form.cpu_limit > 0) {
-      body.cpu_limit = form.cpu_limit;
-    }
+    if (form.name && form.name !== (c?.name || '')) body.name = form.name;
+    if (form.image && form.image !== (c?.image || '')) body.image = form.image;
+    if (form.restart_policy && form.restart_policy !== (c?.restart_policy || '')) body.restart_policy = form.restart_policy;
+    if (form.memory_mb > 0) body.memory_limit = form.memory_mb * 1024 * 1024;
+    if (form.cpu_limit > 0) body.cpu_limit = form.cpu_limit;
 
-    // Env: only send if user added entries
     const validEnv = form.env.filter(e => e.key.trim() !== '');
-    if (validEnv.length > 0) {
-      body.env = validEnv.map(e => e.key + '=' + e.value);
-    }
+    if (validEnv.length > 0) body.env = validEnv.map(e => e.key + '=' + e.value);
 
-    // Ports: only send if user added entries
     const validPorts = form.ports.filter(p => p.host_port && p.container_port);
-    if (validPorts.length > 0) {
-      body.ports = validPorts.map(p => ({
-        host_port: Number(p.host_port),
-        container_port: Number(p.container_port),
-        protocol: p.protocol || 'tcp'
-      }));
-    }
+    if (validPorts.length > 0) body.ports = validPorts.map(p => ({
+      host_port: Number(p.host_port),
+      container_port: Number(p.container_port),
+      protocol: p.protocol || 'tcp'
+    }));
 
-    // Volumes: only send if user added entries
     const validVolumes = form.volumes.filter(v => v.host_path.trim() && v.container_path.trim());
-    if (validVolumes.length > 0) {
-      body.volumes = validVolumes.map(v => ({
-        host_path: v.host_path,
-        container_path: v.container_path,
-        read_only: v.read_only || false
-      }));
-    }
+    if (validVolumes.length > 0) body.volumes = validVolumes.map(v => ({
+      host_path: v.host_path,
+      container_path: v.container_path,
+      read_only: v.read_only || false
+    }));
 
-    // Nothing to update?
     if (Object.keys(body).length === 0) {
       this.toast('No changes to apply', 'info');
-      this.showEditContainerModal = false;
+      this.containerEditMode = false;
       return;
     }
 
-    const resp = await this.api('PUT', '/api/containers/' + this.selectedContainer.id, body);
+    const resp = await this.api('PUT', '/api/containers/' + c.id, body);
     if (!resp || !resp.ok) {
       const data = await resp?.json?.().catch(() => ({}));
       this.toast(data.error || 'Failed to update container', 'error', 5000);
@@ -163,16 +181,13 @@ Dockpal.containers = {
     }
 
     const result = await resp.json();
-    this.showEditContainerModal = false;
+    this.containerEditMode = false;
 
     if (result.recreated) {
       this.toast('Container recreated with new config', 'success');
-      // After recreate, the container ID may have changed — refresh from list
       await this.loadDashboard();
-      // Try to find the updated container by name
       if (result.container) {
         this.selectedContainer = result.container;
-        // Restart stats/log polling with new ID
         this.destroyChart();
         this.startStatsPolling(result.container.id);
         this.startLogStream(result.container.id);
