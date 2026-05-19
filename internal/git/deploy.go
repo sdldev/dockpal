@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
 type RepoInfo struct {
@@ -16,7 +17,7 @@ type RepoInfo struct {
 	ComposeFile string `json:"compose_file,omitempty"`
 }
 
-func Clone(repoURL, branch string) (*RepoInfo, error) {
+func Clone(repoURL, branch, token string) (*RepoInfo, error) {
 	repoName := extractRepoName(repoURL)
 	repoPath := filepath.Join("/opt/dockpal/repos", repoName)
 
@@ -32,6 +33,13 @@ func Clone(repoURL, branch string) (*RepoInfo, error) {
 		URL:          repoURL,
 		Depth:        1,
 		SingleBranch: true,
+	}
+
+	if token != "" {
+		cloneOpts.Auth = &githttp.BasicAuth{
+			Username: "x-access-token",
+			Password: token,
+		}
 	}
 
 	if branch != "" {
@@ -52,7 +60,7 @@ func Clone(repoURL, branch string) (*RepoInfo, error) {
 	}, nil
 }
 
-func Pull(repoPath string) error {
+func Pull(repoPath, token string) error {
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		return fmt.Errorf("failed to open repository: %w", err)
@@ -63,7 +71,15 @@ func Pull(repoPath string) error {
 		return fmt.Errorf("failed to get worktree: %w", err)
 	}
 
-	err = worktree.Pull(&git.PullOptions{})
+	pullOpts := &git.PullOptions{}
+	if token != "" {
+		pullOpts.Auth = &githttp.BasicAuth{
+			Username: "x-access-token",
+			Password: token,
+		}
+	}
+
+	err = worktree.Pull(pullOpts)
 	if err != nil && err != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("failed to pull: %w", err)
 	}

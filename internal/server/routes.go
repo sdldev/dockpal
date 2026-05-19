@@ -468,6 +468,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		var req struct {
 			Repo   string `json:"repo" binding:"required"`
 			Branch string `json:"branch"`
+			Token  string `json:"token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -485,8 +486,14 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			}
 		}
 
-		info, err := git.Clone(req.Repo, req.Branch)
+		info, err := git.Clone(req.Repo, req.Branch, req.Token)
 		if err != nil {
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "authentication") || strings.Contains(errMsg, "Authorization") ||
+				strings.Contains(errMsg, "denied") || strings.Contains(errMsg, "not found") {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. For private repos, provide a valid GitHub Personal Access Token (PAT) with repo scope."})
+				return
+			}
 			internalError(c, err)
 			return
 		}
