@@ -144,11 +144,14 @@ func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, compose
 			if suggestion != "" {
 				session.Emit("hint", suggestion, "error")
 			}
-			// Add auth failure hint if credentials were used
-			if registryAuth != "" && (strings.Contains(err.Error(), "authentication failed") ||
-				strings.Contains(err.Error(), "unauthorized") || strings.Contains(err.Error(), "denied")) {
+			// Add auth failure hint
+			if strings.Contains(err.Error(), "unauthorized") || strings.Contains(err.Error(), "denied") {
 				domain := extractImageDomain(svc.Image)
-				session.Emit("hint", fmt.Sprintf("💡 Authentication failed for %s — credentials may be expired. Update them in Settings > Registry.", domain), "error")
+				if registryAuth != "" {
+					session.Emit("hint", fmt.Sprintf("💡 Authentication failed for %s — credentials may be expired. Update them in Settings > Registry.", domain), "error")
+				} else {
+					session.Emit("hint", fmt.Sprintf("💡 No credentials found for %s. Add a registry credential in Settings > Registry (for ghcr.io, add with domain 'github.com').", domain), "error")
+				}
 			}
 			return fmt.Errorf("failed to pull image for %s: %w", svcName, err)
 		}

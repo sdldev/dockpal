@@ -385,6 +385,12 @@ func (m *Manager) TestConnection(id string) (*TestResult, error) {
 	}
 }
 
+// registryAliases maps registry domains to their credential fallback domains.
+// ghcr.io and github.com share the same GitHub PAT authentication.
+var registryAliases = map[string]string{
+	"ghcr.io": "github.com",
+}
+
 // GetAuthHeader returns the base64-encoded Docker auth header for a given image reference.
 // Returns empty string if no matching credentials found.
 func (m *Manager) GetAuthHeader(imageRef string) (string, error) {
@@ -398,6 +404,12 @@ func (m *Manager) GetAuthHeader(imageRef string) (string, error) {
 	}
 
 	cred, err := m.db.FindRegistryCredentialByDomain(domain)
+	if err != nil || cred == nil {
+		// Try alias fallback (e.g., ghcr.io → github.com)
+		if alias, ok := registryAliases[domain]; ok {
+			cred, err = m.db.FindRegistryCredentialByDomain(alias)
+		}
+	}
 	if err != nil || cred == nil {
 		return "", nil // no credentials stored, pull without auth
 	}

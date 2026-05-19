@@ -1,12 +1,27 @@
 package registry
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/sdldev/dockpal/internal/db"
 )
+
+// decodeAuthHeader decodes a base64-encoded Docker auth header back into a DockerAuthConfig.
+func decodeAuthHeader(header string) (*DockerAuthConfig, error) {
+	jsonBytes, err := base64.URLEncoding.DecodeString(header)
+	if err != nil {
+		return nil, err
+	}
+	var cfg DockerAuthConfig
+	if err := json.Unmarshal(jsonBytes, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
 
 func setupTestManager(t *testing.T) *Manager {
 	t.Helper()
@@ -495,6 +510,55 @@ func TestGetAuthHeader(t *testing.T) {
 		}
 		if header != "" {
 			t.Errorf("expected empty header for unmatched domain, got %s", header)
+		}
+	})
+
+	t.Run("falls back to github.com credential for ghcr.io image", func(t *testing.T) {
+		mgr := setupTestManager(t)
+		// Store credential under github.com, not ghcr.io
+		mgr.Create(CreateRequest{
+			Registry: "github.com",
+			Username: "testuser",
+			Token:    "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+		})
+
+		header, err := mgr.GetAuthHeader("ghcr.io/sdldev/eonet-finance:latest")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if header == "" {
+			t.Error("expected non-empty auth header via ghcr.io → github.com alias fallback")
+		}
+	})
+
+	t.Run("prefers direct ghcr.io credential over alias fallback", func(t *testing.T) {
+		mgr := setupTestManager(t)
+		// Store credentials under both domains
+		mgr.Create(CreateRequest{
+			Registry: "ghcr.io",
+			Username: "direct-user",
+			Token:    "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+		})
+		mgr.Create(CreateRequest{
+			Registry: "github.com",
+			Username: "alias-user",
+			Token:    "ghp_12345678901234567890123456789012ABCD",
+		})
+
+		header, err := mgr.GetAuthHeader("ghcr.io/owner/app:v1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if header == "" {
+			t.Fatal("expected non-empty auth header")
+		}
+		// Decode and verify it used the direct ghcr.io credential
+		decoded, err := decodeAuthHeader(header)
+		if err != nil {
+			t.Fatalf("failed to decode auth header: %v", err)
+		}
+		if decoded.Username != "direct-user" {
+			t.Errorf("expected direct-user (from ghcr.io credential), got %s", decoded.Username)
 		}
 	})
 }
