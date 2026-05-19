@@ -80,6 +80,8 @@ type ContainerDetail struct {
 	NetworkMode   string                            `json:"network_mode"`
 	RestartPolicy string                            `json:"restart_policy"`
 	Networks      map[string]string                 `json:"networks"`
+	MemoryLimit   int64                             `json:"memory_limit"`
+	NanoCPUs      int64                             `json:"nano_cpus"`
 }
 
 func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDetail, error) {
@@ -109,9 +111,13 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDet
 
 	networkMode := ""
 	restartPolicy := ""
+	var memoryLimit int64
+	var nanoCPUs int64
 	if ctr.HostConfig != nil {
 		networkMode = string(ctr.HostConfig.NetworkMode)
 		restartPolicy = string(ctr.HostConfig.RestartPolicy.Name)
+		memoryLimit = ctr.HostConfig.Memory
+		nanoCPUs = ctr.HostConfig.NanoCPUs
 	}
 
 	info := &ContainerDetail{
@@ -130,6 +136,8 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDet
 		NetworkMode:   networkMode,
 		RestartPolicy: restartPolicy,
 		Networks:      networks,
+		MemoryLimit:   memoryLimit,
+		NanoCPUs:      nanoCPUs,
 	}
 
 	return info, nil
@@ -317,9 +325,13 @@ func (c *Client) EditContainer(ctx context.Context, id string, req ContainerEdit
 			resources := container.Resources{}
 			if req.MemoryLimit != nil {
 				resources.Memory = *req.MemoryLimit
-				// Docker requires MemorySwap >= Memory; set to -1 (unlimited swap)
-				// to avoid "Memory limit should be smaller than memoryswap limit" errors.
-				resources.MemorySwap = -1
+				if *req.MemoryLimit > 0 {
+					// Docker requires MemorySwap >= Memory; set to -1 (unlimited swap)
+					resources.MemorySwap = -1
+				} else {
+					// 0 = unlimited, also reset swap
+					resources.MemorySwap = 0
+				}
 			}
 			if req.CPULimit != nil {
 				resources.NanoCPUs = int64(*req.CPULimit * 1e9)

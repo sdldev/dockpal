@@ -171,13 +171,14 @@ Dockpal.containers = {
       name: c.name || '',
       image: c.image || '',
       restart_policy: c.restart_policy || '',
-      memory_mb: 0,
-      cpu_limit: 0,
+      memory_mb: c.memory_limit ? Math.round(c.memory_limit / (1024 * 1024)) : 0,
+      cpu_limit: c.nano_cpus ? (c.nano_cpus / 1e9) : 0,
       env: envPairs,
       ports: ports,
       volumes: volumes
     };
     this.containerEditMode = true;
+    this.containerEditSaving = false;
   },
 
   cancelContainerEdit() {
@@ -192,10 +193,20 @@ Dockpal.containers = {
     if (form.name && form.name !== (c?.name || '')) body.name = form.name;
     if (form.image && form.image !== (c?.image || '')) body.image = form.image;
     if (form.restart_policy && form.restart_policy !== (c?.restart_policy || '')) body.restart_policy = form.restart_policy;
+
+    // Memory limit: always send if changed from current value
     const memMB = Number(form.memory_mb) || 0;
+    const currentMemMB = c?.memory_limit ? Math.round(c.memory_limit / (1024 * 1024)) : 0;
+    if (memMB !== currentMemMB) {
+      body.memory_limit = memMB * 1024 * 1024; // 0 = unlimited
+    }
+
+    // CPU limit: always send if changed from current value
     const cpuLim = Number(form.cpu_limit) || 0;
-    if (memMB > 0) body.memory_limit = memMB * 1024 * 1024;
-    if (cpuLim > 0) body.cpu_limit = cpuLim;
+    const currentCpu = c?.nano_cpus ? (c.nano_cpus / 1e9) : 0;
+    if (cpuLim !== currentCpu) {
+      body.cpu_limit = cpuLim; // 0 = unlimited
+    }
 
     const validEnv = form.env.filter(e => e.key.trim() !== '');
     if (validEnv.length > 0) body.env = validEnv.map(e => e.key + '=' + e.value);
@@ -220,14 +231,17 @@ Dockpal.containers = {
       return;
     }
 
+    this.containerEditSaving = true;
     const resp = await this.api('PUT', '/api/containers/' + (c.name || c.id), body);
     if (!resp || !resp.ok) {
+      this.containerEditSaving = false;
       const data = await resp?.json?.().catch(() => ({}));
       this.toast(data.error || 'Failed to update container', 'error', 5000);
       return;
     }
 
     const result = await resp.json();
+    this.containerEditSaving = false;
     this.containerEditMode = false;
 
     if (result.recreated) {
@@ -240,8 +254,10 @@ Dockpal.containers = {
         this.startLogStream(result.container.id);
       }
     } else {
-      this.toast('Container updated', 'success');
-      this.selectedContainer = result.container || this.selectedContainer;
+      this.toast('Container updated successfully', 'success');
+      if (result.container) {
+        this.selectedContainer = result.container;
+      }
       await this.refreshContainerDetail();
     }
   },

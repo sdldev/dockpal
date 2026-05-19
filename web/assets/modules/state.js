@@ -21,6 +21,7 @@ Dockpal.initialState = function() {
     statsInterval: null,
     statsHistory: { cpu: [], mem: [], rx: [], tx: [], labels: [] },
     containerEditMode: false,
+    containerEditSaving: false,
     editContainerForm: { name: '', image: '', restart_policy: '', memory_mb: 0, cpu_limit: 0, env: [], ports: [], volumes: [] },
 
     systemInfo: null,

@@ -305,9 +305,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
-		// Validate CPU limit if provided (must be positive)
-		if req.CPULimit != nil && *req.CPULimit <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "CPU limit must be positive"})
+		// Validate CPU limit if provided (must be non-negative; 0 means unlimited)
+		if req.CPULimit != nil && *req.CPULimit < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "CPU limit must be non-negative"})
 			return
 		}
 
@@ -358,7 +358,8 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		detail, err := dockerClient.EditContainer(c.Request.Context(), containerID, req)
 		if err != nil {
-			internalError(c, err)
+			// TODO: remove debug detail before release
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "debug": true})
 			return
 		}
 
