@@ -273,7 +273,7 @@ download_binary() {
     local arch="$1"
     local url
     local max_retries=3
-    local timeout_seconds=60
+    local timeout_seconds=120
 
     if [ "$VERSION" = "latest" ]; then
         url="https://github.com/$REPO/releases/latest/download/dockpal-linux-$arch"
@@ -287,17 +287,36 @@ download_binary() {
     while [ $attempt -le $max_retries ]; do
         log_info "Download attempt $attempt of $max_retries..."
 
-        if curl -fsSL --max-time "$timeout_seconds" "$url" -o "$BINARY" 2>/dev/null; then
+        # Try curl first
+        local curl_err
+        if curl_err=$(curl -fSL --max-time "$timeout_seconds" --connect-timeout 15 --retry 1 "$url" -o "$BINARY" 2>&1); then
             chmod +x "$BINARY"
             log_info "Binary installed to $BINARY"
             return 0
         fi
+        log_warn "curl failed: $curl_err"
+
+        # Fallback to wget if curl failed
+        if command -v wget >/dev/null 2>&1; then
+            log_info "Trying wget as fallback..."
+            if wget -q --timeout="$timeout_seconds" -O "$BINARY" "$url" 2>/dev/null; then
+                chmod +x "$BINARY"
+                log_info "Binary installed to $BINARY (via wget)"
+                return 0
+            fi
+            log_warn "wget also failed"
+        fi
+
+        # Partial cleanup before retry
+        rm -f "$BINARY" 2>/dev/null || true
 
         log_warn "Download attempt $attempt failed"
         attempt=$((attempt + 1))
     done
 
     log_error "Failed to download binary after $max_retries attempts"
+    log_error "Check your network connection and that GitHub is reachable from this host"
+    log_error "You can test manually: curl -fSL '$url' -o /tmp/dockpal-test"
     exit 6
 }
 
