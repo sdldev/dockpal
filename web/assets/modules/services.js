@@ -21,7 +21,8 @@ Dockpal.services = {
       const payload = {
         repo: this.gitForm.repo,
         branch: this.gitForm.branch,
-        compose_file: this.gitForm.compose_file || ''
+        compose_file: this.gitForm.compose_file || '',
+        name: this.gitForm.name || ''
       };
       const resp = await this.api('POST', '/api/deploy/git', payload);
       if (resp && resp.ok) {
@@ -33,7 +34,7 @@ Dockpal.services = {
           return;
         }
         this.toast('Deployed successfully', 'success');
-        this.gitForm = { repo: '', branch: 'main', compose_file: '' };
+        this.gitForm = { repo: '', branch: 'main', compose_file: '', name: '' };
         this.githubSearch = '';
         this.composeFiles = [];
       } else {
@@ -71,6 +72,7 @@ Dockpal.services = {
     this.gitForm.repo = repo.clone_url;
     this.gitForm.branch = repo.default_branch || 'main';
     this.gitForm.compose_file = '';
+    this.gitForm.name = '';
     this.composeFiles = [];
   },
 
