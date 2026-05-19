@@ -12,12 +12,14 @@ Manage containers, deploy stacks from compose or templates, monitor resources, a
 - **One-click deploy** — 25+ pre-configured templates (PostgreSQL, Redis, Grafana, n8n, Nextcloud, etc.)
 - **Compose & Git deploy** — Deploy from raw YAML or Git repository with auto-pull
 - **Streamed deployment logs** — WebSocket-based live progress with smart error diagnostics
-- **Container management** — Start, stop, restart, remove with confirmation dialogs
+- **Container management** — Start, stop, restart, remove, and in-place edit (memory/CPU limits, restart policy, ports, volumes)
+- **Private registry support** — Store encrypted GitHub PAT tokens to pull from private ghcr.io registries
 - **Live log viewer** — Tail container logs over WebSocket
 - **Traefik integration** — Auto-generate reverse proxy config with Let's Encrypt
 - **Cloudflare Tunnel** — Expose services without opening firewall ports
 - **Auto-recovery** — Background health monitor restarts crashed containers
-- **Security hardening** — JWT versioning, rate limiting, path traversal protection, input validation
+- **Auto-update** — Checks for new versions on login, shows changelog modal with one-click update
+- **Security hardened** — JWT versioning, rate limiting, AES-256-GCM encrypted credentials, input validation
 - **Embedded UI** — No external CDN, works offline, single binary deployment
 
 ---
@@ -126,26 +128,27 @@ dockpal/
 ├── main.go              # Entry point, CLI commands
 ├── internal/
 │   ├── auth/            # JWT, login, password, secret management
-│   ├── db/              # BBolt persistence (users, services, domains)
-│   ├── docker/          # Docker SDK wrapper, compose parser, health monitor
+│   ├── db/              # BBolt persistence (users, services, domains, registries)
+│   ├── docker/          # Docker SDK wrapper, compose parser, container edit, health monitor
+│   ├── registry/        # Private registry credential management (AES-256-GCM encryption)
 │   ├── server/          # Gin routes, middleware, rate limiter
 │   ├── traefik/         # Reverse proxy config generator
 │   ├── tunnel/          # Cloudflare tunnel lifecycle
 │   ├── git/             # Git deploy helper
 │   ├── logging/         # Log file rotation
+│   ├── update/          # Version check, cache, scheduler, binary update service
 │   └── validator/       # Input validation (names, URLs, env vars)
 ├── web/
 │   ├── index.html       # Shell with #include directives
-│   ├── pages/           # One file per route (dashboard, containers, etc.)
+│   ├── pages/           # One file per route (dashboard, containers, registry, etc.)
 │   ├── partials/        # Reusable components (sidebar, dialogs, toast)
 │   ├── assets/
 │   │   ├── app.js       # Module orchestrator
-│   │   ├── modules/     # Feature modules (auth, charts, containers, ...)
+│   │   ├── modules/     # Feature modules (auth, charts, containers, registry, ...)
 │   │   ├── styles.css   # Custom CSS
 │   │   └── vendor/      # Tailwind, Alpine.js, Chart.js (offline-ready)
 │   └── embed.go         # go:embed + HTML assembler
-└── templates/
-    └── templates.json   # 25+ pre-configured app templates
+└── templates/           # Individual JSON files per template (nginx.json, postgres16.json, ...)
 ```
 
 ---
