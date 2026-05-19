@@ -468,7 +468,6 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		var req struct {
 			Repo   string `json:"repo" binding:"required"`
 			Branch string `json:"branch"`
-			Token  string `json:"token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -486,12 +485,15 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			}
 		}
 
-		info, err := git.Clone(req.Repo, req.Branch, req.Token)
+		// Auto-fetch GitHub token from stored registry credentials
+		token, _ := registryManager.GetTokenForDomain("github.com")
+
+		info, err := git.Clone(req.Repo, req.Branch, token)
 		if err != nil {
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "authentication") || strings.Contains(errMsg, "Authorization") ||
 				strings.Contains(errMsg, "denied") || strings.Contains(errMsg, "not found") {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. For private repos, provide a valid GitHub Personal Access Token (PAT) with repo scope."})
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. Add a GitHub credential in Settings > Registry with registry 'github.com' and a PAT with repo scope."})
 				return
 			}
 			internalError(c, err)
@@ -519,6 +521,84 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		})
 
 		c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": info})
+	})
+
+	// GitHub repository listing — uses stored github.com registry credential
+	protected.GET("/github/repos", func(c *gin.Context) {
+		token, _ := registryManager.GetTokenForDomain("github.com")
+		if token == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No GitHub credential found. Add a registry with domain 'github.com' in Settings > Registry."})
+			return
+		}
+
+		page := c.DefaultQuery("page", "1")
+		perPage := c.DefaultQuery("per_page", "30")
+
+		apiURL := fmt.Sprintf("https://api.github.com/user/repos?sort=updated&direction=desc&page=%s&per_page=%s&type=all", page, perPage)
+		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", apiURL, nil)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "GitHub token is invalid or expired. Update the credential in Settings > Registry."})
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		var repos []json.RawMessage
+		if err := json.Unmarshal(body, &repos); err != nil {
+			internalError(c, err)
+			return
+		}
+
+		type repoSummary struct {
+			FullName      string `json:"full_name"`
+			CloneURL      string `json:"clone_url"`
+			DefaultBranch string `json:"default_branch"`
+			Private       bool   `json:"private"`
+			Description   string `json:"description"`
+			UpdatedAt     string `json:"updated_at"`
+		}
+
+		var results []repoSummary
+		for _, raw := range repos {
+			var r struct {
+				FullName      string `json:"full_name"`
+				CloneURL      string `json:"clone_url"`
+				DefaultBranch string `json:"default_branch"`
+				Private       bool   `json:"private"`
+				Description   string `json:"description"`
+				UpdatedAt     string `json:"updated_at"`
+			}
+			if err := json.Unmarshal(raw, &r); err == nil {
+				results = append(results, repoSummary{
+					FullName:      r.FullName,
+					CloneURL:      r.CloneURL,
+					DefaultBranch: r.DefaultBranch,
+					Private:       r.Private,
+					Description:   r.Description,
+					UpdatedAt:     r.UpdatedAt,
+				})
+			}
+		}
+
+		c.JSON(http.StatusOK, results)
 	})
 
 	protected.GET("/services", func(c *gin.Context) {

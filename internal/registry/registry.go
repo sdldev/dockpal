@@ -421,6 +421,26 @@ func (m *Manager) GetAuthHeader(imageRef string) (string, error) {
 	return base64.URLEncoding.EncodeToString(jsonBytes), nil
 }
 
+// GetTokenForDomain retrieves the decrypted plaintext token for a given registry domain.
+// Used for Git clone authentication when a github.com credential is stored.
+func (m *Manager) GetTokenForDomain(domain string) (string, error) {
+	if m.cryptoKey == nil {
+		return "", fmt.Errorf("encryption configuration error")
+	}
+
+	cred, err := m.db.FindRegistryCredentialByDomain(domain)
+	if err != nil || cred == nil {
+		return "", nil
+	}
+
+	token, err := Decrypt(cred.EncryptedToken, m.cryptoKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt credentials for %s", domain)
+	}
+
+	return string(token), nil
+}
+
 // isAlphanumeric checks if a string contains only alphanumeric characters.
 func isAlphanumeric(s string) bool {
 	for _, r := range s {

@@ -2,10 +2,91 @@
       <div x-show="currentPage === 'deploy'">
         <div class="mb-6">
           <h2 class="text-lg font-semibold text-white">Deploy Application</h2>
-          <p class="text-sm text-zinc-500">Deploy from Compose YAML or Git repository</p>
+          <p class="text-sm text-zinc-500">Deploy from GitHub, Git URL, or Compose YAML</p>
         </div>
-        <div class="grid lg:grid-cols-2 gap-6">
-          <!-- Compose -->
+
+        <!-- Source Selector Tabs -->
+        <div class="flex gap-1 mb-6 bg-zinc-900 border border-zinc-800 rounded-sm p-1 w-fit">
+          <button @click="deploySource = 'github'" :class="deploySource === 'github' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'"
+            class="px-4 py-2 rounded-sm text-sm font-medium transition-all">GitHub</button>
+          <button @click="deploySource = 'compose'" :class="deploySource === 'compose' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'"
+            class="px-4 py-2 rounded-sm text-sm font-medium transition-all">Compose</button>
+          <button @click="deploySource = 'git'" :class="deploySource === 'git' ? 'bg-white text-zinc-900' : 'text-zinc-400 hover:text-white'"
+            class="px-4 py-2 rounded-sm text-sm font-medium transition-all">Git URL</button>
+        </div>
+
+        <!-- GitHub Deploy -->
+        <div x-show="deploySource === 'github'">
+          <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5 space-y-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold text-white">Deploy from GitHub</h3>
+              <button @click="loadGithubRepos()" :disabled="githubLoading"
+                class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded-sm text-xs font-medium transition-all">
+                <span x-show="!githubLoading">Refresh</span>
+                <span x-show="githubLoading" class="flex items-center gap-1">
+                  <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  Loading...
+                </span>
+              </button>
+            </div>
+
+            <!-- No credential state -->
+            <div x-show="githubError" class="text-center py-8">
+              <svg class="w-10 h-10 mx-auto mb-3 text-zinc-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+              </svg>
+              <p class="text-zinc-400 text-sm mb-1" x-text="githubError"></p>
+              <p class="text-zinc-600 text-xs">Add a credential with registry <code class="text-zinc-500">github.com</code> in Settings &gt; Registry</p>
+            </div>
+
+            <!-- Search -->
+            <div x-show="githubRepos.length > 0 && !githubError">
+              <input type="text" x-model="githubSearch" placeholder="Search repositories..."
+                class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+            </div>
+
+            <!-- Repo List -->
+            <div x-show="githubRepos.length > 0 && !githubError" class="space-y-1 max-h-96 overflow-y-auto">
+              <template x-for="repo in githubRepos.filter(r => !githubSearch || r.full_name.toLowerCase().includes(githubSearch.toLowerCase()) || (r.description && r.description.toLowerCase().includes(githubSearch.toLowerCase())))" :key="repo.full_name">
+                <div @click="selectGithubRepo(repo)"
+                  class="flex items-center justify-between px-3 py-2.5 rounded-sm cursor-pointer transition-all"
+                  :class="gitForm.repo === repo.clone_url ? 'bg-blue-600/20 border border-blue-600/50' : 'bg-zinc-950 border border-zinc-800 hover:border-zinc-700'">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm text-white font-medium truncate" x-text="repo.full_name"></span>
+                      <span x-show="repo.private" class="px-1.5 py-0.5 bg-amber-600/20 text-amber-400 text-[10px] font-medium rounded">PRIVATE</span>
+                    </div>
+                    <p x-show="repo.description" class="text-xs text-zinc-500 truncate mt-0.5" x-text="repo.description"></p>
+                  </div>
+                  <svg x-show="gitForm.repo === repo.clone_url" class="w-4 h-4 text-blue-400 flex-shrink-0 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                  </svg>
+                </div>
+              </template>
+            </div>
+
+            <!-- Loading state -->
+            <div x-show="githubLoading && githubRepos.length === 0 && !githubError" class="text-center py-8 text-zinc-500 text-sm">
+              <svg class="w-6 h-6 animate-spin mx-auto mb-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              Loading repositories...
+            </div>
+
+            <!-- Deploy selected -->
+            <div x-show="gitForm.repo && !githubError" class="space-y-3 pt-2 border-t border-zinc-800">
+              <div class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Branch <span class="text-zinc-600">(optional)</span></label>
+                <input type="text" x-model="gitForm.branch" placeholder="main"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+              </div>
+              <button @click="deployGit()" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">
+                Deploy from GitHub
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compose Deploy -->
+        <div x-show="deploySource === 'compose'">
           <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5 space-y-4">
             <h3 class="text-sm font-semibold text-white">Docker Compose</h3>
             <form @submit.prevent="deployCompose()" class="space-y-3">
@@ -28,25 +109,24 @@
               <button type="submit" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">Deploy</button>
             </form>
           </div>
-          <!-- Git -->
+        </div>
+
+        <!-- Git URL Deploy -->
+        <div x-show="deploySource === 'git'">
           <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5 space-y-4">
-            <h3 class="text-sm font-semibold text-white">Git Repository</h3>
+            <h3 class="text-sm font-semibold text-white">Git Repository URL</h3>
+            <p class="text-xs text-zinc-500">For private repos, add a GitHub credential in Settings &gt; Registry first.</p>
             <form @submit.prevent="deployGit()" class="space-y-3">
               <div class="space-y-1.5">
                 <label class="text-xs text-zinc-400">Repository URL</label>
                 <input type="text" x-model="gitForm.repo" required
-                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+                  placeholder="https://github.com/user/repo.git">
               </div>
               <div class="space-y-1.5">
                 <label class="text-xs text-zinc-400">Branch <span class="text-zinc-600">(optional)</span></label>
                 <input type="text" x-model="gitForm.branch" placeholder="main"
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
-              </div>
-              <div class="space-y-1.5">
-                <label class="text-xs text-zinc-400">Access Token <span class="text-zinc-600">(required for private repos)</span></label>
-                <input type="password" x-model="gitForm.token" placeholder="ghp_xxxxxxxxxxxx"
-                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
-                <p class="text-xs text-zinc-600">GitHub PAT with <code class="text-zinc-500">repo</code> scope for private repositories</p>
               </div>
               <button type="submit" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">Deploy from Git</button>
             </form>
