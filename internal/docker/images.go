@@ -55,6 +55,38 @@ func (c *Client) PullImage(ctx context.Context, image string) error {
 	return nil
 }
 
+// PullImageWithAuth pulls an image with optional registry authentication.
+// If registryAuth is empty, it falls back to an unauthenticated pull.
+func (c *Client) PullImageWithAuth(ctx context.Context, image string, registryAuth string) error {
+	opts := client.ImagePullOptions{}
+	if registryAuth != "" {
+		opts.RegistryAuth = registryAuth
+	}
+	reader, err := c.cli.ImagePull(ctx, image, opts)
+	if err != nil {
+		errMsg := err.Error()
+		if registryAuth != "" && (strings.Contains(errMsg, "401") || strings.Contains(errMsg, "403") ||
+			strings.Contains(errMsg, "unauthorized") || strings.Contains(errMsg, "denied")) {
+			// Extract domain from image for the hint
+			domain := extractImageDomain(image)
+			return fmt.Errorf("authentication failed for %s — credentials may be expired: %w", domain, err)
+		}
+		return fmt.Errorf("failed to pull image: %w", err)
+	}
+	defer reader.Close()
+	io.Copy(io.Discard, reader)
+	return nil
+}
+
+// extractImageDomain extracts the registry domain from an image reference.
+func extractImageDomain(image string) string {
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) >= 2 && strings.Contains(parts[0], ".") {
+		return parts[0]
+	}
+	return "registry"
+}
+
 func (c *Client) RemoveImage(ctx context.Context, id string) error {
 	_, err := c.cli.ImageRemove(ctx, id, client.ImageRemoveOptions{Force: true})
 	return err
