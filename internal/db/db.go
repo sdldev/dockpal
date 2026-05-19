@@ -139,6 +139,28 @@ func (d *DB) UpdatePasswordWithVersion(username, hash string) error {
 	})
 }
 
+// IncrementTokenVersion atomically increments the token_version field,
+// invalidating all previously issued JWT tokens for the user.
+func (d *DB) IncrementTokenVersion(username string) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketUsers)
+		data := b.Get([]byte(username))
+		if data == nil {
+			return fmt.Errorf("user not found")
+		}
+		var user User
+		if err := json.Unmarshal(data, &user); err != nil {
+			return err
+		}
+		user.TokenVersion++
+		updated, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(username), updated)
+	})
+}
+
 func (d *DB) EnsureDefaultAdmin(passwordHash string) error {
 	_, err := d.GetUser("admin")
 	if err != nil {

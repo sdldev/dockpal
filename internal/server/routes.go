@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -124,18 +125,19 @@ func loadTemplatesFromDir(dir string) ([]Template, error) {
 func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService) {
 	api := r.Group("/api")
 
-	// Rate limiter for login endpoint
+	// Rate limiters
 	loginRateLimiter := NewRateLimiter()
+	mutationRateLimiter := NewRateLimiter()
 
 	// Auth (unprotected)
 	api.POST("/login", RateLimitMiddleware(loginRateLimiter), func(c *gin.Context) { auth.HandleLogin(c, jwtSecret, database) })
-	api.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c) })
+	api.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
 
 	protected := api.Group("")
 	protected.Use(AuthMiddleware(jwtSecret, database))
 
 	// Auth protected
-	protected.POST("/auth/reset-password", func(c *gin.Context) { auth.HandleResetPassword(c, database) })
+	protected.POST("/auth/reset-password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
 	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)
@@ -143,7 +145,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/registries", func(c *gin.Context) {
 		list, err := registryManager.List()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, list)
@@ -170,7 +172,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, cred)
@@ -199,7 +201,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
@@ -212,7 +214,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, result)
@@ -222,7 +224,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/containers", func(c *gin.Context) {
 		containers, err := dockerClient.ListContainers(c.Request.Context(), true)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, containers)
@@ -231,7 +233,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/containers/:id", func(c *gin.Context) {
 		detail, err := dockerClient.InspectContainer(c.Request.Context(), c.Param("id"))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, detail)
@@ -239,7 +241,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.POST("/containers/:id/start", func(c *gin.Context) {
 		if err := dockerClient.StartContainer(c.Request.Context(), c.Param("id")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "started"})
@@ -247,7 +249,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.POST("/containers/:id/stop", func(c *gin.Context) {
 		if err := dockerClient.StopContainer(c.Request.Context(), c.Param("id")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "stopped"})
@@ -255,7 +257,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.POST("/containers/:id/restart", func(c *gin.Context) {
 		if err := dockerClient.RestartContainer(c.Request.Context(), c.Param("id")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "restarted"})
@@ -264,7 +266,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.DELETE("/containers/:id", func(c *gin.Context) {
 		force := c.Query("force") == "true"
 		if err := dockerClient.RemoveContainer(c.Request.Context(), c.Param("id"), force); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
@@ -273,7 +275,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/containers/:id/stats", func(c *gin.Context) {
 		stats, err := dockerClient.GetContainerStats(c.Request.Context(), c.Param("id"))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, stats)
@@ -289,7 +291,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		reader, err := dockerClient.ContainerLogs(c.Request.Context(), c.Param("id"), "100")
 		if err != nil {
-			conn.WriteMessage(websocket.TextMessage, []byte("Error: "+err.Error()))
+			conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
 			return
 		}
 		defer reader.Close()
@@ -324,6 +326,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
 			return
 		}
+		if req.Domain != "" {
+			if err := validator.ValidateDomain(req.Domain); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid domain: %s", err.Error())})
+				return
+			}
+		}
 
 		session := deployManager.CreateSession()
 
@@ -332,7 +340,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			err := dockerClient.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryManager.GetAuthHeader)
 			if err == nil {
 				database.SaveService(db.Service{
-					ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
+					ID:        generateID("svc"),
 					Name:      req.Name,
 					Type:      "compose",
 					Domain:    req.Domain,
@@ -354,6 +362,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	// WebSocket endpoint for deploy log streaming (uses query param auth)
+	// Note: WebSocket cannot send custom headers during upgrade, so token
+	// must be passed as query param. The token is short-lived (30 days max)
+	// and the endpoint is read-only (streaming logs only).
 	r.GET("/api/deploy/stream/:id", func(c *gin.Context) {
 		// Auth via query param for WebSocket
 		token := c.Query("token")
@@ -361,9 +372,20 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
 			return
 		}
-		if _, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database); err != nil {
+		claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
+		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
+		}
+		_ = claims
+		// Verify origin matches to prevent CSRF via WebSocket
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			u, parseErr := url.Parse(origin)
+			if parseErr != nil || (u.Host != c.Request.Host && !strings.HasPrefix(u.Host, "localhost:")) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
+				return
+			}
 		}
 
 		session := deployManager.GetSession(c.Param("id"))
@@ -418,12 +440,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		if err := dockerClient.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryManager.GetAuthHeader); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
 		database.SaveService(db.Service{
-			ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
+			ID:        generateID("svc"),
 			Name:      req.Name,
 			Type:      "compose",
 			Domain:    req.Domain,
@@ -456,27 +478,33 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid repo: %s", err.Error())})
 			return
 		}
+		if req.Branch != "" {
+			if err := validator.ValidateBranchName(req.Branch); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid branch: %s", err.Error())})
+				return
+			}
+		}
 
 		info, err := git.Clone(req.Repo, req.Branch)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
 		if info.ComposeFile != "" {
 			composeData, err := os.ReadFile(info.ComposeFile)
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 				return
 			}
 			if err := dockerClient.DeployCompose(c.Request.Context(), info.Path, string(composeData), registryManager.GetAuthHeader); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 				return
 			}
 		}
 
 		database.SaveService(db.Service{
-			ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
+			ID:        generateID("svc"),
 			Name:      info.Path,
 			Type:      "git",
 			Repo:      req.Repo,
@@ -489,7 +517,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/services", func(c *gin.Context) {
 		services, err := database.ListServices()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, services)
@@ -521,7 +549,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/templates", func(c *gin.Context) {
 		templates, err := loadTemplates()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, templates)
@@ -530,7 +558,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/templates/:id", func(c *gin.Context) {
 		templates, err := loadTemplates()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		for _, t := range templates {
@@ -545,7 +573,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.POST("/templates/:id/deploy", func(c *gin.Context) {
 		templates, err := loadTemplates()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -566,10 +594,14 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 		c.ShouldBindJSON(&req)
 
-		// Validate environment variable names
-		for k := range req.Env {
+		// Validate environment variable names and values
+		for k, v := range req.Env {
 			if err := validator.ValidateEnvVarName(k); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var name '%s': %s", k, err.Error())})
+				return
+			}
+			if err := validator.ValidateEnvVarValue(v); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var value for '%s': %s", k, err.Error())})
 				return
 			}
 		}
@@ -581,12 +613,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
 		if err := dockerClient.DeployCompose(c.Request.Context(), name, compose, registryManager.GetAuthHeader); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
 		database.SaveService(db.Service{
-			ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
+			ID:        generateID("svc"),
 			Name:      name,
 			Type:      "template",
 			Compose:   compose,
@@ -600,7 +632,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.POST("/templates/:id/deploy/stream", func(c *gin.Context) {
 		templates, err := loadTemplates()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 
@@ -628,6 +660,14 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		compose := tpl.Compose
 		for k, v := range req.Env {
+			if err := validator.ValidateEnvVarName(k); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var name '%s': %s", k, err.Error())})
+				return
+			}
+			if err := validator.ValidateEnvVarValue(v); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var value for '%s': %s", k, err.Error())})
+				return
+			}
 			compose = strings.ReplaceAll(compose, "${"+k+"}", v)
 		}
 		// Replace port placeholders
@@ -661,7 +701,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			err := dockerClient.DeployComposeStreamed(context.Background(), name, compose, session, registryManager.GetAuthHeader)
 			if err == nil {
 				database.SaveService(db.Service{
-					ID:        fmt.Sprintf("svc-%d", time.Now().UnixNano()),
+					ID:        generateID("svc"),
 					Name:      name,
 					Type:      "template",
 					Domain:    req.Domain,
@@ -685,7 +725,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/images", func(c *gin.Context) {
 		images, err := dockerClient.ListImages(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, images)
@@ -703,13 +743,13 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		authHeader, _ := registryManager.GetAuthHeader(req.Image)
 		if authHeader != "" {
 			if err := dockerClient.PullImageWithAuth(c.Request.Context(), req.Image, authHeader); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 				return
 			}
 		} else {
 			// Fallback to unauthenticated pull
 			if err := dockerClient.PullImage(c.Request.Context(), req.Image); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 				return
 			}
 		}
@@ -718,7 +758,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.DELETE("/images/:id", func(c *gin.Context) {
 		if err := dockerClient.RemoveImage(c.Request.Context(), c.Param("id")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
@@ -734,7 +774,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 		files, err := dockerClient.ListFiles(c.Request.Context(), containerID, path)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, files)
@@ -743,7 +783,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/files/read", func(c *gin.Context) {
 		content, err := dockerClient.ReadFile(c.Request.Context(), c.Query("container"), c.Query("path"))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.String(http.StatusOK, content)
@@ -760,23 +800,29 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 		if err := dockerClient.WriteFile(c.Request.Context(), req.Container, req.Path, req.Content); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "written"})
 	})
 
 	protected.POST("/files/upload", func(c *gin.Context) {
+		// Limit upload size to 10MB
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 		file, err := c.FormFile("file")
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "file required (max 10MB)"})
 			return
 		}
 		src, _ := file.Open()
 		defer src.Close()
-		data, _ := io.ReadAll(src)
+		data, err := io.ReadAll(io.LimitReader(src, 10<<20))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read file"})
+			return
+		}
 		if err := dockerClient.WriteFile(c.Request.Context(), c.PostForm("container"), c.PostForm("path")+"/"+file.Filename, string(data)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "uploaded"})
@@ -785,16 +831,16 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/files/download", func(c *gin.Context) {
 		content, err := dockerClient.ReadFile(c.Request.Context(), c.Query("container"), c.Query("path"))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
-		c.Header("Content-Disposition", "attachment; filename="+filepath.Base(c.Query("path")))
+		c.Header("Content-Disposition", `attachment; filename="`+sanitizeFilename(filepath.Base(c.Query("path")))+`"`)
 		c.String(http.StatusOK, content)
 	})
 
 	protected.DELETE("/files", func(c *gin.Context) {
 		if err := dockerClient.DeleteFile(c.Request.Context(), c.Query("container"), c.Query("path")); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
@@ -812,7 +858,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 		if err := dockerClient.WriteFile(c.Request.Context(), containerID, req.Path, req.Content); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "written"})
@@ -843,7 +889,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/domains", func(c *gin.Context) {
 		domains, err := database.ListDomains()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, domains)
@@ -859,8 +905,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
+		if err := validator.ValidateDomain(req.Name); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid domain: %s", err.Error())})
+			return
+		}
 		domain := db.Domain{
-			ID:      fmt.Sprintf("dom-%d", time.Now().UnixNano()),
+			ID:      generateID("dom"),
 			Domain:  req.Name,
 			Service: req.Service,
 			Port:    req.Port,
@@ -890,7 +940,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 		if err := cfTunnel.Deploy(c.Request.Context(), req.Token); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "deployed"})
@@ -898,7 +948,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.DELETE("/tunnel", func(c *gin.Context) {
 		if err := cfTunnel.Remove(c.Request.Context()); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
@@ -1008,7 +1058,7 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 	// Check if container is running before starting the stream
 	detail, err := dockerClient.InspectContainer(ctx, containerID)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": fmt.Sprintf("container not found: %s", err.Error())})
+		conn.WriteJSON(gin.H{"error": "container not found"})
 		return
 	}
 	if detail.State != "running" {
@@ -1032,7 +1082,8 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 	// Send initial stats immediately
 	stats, err := dockerClient.GetContainerStats(ctx, containerID)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": err.Error()})
+		log.Printf("[ERROR] stats stream: %v", err)
+		conn.WriteJSON(gin.H{"error": "failed to get container stats"})
 		return
 	}
 	if err := conn.WriteJSON(stats); err != nil {
@@ -1046,7 +1097,8 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 		case <-ticker.C:
 			stats, err := dockerClient.GetContainerStats(ctx, containerID)
 			if err != nil {
-				conn.WriteJSON(gin.H{"error": err.Error()})
+				log.Printf("[ERROR] stats stream: %v", err)
+				conn.WriteJSON(gin.H{"error": "failed to get container stats"})
 				return
 			}
 			if err := conn.WriteJSON(stats); err != nil {
@@ -1054,6 +1106,33 @@ func handleStatsStream(c *gin.Context, dockerClient *docker.Client) {
 			}
 		}
 	}
+}
+
+// sanitizeFilename removes CR/LF and quotes from a filename to prevent
+// Content-Disposition header injection.
+func sanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, "\r", "")
+	name = strings.ReplaceAll(name, "\n", "")
+	name = strings.ReplaceAll(name, `"`, "'")
+	return name
+}
+
+// generateID creates a prefixed, unpredictable ID using crypto/rand.
+func generateID(prefix string) string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback should never happen
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
+	return fmt.Sprintf("%s-%x", prefix, b)
+}
+
+// internalError returns a generic error message to the client while logging
+// the real error. This prevents leaking internal details (file paths, DB
+// errors, etc.) in API responses.
+func internalError(c *gin.Context, err error) {
+	log.Printf("[ERROR] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 
 // extractFirstPort parses the compose YAML and extracts the first container port
@@ -1082,7 +1161,7 @@ func HandleGetVersion(c *gin.Context, versionService *update.VersionService) {
 
 	versionInfo, err := versionService.GetVersionInfo(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 

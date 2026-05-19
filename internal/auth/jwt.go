@@ -23,8 +23,10 @@ func GenerateJWT(userID, username, secret string, tokenVersion int) (string, err
 		Username:     username,
 		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(4 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Issuer:    "dockpal",
+			Subject:   userID,
 		},
 	}
 

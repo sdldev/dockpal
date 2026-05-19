@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -173,7 +174,11 @@ func (m *Manager) Create(req CreateRequest) (*CredentialSummary, error) {
 	}
 
 	// Create new credential
-	id := fmt.Sprintf("reg-%d", time.Now().UnixNano())
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return nil, fmt.Errorf("failed to generate ID: %w", err)
+	}
+	id := fmt.Sprintf("reg-%x", b)
 	cred := db.RegistryCredential{
 		ID:             id,
 		Registry:       req.Registry,

@@ -7,10 +7,25 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/moby/moby/client"
 )
+
+// containerIDRegex validates Docker container IDs (hex, 12-64 chars) and names.
+var containerIDRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,63}$`)
+
+// ValidateContainerID ensures a container ID/name is safe for exec operations.
+func ValidateContainerID(id string) error {
+	if id == "" {
+		return fmt.Errorf("container ID is required")
+	}
+	if !containerIDRegex.MatchString(id) {
+		return fmt.Errorf("invalid container ID format")
+	}
+	return nil
+}
 
 // ValidatePath ensures the path is safe for container file operations.
 // Returns the cleaned path or an error if the path is invalid.
@@ -68,6 +83,9 @@ func execCommand(ctx context.Context, cli *client.Client, containerID string, cm
 }
 
 func (c *Client) ListFiles(ctx context.Context, containerID, path string) ([]FileInfo, error) {
+	if err := ValidateContainerID(containerID); err != nil {
+		return nil, err
+	}
 	if path == "" {
 		path = "/"
 	}
@@ -75,7 +93,7 @@ func (c *Client) ListFiles(ctx context.Context, containerID, path string) ([]Fil
 	if err != nil {
 		return nil, err
 	}
-	output, err := execCommand(ctx, c.cli, containerID, []string{"sh", "-c", fmt.Sprintf("ls -la '%s'", cleanPath)})
+	output, err := execCommand(ctx, c.cli, containerID, []string{"ls", "-la", cleanPath})
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +123,9 @@ func (c *Client) ListFiles(ctx context.Context, containerID, path string) ([]Fil
 }
 
 func (c *Client) ReadFile(ctx context.Context, containerID, path string) (string, error) {
+	if err := ValidateContainerID(containerID); err != nil {
+		return "", err
+	}
 	cleanPath, err := ValidatePath(path)
 	if err != nil {
 		return "", err
@@ -113,6 +134,9 @@ func (c *Client) ReadFile(ctx context.Context, containerID, path string) (string
 }
 
 func (c *Client) WriteFile(ctx context.Context, containerID, path, content string) error {
+	if err := ValidateContainerID(containerID); err != nil {
+		return err
+	}
 	cleanPath, err := ValidatePath(path)
 	if err != nil {
 		return err
@@ -130,9 +154,19 @@ func (c *Client) WriteFile(ctx context.Context, containerID, path, content strin
 }
 
 func (c *Client) DeleteFile(ctx context.Context, containerID, path string) error {
+	if err := ValidateContainerID(containerID); err != nil {
+		return err
+	}
 	cleanPath, err := ValidatePath(path)
 	if err != nil {
 		return err
+	}
+	// Block deletion of critical paths
+	blocked := []string{"/", "/etc", "/bin", "/sbin", "/usr", "/var", "/boot", "/dev", "/proc", "/sys", "/lib", "/opt"}
+	for _, b := range blocked {
+		if cleanPath == b || cleanPath == b+"/" {
+			return fmt.Errorf("deleting %s is not allowed for safety", cleanPath)
+		}
 	}
 	_, err = execCommand(ctx, c.cli, containerID, []string{"rm", "-rf", cleanPath})
 	return err

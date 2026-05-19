@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -77,13 +80,18 @@ func NewUpdateServiceWithPaths(currentVersion, binPath, tempPath string) *Update
 
 // DownloadUpdate downloads the update binary from the given URL
 // Returns the path to the downloaded file
-func (s *UpdateService) DownloadUpdate(ctx context.Context, url string) (string, error) {
-	if url == "" {
+func (s *UpdateService) DownloadUpdate(ctx context.Context, rawURL string) (string, error) {
+	if rawURL == "" {
 		return "", fmt.Errorf("download URL cannot be empty")
 	}
 
+	// Validate URL to prevent SSRF
+	if err := ValidateDownloadURL(rawURL); err != nil {
+		return "", fmt.Errorf("invalid download URL: %w", err)
+	}
+
 	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -251,4 +259,43 @@ func (s *UpdateService) GetProgressStatus(status, message string, percentage int
 		Message:   message,
 		Percentage: percentage,
 	}
+}
+
+// ValidateDownloadURL ensures the download URL is safe:
+// - Must use https:// scheme
+// - Host must be github.com or a github.com subdomain
+// - No credentials in URL
+// - Resolves DNS and rejects private/internal IPs
+func ValidateDownloadURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format")
+	}
+
+	if u.Scheme != "https" {
+		return fmt.Errorf("only https URLs are allowed")
+	}
+
+	host := strings.ToLower(u.Hostname())
+	if host != "github.com" && !strings.HasSuffix(host, ".github.com") &&
+		host != "githubusercontent.com" && !strings.HasSuffix(host, ".githubusercontent.com") {
+		return fmt.Errorf("downloads are only allowed from github.com")
+	}
+
+	if u.User != nil {
+		return fmt.Errorf("URL must not contain credentials")
+	}
+
+	// Resolve DNS and reject private/internal IPs
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("failed to resolve host: %w", err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("download host resolves to private/internal IP")
+		}
+	}
+
+	return nil
 }

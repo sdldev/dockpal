@@ -43,12 +43,17 @@ func HandleLogin(c *gin.Context, jwtSecret string, database *db.DB) {
 	})
 }
 
-func HandleLogout(c *gin.Context) {
+func HandleLogout(c *gin.Context, database *db.DB) {
+	username := c.GetString("username")
+	if username != "" {
+		// Increment token version to invalidate all existing tokens
+		database.IncrementTokenVersion(username)
+	}
 	c.JSON(http.StatusOK, gin.H{"status": "logged out"})
 }
 
 type ResetPasswordRequest struct {
-	NewPassword string `json:"new_password" binding:"required"`
+	NewPassword string `json:"new_password" binding:"required,min=8"`
 }
 
 func HandleResetPassword(c *gin.Context, database *db.DB) {

@@ -41,9 +41,25 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		host := c.Request.Host
+
+		// Only allow same-origin requests or explicit host match
+		allowed := ""
+		if origin != "" {
+			// Allow if origin host matches request host (same-origin)
+			if strings.Contains(origin, "://"+host) || strings.Contains(origin, "://localhost:") {
+				allowed = origin
+			}
+		}
+
+		if allowed != "" {
+			c.Header("Access-Control-Allow-Origin", allowed)
+			c.Header("Access-Control-Allow-Credentials", "true")
+		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Header("Vary", "Origin")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)

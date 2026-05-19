@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"strings"
 	"sync"
@@ -43,7 +44,14 @@ func (dm *DeployManager) CreateSession() *DeploySession {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 
-	id := fmt.Sprintf("deploy-%d", time.Now().UnixNano())
+	var id string
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback — should never happen
+		id = fmt.Sprintf("deploy-%d", time.Now().UnixNano())
+	} else {
+		id = fmt.Sprintf("deploy-%x", b)
+	}
 	session := &DeploySession{
 		ID:     id,
 		Events: make(chan DeployEvent, 50),
