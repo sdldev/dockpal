@@ -1,0 +1,256 @@
+<!-- ===== FLEET DASHBOARD ===== -->
+<div x-show="currentPage === 'fleet'" x-cloak class="space-y-6">
+  
+  <!-- Page Header -->
+  <div class="mb-6 flex items-center justify-between">
+    <div>
+      <h2 class="text-xl font-semibold text-white">Fleet Dashboard</h2>
+      <p class="text-sm text-zinc-500 mt-0.5">Real-time status and deployment management across all Docker hosts</p>
+    </div>
+    <div class="flex gap-2">
+      <!-- Tab Selector for Fleet View -->
+      <button @click="fleetTab = 'overview'" :class="fleetTab === 'overview' ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'"
+        class="px-4 py-2 rounded-sm text-sm font-medium transition-all">Overview</button>
+      <button @click="fleetTab = 'containers'" :class="fleetTab === 'containers' ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'"
+        class="px-4 py-2 rounded-sm text-sm font-medium transition-all">All Containers</button>
+      <button @click="fleetTab = 'bulk-deploy'" :class="fleetTab === 'bulk-deploy' ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'"
+        class="px-4 py-2 rounded-sm text-sm font-medium transition-all">Bulk Deploy</button>
+    </div>
+  </div>
+
+  <!-- Fleet Overview Tab -->
+  <div x-show="fleetTab === 'overview'" class="space-y-6">
+    <!-- Fleet Summary KPI Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
+        <div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Instances</div>
+        <div class="text-3xl font-bold text-white" x-text="instances.length">0</div>
+        <div class="text-[10px] text-zinc-500 mt-1" x-text="instances.filter(i => i.status === 'online' || i.id === 'local').length + ' Online / ' + instances.filter(i => i.status === 'offline' && i.id !== 'local').length + ' Offline'"></div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
+        <div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Running Containers</div>
+        <div class="text-3xl font-bold text-emerald-400" x-text="fleetContainers.filter(c => c.state === 'running').length">0</div>
+        <div class="text-[10px] text-zinc-500 mt-1" x-text="'Across all online agents'"></div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
+        <div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total CPU Cores</div>
+        <div class="text-3xl font-bold text-blue-400" x-text="fleetInstances.reduce((acc, inst) => acc + (inst.sysInfo?.cpu_cores || inst.cpu_cores || 0), 0)">0</div>
+        <div class="text-[10px] text-zinc-500 mt-1">Fleet CPU capacity</div>
+      </div>
+      <div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
+        <div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Memory Capacity</div>
+        <div class="text-3xl font-bold text-violet-400" x-text="formatBytes(fleetInstances.reduce((acc, inst) => acc + (inst.sysInfo?.total_ram || inst.total_memory || 0), 0))">0</div>
+        <div class="text-[10px] text-zinc-500 mt-1">Fleet RAM capacity</div>
+      </div>
+    </div>
+
+    <!-- Instance Cards Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <template x-for="inst in fleetInstances" :key="inst.id">
+        <div class="bg-zinc-900 border border-zinc-800/80 rounded-sm p-5 flex flex-col justify-between space-y-4">
+          <!-- Instance Title / Status -->
+          <div class="flex items-center justify-between border-b border-zinc-800/60 pb-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full" :class="inst.id === 'local' || inst.status === 'online' ? 'bg-green-500' : 'bg-red-500'"></span>
+                <span class="font-semibold text-white text-sm" x-text="inst.id === 'local' ? 'This Server' : inst.name"></span>
+                <span class="text-[10px] bg-zinc-800 border border-zinc-700/60 text-zinc-400 px-1.5 py-0.5 rounded uppercase font-mono" x-text="inst.mode || 'local'"></span>
+              </div>
+              <p class="text-xs text-zinc-500 mt-1 font-mono" x-text="inst.id === 'local' ? 'Local Connection' : (inst.host || 'Edge Agent')"></p>
+            </div>
+            
+            <div class="text-right">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded" 
+                :class="inst.id === 'local' || inst.status === 'online' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'"
+                x-text="inst.id === 'local' || inst.status === 'online' ? 'ONLINE' : 'OFFLINE'">
+              </span>
+            </div>
+          </div>
+
+          <!-- Gauges (Only if Online/Local) -->
+          <template x-if="inst.id === 'local' || inst.status === 'online'">
+            <div class="grid grid-cols-3 gap-3">
+              <!-- CPU -->
+              <div class="space-y-1.5">
+                <div class="flex justify-between text-xs text-zinc-400">
+                  <span>CPU</span>
+                  <span class="font-semibold" x-text="(inst.sysInfo?.cpu_percent || 0).toFixed(1) + '%'"></span>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5">
+                  <div class="bg-blue-500 h-1.5 rounded-full" :style="'width: ' + Math.min(inst.sysInfo?.cpu_percent || 0, 100) + '%'"></div>
+                </div>
+              </div>
+
+              <!-- RAM -->
+              <div class="space-y-1.5">
+                <div class="flex justify-between text-xs text-zinc-400">
+                  <span>Memory</span>
+                  <span class="font-semibold" x-text="inst.sysInfo?.total_ram > 0 ? (inst.sysInfo.used_ram / inst.sysInfo.total_ram * 100).toFixed(1) + '%' : '0%'"></span>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5">
+                  <div class="bg-emerald-500 h-1.5 rounded-full" :style="'width: ' + (inst.sysInfo?.total_ram > 0 ? (inst.sysInfo.used_ram / inst.sysInfo.total_ram * 100) : 0) + '%'"></div>
+                </div>
+              </div>
+
+              <!-- Disk -->
+              <div class="space-y-1.5">
+                <div class="flex justify-between text-xs text-zinc-400">
+                  <span>Disk</span>
+                  <span class="font-semibold" x-text="inst.sysInfo?.total_disk > 0 ? (inst.sysInfo.used_disk / inst.sysInfo.total_disk * 100).toFixed(1) + '%' : '0%'"></span>
+                </div>
+                <div class="w-full bg-zinc-800 rounded-full h-1.5">
+                  <div class="bg-violet-500 h-1.5 rounded-full" :style="'width: ' + (inst.sysInfo?.total_disk > 0 ? (inst.sysInfo.used_disk / inst.sysInfo.total_disk * 100) : 0) + '%'"></div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="inst.id !== 'local' && inst.status !== 'online'">
+            <div class="py-4 text-center text-xs text-zinc-500">
+              Agent is unreachable. Ensure the agent service is running on the host.
+            </div>
+          </template>
+
+          <!-- Containers List Summary -->
+          <div class="border-t border-zinc-800/60 pt-3">
+            <div class="flex justify-between text-xs text-zinc-400 mb-2">
+              <span>Containers</span>
+              <span class="font-semibold" x-text="inst.containers ? inst.containers.length : 0"></span>
+            </div>
+            
+            <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+              <template x-for="c in (inst.containers || [])" :key="c.id">
+                <span class="px-2 py-0.5 bg-zinc-950 border border-zinc-800 rounded-full text-[10px] text-zinc-300 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full" :class="c.state === 'running' ? 'bg-green-500' : 'bg-zinc-600'"></span>
+                  <span x-text="c.name"></span>
+                </span>
+              </template>
+              <template x-if="!inst.containers || inst.containers.length === 0">
+                <span class="text-xs text-zinc-600">No containers</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Fleet Containers Tab -->
+  <div x-show="fleetTab === 'containers'" class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
+    <div class="p-4 border-b border-zinc-800 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-white">All Running Containers Across Fleet</h3>
+      <div class="flex gap-2">
+        <input type="text" x-model="fleetContainerSearch" placeholder="Search containers..."
+          class="px-3 py-1.5 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-600">
+      </div>
+    </div>
+    
+    <table class="w-full">
+      <thead>
+        <tr class="border-b border-zinc-800 bg-zinc-950/20">
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Name</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Instance</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Image</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Status</th>
+          <th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500 hidden sm:table-cell">Ports</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="c in fleetContainers.filter(c => !fleetContainerSearch || c.name.toLowerCase().includes(fleetContainerSearch.toLowerCase()) || c.instanceName.toLowerCase().includes(fleetContainerSearch.toLowerCase()))" :key="c.instanceId + '-' + c.id">
+          <tr class="border-b border-zinc-800/40 hover:bg-zinc-950/10">
+            <td class="px-4 py-2.5 text-sm font-medium text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full" :class="c.state === 'running' ? 'bg-green-500' : 'bg-red-500'"></span>
+              <span x-text="c.name"></span>
+            </td>
+            <td class="px-4 py-2.5 text-sm text-zinc-400" x-text="c.instanceName"></td>
+            <td class="px-4 py-2.5 text-sm text-zinc-500 font-mono truncate max-w-xs" x-text="c.image"></td>
+            <td class="px-4 py-2.5 text-sm text-zinc-400" x-text="c.status"></td>
+            <td class="px-4 py-2.5 text-sm text-zinc-500 hidden sm:table-cell" x-text="c.ports || '—'"></td>
+          </tr>
+        </template>
+        <template x-if="fleetContainers.length === 0">
+          <tr>
+            <td colspan="5" class="text-center py-10 text-zinc-600 text-sm">No containers found across the fleet.</td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Bulk Deploy Tab -->
+  <div x-show="fleetTab === 'bulk-deploy'" class="bg-zinc-900 border border-zinc-800 rounded-sm p-5 space-y-4">
+    <div>
+      <h3 class="text-base font-semibold text-white">Bulk Application Deployment</h3>
+      <p class="text-xs text-zinc-500 mt-1">Deploy a Docker Compose application to multiple target instances simultaneously.</p>
+    </div>
+
+    <form @submit.prevent="executeBulkDeploy()" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Input Fields -->
+        <div class="space-y-4">
+          <div class="space-y-1.5">
+            <label class="text-xs text-zinc-400">Application Name</label>
+            <input type="text" x-model="bulkDeployForm.name" required placeholder="my-fleet-app"
+              class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
+          </div>
+
+          <div class="space-y-1.5">
+            <label class="text-xs text-zinc-400">Compose YAML</label>
+            <textarea x-model="bulkDeployForm.compose" rows="10" required
+              class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 resize-none"
+              placeholder="services:&#10;  web:&#10;    image: nginx:alpine&#10;    ports:&#10;      - '8080:80'"></textarea>
+          </div>
+        </div>
+
+        <!-- Target Instances Checkboxes -->
+        <div class="space-y-3 bg-zinc-950 border border-zinc-800/60 rounded-sm p-4">
+          <label class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Select Deployment Targets</label>
+          <div class="space-y-2 max-h-64 overflow-y-auto">
+            <template x-for="inst in instances" :key="inst.id">
+              <div class="flex items-center gap-3 p-2 hover:bg-zinc-900 rounded cursor-pointer">
+                <input type="checkbox" :value="inst.id" x-model="bulkDeployForm.targets"
+                  :disabled="inst.id !== 'local' && inst.status !== 'online'"
+                  class="rounded bg-zinc-900 border-zinc-800 text-blue-600 focus:ring-blue-600">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-sm font-medium text-white" x-text="inst.id === 'local' ? 'This Server' : inst.name"></span>
+                    <span class="text-[10px] px-1.5 py-0.2 bg-zinc-800 text-zinc-500 rounded font-mono" x-text="inst.mode || 'local'"></span>
+                  </div>
+                  <span class="text-xs text-zinc-500 truncate" x-text="inst.host || 'Local Daemon'"></span>
+                </div>
+                <span class="text-xs" :class="inst.id === 'local' || inst.status === 'online' ? 'text-green-400' : 'text-red-400'"
+                  x-text="inst.id === 'local' || inst.status === 'online' ? 'Online' : 'Offline'"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Button -->
+      <div class="flex justify-end pt-2 border-t border-zinc-800/60">
+        <button type="submit" :disabled="bulkDeploying || bulkDeployForm.targets.length === 0 || !bulkDeployForm.name || !bulkDeployForm.compose"
+          class="px-6 py-2.5 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium flex items-center gap-2">
+          <svg x-show="bulkDeploying" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          <span x-text="bulkDeploying ? 'Deploying to Fleet...' : 'Deploy to Selected Targets'"></span>
+        </button>
+      </div>
+    </form>
+
+    <!-- Deployment Status Logs -->
+    <div x-show="bulkDeployLogs.length > 0" class="mt-4 space-y-2">
+      <h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Deployment Status Log</h4>
+      <div class="bg-black/50 border border-zinc-800 rounded-sm p-4 space-y-1.5 font-mono text-xs max-h-60 overflow-y-auto">
+        <template x-for="log in bulkDeployLogs">
+          <div class="flex justify-between items-start gap-4">
+            <span class="text-zinc-500" x-text="log.timestamp"></span>
+            <span class="flex-1" :class="log.type === 'error' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-blue-400'" x-text="log.message"></span>
+            <span class="text-[10px] uppercase font-semibold px-1.5 py-0.2 rounded"
+              :class="log.status === 'success' ? 'bg-green-500/10 text-green-400' : log.status === 'failed' ? 'bg-red-500/10 text-red-400' : 'bg-blue-500/10 text-blue-400'"
+              x-text="log.status"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+</div>

@@ -77,12 +77,9 @@ Dockpal.auth = {
       const resp = await this.api('GET', '/api/instances');
       if (resp && resp.ok) {
         const data = await resp.json();
-        // Ensure local instance is always in the list
-        const hasLocal = (data.instances || []).some(i => i.id === 'local');
-        if (!hasLocal) {
-          data.instances = [{ id: 'local', name: 'This Server', status: 'online' }, ...(data.instances || [])];
-        }
-        this.instances = data.instances || [];
+        const list = Array.isArray(data) ? data : (data.instances || []);
+        const hasLocal = list.some(i => i.id === 'local');
+        this.instances = hasLocal ? list : [{ id: 'local', name: 'This Server', status: 'online' }, ...list];
       }
     } catch (e) {
       console.error('Failed to load instances:', e);

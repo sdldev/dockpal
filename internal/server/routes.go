@@ -171,8 +171,56 @@ func loadTemplatesFromDir(dir string) ([]Template, error) {
 	return templates, nil
 }
 
+type roleRouterWrapper struct {
+	viewerGroup   *gin.RouterGroup
+	operatorGroup *gin.RouterGroup
+	adminGroup    *gin.RouterGroup
+}
+
+func (r *roleRouterWrapper) GET(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return r.viewerGroup.GET(path, handlers...)
+}
+
+func (r *roleRouterWrapper) POST(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	if path == "/system/update" {
+		return r.adminGroup.POST(path, handlers...)
+	}
+	return r.operatorGroup.POST(path, handlers...)
+}
+
+func (r *roleRouterWrapper) PUT(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return r.operatorGroup.PUT(path, handlers...)
+}
+
+func (r *roleRouterWrapper) DELETE(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return r.operatorGroup.DELETE(path, handlers...)
+}
+
 func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager) {
 	api := r.Group("/api")
+
+	// API Docs (Redoc + OpenAPI spec)
+	api.GET("/docs/swagger.json", func(c *gin.Context) {
+		c.Header("Content-Type", "application/json")
+		c.String(http.StatusOK, SwaggerJSON)
+	})
+	api.GET("/docs", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dockpal API Documentation</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
+    <style>body { margin: 0; padding: 0; }</style>
+  </head>
+  <body>
+    <redoc spec-url='/api/docs/swagger.json'></redoc>
+    <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"> </script>
+  </body>
+</html>`)
+	})
 
 	// Rate limiters
 	loginRateLimiter := NewRateLimiter()
@@ -182,20 +230,43 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	api.POST("/login", RateLimitMiddleware(loginRateLimiter), func(c *gin.Context) { auth.HandleLogin(c, jwtSecret, database) })
 	api.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
 
-	protected := api.Group("")
-	protected.Use(AuthMiddleware(jwtSecret, database))
+	// Webhooks public trigger
+	api.POST("/webhooks/deploy/:webhook_id", HandleWebhookDeploy(database, agentMgr, jwtSecret))
+
+	baseProtected := api.Group("")
+	baseProtected.Use(AuthMiddleware(jwtSecret, database))
+
+	viewerGroup := baseProtected.Group("")
+	viewerGroup.Use(RequireRole(auth.RoleViewer))
+
+	operatorGroup := baseProtected.Group("")
+	operatorGroup.Use(RequireRole(auth.RoleOperator))
+
+	adminGroup := baseProtected.Group("")
+	adminGroup.Use(RequireRole(auth.RoleAdmin))
+
+	protected := &roleRouterWrapper{
+		viewerGroup:   viewerGroup,
+		operatorGroup: operatorGroup,
+		adminGroup:    adminGroup,
+	}
 
 	// Auth protected
 	protected.POST("/auth/reset-password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
+	// Webhooks management
+	protected.GET("/webhooks", HandleListWebhooks(database))
+	protected.POST("/webhooks", HandleCreateWebhook(database))
+	protected.DELETE("/webhooks/:webhook_id", HandleDeleteWebhook(database))
+
 	// Instance management routes (new)
-	RegisterInstanceRoutes(protected, database, agentMgr, jwtSecret)
+	RegisterInstanceRoutes(baseProtected, database, agentMgr, jwtSecret)
 
 	// Agent WebSocket endpoint (unauthenticated — agent uses token in message)
 	r.GET("/api/agent/connect", HandleAgentConnect(database, agentMgr))
 
 	// Instance-scoped operations (new route group)
-	instances := protected.Group("/instances/:instance_id")
+	instances := baseProtected.Group("/instances/:instance_id")
 	instances.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
 	RegisterInstanceScopedRoutes(instances)
 
@@ -583,7 +654,10 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
-		_ = claims
+		if !auth.HasRole(claims.Role, auth.RoleViewer) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			return
+		}
 		// Verify origin matches to prevent CSRF via WebSocket
 		origin := c.GetHeader("Origin")
 		if origin != "" {
@@ -642,7 +716,10 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
-		_ = claims
+		if !auth.HasRole(claims.Role, auth.RoleViewer) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			return
+		}
 		origin := c.GetHeader("Origin")
 		if origin != "" {
 			u, parseErr := url.Parse(origin)
@@ -1349,6 +1426,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.POST("/system/update", func(c *gin.Context) {
 		HandleUpdate(c, updateService, database)
 	})
+
+	// Audit logs (requires admin authentication)
+	adminGroup.GET("/audit-logs", handleListAuditLogs(database))
 
 	// WebSocket stats streaming
 	protected.GET("/containers/:id/stats/ws", func(c *gin.Context) {

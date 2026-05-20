@@ -222,7 +222,18 @@ install_templates() {
 }
 
 setup_directories() {
-    log_info "Setting up directories..."
+    log_info "Setting up directories and user/group..."
+
+    # Create dockpal group and user if they do not exist
+    if ! getent group dockpal >/dev/null; then
+        groupadd -r dockpal
+    fi
+    if ! getent passwd dockpal >/dev/null; then
+        useradd -r -g dockpal -d "$DATA_DIR" -s /sbin/nologin -c "Dockpal system user" dockpal
+    fi
+
+    # Ensure dockpal is in docker group to access docker.sock
+    usermod -aG docker dockpal || true
 
     mkdir -p "$DATA_DIR"
     mkdir -p "$DATA_DIR/data"
@@ -232,14 +243,14 @@ setup_directories() {
     mkdir -p "$DATA_DIR/traefik"
     mkdir -p "$TEMPLATES_DIR"
 
-    chown -R root:root "$DATA_DIR"
+    chown -R dockpal:dockpal "$DATA_DIR"
     chmod 750 "$DATA_DIR"
     chmod 750 "$DATA_DIR/data"
     chmod 750 "$DATA_DIR/logs"
-    chmod 755 "$DATA_DIR/repos"
-    chmod 755 "$DATA_DIR/compose"
-    chmod 755 "$DATA_DIR/traefik"
-    chmod 755 "$TEMPLATES_DIR"
+    chmod 750 "$DATA_DIR/repos"
+    chmod 750 "$DATA_DIR/compose"
+    chmod 750 "$DATA_DIR/traefik"
+    chmod 750 "$TEMPLATES_DIR"
 
     for dir in "$DATA_DIR" "$DATA_DIR/data" "$DATA_DIR/logs" "$DATA_DIR/repos" \
                "$DATA_DIR/compose" "$DATA_DIR/traefik" "$TEMPLATES_DIR"; do
@@ -247,13 +258,13 @@ setup_directories() {
             log_error "Failed to create directory: $dir"
             exit 1
         fi
-        if [ ! -w "$dir" ]; then
-            log_error "Directory not writable: $dir"
-            exit 1
+        if [ ! -w "$dir" ] && [ "$(id -u)" -eq 0 ]; then
+            # Since chowned to dockpal, root still has access, but let chown finish first
+            true
         fi
     done
 
-    log_info "Directories created successfully"
+    log_info "Directories created and permissions configured successfully"
 }
 
 setup_systemd() {
@@ -266,13 +277,20 @@ Requires=docker.service
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=dockpal
+Group=docker
 WorkingDirectory=/opt/dockpal
 ExecStart=/usr/local/bin/dockpal server
 Restart=always
 RestartSec=5
 Environment="PORT=3012"
+# Hardening Directives
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/dockpal
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target

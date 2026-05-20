@@ -20,7 +20,8 @@ jobs:
 
       - name: Build binary
         run: |
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dockpal-linux-amd64 .
+          VERSION=${{ github.ref_name }}
+          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o dockpal-linux-amd64 .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

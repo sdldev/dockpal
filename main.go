@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/fs"
 	"log"
@@ -28,8 +29,13 @@ const (
 	defaultDataDir = "/opt/dockpal/data"
 	defaultDBPath  = "/opt/dockpal/data/dockpal.db"
 	defaultLogPath = "/opt/dockpal/data/dockpal.log"
-	version        = "0.8.0"
 )
+
+var version = "0.9.0-dev"
+
+func init() {
+	version = strings.TrimPrefix(version, "v")
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -37,7 +43,7 @@ func main() {
 		fmt.Printf("Version: %s\n", version)
 		fmt.Println()
 		fmt.Println("Usage:")
-		fmt.Println("  dockpal server          Start the HTTP server")
+		fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
 		fmt.Println("  dockpal reset-password  Reset admin password")
 		fmt.Println("  dockpal version         Show version")
 		fmt.Println("  dockpal help            Show this help")
@@ -46,7 +52,20 @@ func main() {
 
 	switch os.Args[1] {
 	case "server":
-		runServer()
+		serverCmd := flag.NewFlagSet("server", flag.ExitOnError)
+
+		envTLS := os.Getenv("DOCKPAL_TLS") == "true"
+		envTLSCert := os.Getenv("DOCKPAL_TLS_CERT")
+		envTLSKey := os.Getenv("DOCKPAL_TLS_KEY")
+		envTLSDomain := os.Getenv("DOCKPAL_TLS_DOMAIN")
+
+		tls := serverCmd.Bool("tls", envTLS, "Enable TLS (HTTPS)")
+		tlsCert := serverCmd.String("tls-cert", envTLSCert, "Path to TLS certificate file")
+		tlsKey := serverCmd.String("tls-key", envTLSKey, "Path to TLS private key file")
+		tlsDomain := serverCmd.String("tls-domain", envTLSDomain, "Domain name for Let's Encrypt autocert")
+
+		serverCmd.Parse(os.Args[2:])
+		runServer(*tls, *tlsCert, *tlsKey, *tlsDomain)
 	case "reset-password":
 		resetPassword()
 	case "version":
@@ -56,7 +75,7 @@ func main() {
 		fmt.Printf("Version: %s\n", version)
 		fmt.Println()
 		fmt.Println("Commands:")
-		fmt.Println("  server          Start the HTTP server")
+		fmt.Println("  server          Start the HTTP/HTTPS server")
 		fmt.Println("  reset-password  Reset admin password")
 		fmt.Println("  version         Show version")
 		fmt.Println("  help            Show this help")
@@ -66,7 +85,7 @@ func main() {
 	}
 }
 
-func runServer() {
+func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
 	if dataDir == "" {
 		dataDir = defaultDataDir
@@ -129,7 +148,7 @@ func runServer() {
 	healthMonitor.Start()
 	defer healthMonitor.Stop()
 
-	srv := server.New()
+	srv := server.New(tls, tlsCert, tlsKey, tlsDomain, dataDir)
 	srv.Router().Use(server.CORSMiddleware())
 
 	// Initialize version service

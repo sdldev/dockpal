@@ -27,6 +27,7 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 				}
 				c.Set("user_id", claims.UserID)
 				c.Set("username", claims.Username)
+				c.Set("role", claims.Role)
 				c.Next()
 				return
 			}
@@ -52,6 +53,25 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
+		c.Set("role", claims.Role)
+		c.Next()
+	}
+}
+
+func RequireRole(requiredRole string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		roleVal, exists := c.Get("role")
+		if !exists {
+			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions: no role assigned"})
+			c.Abort()
+			return
+		}
+		userRole, ok := roleVal.(string)
+		if !ok || !auth.HasRole(userRole, requiredRole) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
+			c.Abort()
+			return
+		}
 		c.Next()
 	}
 }

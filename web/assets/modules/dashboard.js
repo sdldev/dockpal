@@ -53,6 +53,7 @@ Dockpal.dashboard = {
 
   async loadPageData(page) {
     if (page === 'dashboard') await this.loadDashboard();
+    else if (page === 'fleet') await this.loadFleet();
     else if (page === 'templates') await this.loadTemplates();
     else if (page === 'images') await this.loadImages();
     else if (page === 'containers') await this.loadDashboard();

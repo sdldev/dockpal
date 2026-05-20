@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/sdldev/dockpal/internal/agent"
+	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/registry"
 
@@ -66,13 +67,13 @@ type TestResult struct {
 
 // RegisterInstanceRoutes adds instance CRUD and enrollment endpoints.
 func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string) {
-	g.POST("/instances", handleCreateInstance(database, jwtSecret))
-	g.GET("/instances", handleListInstances(database))
-	g.GET("/instances/:instance_id", handleGetInstance(database))
-	g.PUT("/instances/:instance_id", handleUpdateInstance(database))
-	g.DELETE("/instances/:instance_id", handleDeleteInstance(database, agentMgr))
-	g.POST("/instances/:instance_id/test", handleTestInstance(agentMgr))
-	g.POST("/instances/:instance_id/rotate-token", handleRotateToken(database, jwtSecret))
+	g.POST("/instances", RequireRole(auth.RoleAdmin), handleCreateInstance(database, jwtSecret))
+	g.GET("/instances", RequireRole(auth.RoleViewer), handleListInstances(database))
+	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database))
+	g.PUT("/instances/:instance_id", RequireRole(auth.RoleAdmin), handleUpdateInstance(database))
+	g.DELETE("/instances/:instance_id", RequireRole(auth.RoleAdmin), handleDeleteInstance(database, agentMgr))
+	g.POST("/instances/:instance_id/test", RequireRole(auth.RoleOperator), handleTestInstance(agentMgr))
+	g.POST("/instances/:instance_id/rotate-token", RequireRole(auth.RoleAdmin), handleRotateToken(database, jwtSecret))
 }
 
 // handleCreateInstance creates a new instance with a generated agent token.
@@ -149,6 +150,8 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save instance"})
 			return
 		}
+
+		LogAudit(c, database, "instance.create", instanceID, "success", fmt.Sprintf("Created instance '%s' in mode '%s'", req.Name, req.Mode))
 
 		// Generate install command
 		serverHost := c.Request.Host
@@ -274,6 +277,8 @@ func handleUpdateInstance(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		LogAudit(c, database, "instance.update", id, "success", fmt.Sprintf("Updated instance: Name='%s', Host='%s', Port=%d", inst.Name, inst.Host, inst.Port))
+
 		c.JSON(http.StatusOK, InstanceResponse{
 			ID:            inst.ID,
 			Name:          inst.Name,
@@ -332,6 +337,8 @@ func handleDeleteInstance(database *db.DB, agentMgr *agent.Manager) gin.HandlerF
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete instance"})
 			return
 		}
+
+		LogAudit(c, database, "instance.delete", id, "success", fmt.Sprintf("Deleted instance '%s'", id))
 
 		c.JSON(http.StatusOK, gin.H{"message": "instance deleted"})
 	}
@@ -421,6 +428,8 @@ func handleRotateToken(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update instance"})
 			return
 		}
+
+		LogAudit(c, database, "instance.rotate_token", id, "success", fmt.Sprintf("Rotated agent enrollment token for instance '%s'", id))
 
 		// Generate install command
 		serverHost := c.Request.Host

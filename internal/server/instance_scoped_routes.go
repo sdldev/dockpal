@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/sdldev/dockpal/internal/agent"
+	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/git"
@@ -25,48 +26,48 @@ import (
 // These routes expect the InstanceMiddleware to have already run and set agent_client and instance_id in context.
 func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	// Container routes
-	g.GET("/containers", handleInstanceListContainers)
-	g.GET("/containers/:id", handleInstanceInspectContainer)
-	g.POST("/containers/:id/start", handleInstanceStartContainer)
-	g.POST("/containers/:id/stop", handleInstanceStopContainer)
-	g.POST("/containers/:id/restart", handleInstanceRestartContainer)
-	g.DELETE("/containers/:id", handleInstanceRemoveContainer)
-	g.PUT("/containers/:id", handleInstanceEditContainer)
-	g.GET("/containers/:id/stats", handleInstanceContainerStats)
-	g.GET("/containers/:id/logs", handleInstanceContainerLogs)
+	g.GET("/containers", RequireRole(auth.RoleViewer), handleInstanceListContainers)
+	g.GET("/containers/:id", RequireRole(auth.RoleViewer), handleInstanceInspectContainer)
+	g.POST("/containers/:id/start", RequireRole(auth.RoleOperator), handleInstanceStartContainer)
+	g.POST("/containers/:id/stop", RequireRole(auth.RoleOperator), handleInstanceStopContainer)
+	g.POST("/containers/:id/restart", RequireRole(auth.RoleOperator), handleInstanceRestartContainer)
+	g.DELETE("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceRemoveContainer)
+	g.PUT("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceEditContainer)
+	g.GET("/containers/:id/stats", RequireRole(auth.RoleViewer), handleInstanceContainerStats)
+	g.GET("/containers/:id/logs", RequireRole(auth.RoleViewer), handleInstanceContainerLogs)
 
 	// Deploy routes
-	g.POST("/deploy/stream", handleInstanceDeployStream)
-	g.POST("/deploy/compose", handleInstanceDeployCompose)
-	g.POST("/deploy/git", handleInstanceDeployGit)
-	g.POST("/templates/:id/deploy/stream", handleInstanceTemplateDeployStream)
+	g.POST("/deploy/stream", RequireRole(auth.RoleOperator), handleInstanceDeployStream)
+	g.POST("/deploy/compose", RequireRole(auth.RoleOperator), handleInstanceDeployCompose)
+	g.POST("/deploy/git", RequireRole(auth.RoleOperator), handleInstanceDeployGit)
+	g.POST("/templates/:id/deploy/stream", RequireRole(auth.RoleOperator), handleInstanceTemplateDeployStream)
 
 	// Image routes
-	g.GET("/images", handleInstanceListImages)
-	g.POST("/images/pull", handleInstancePullImage)
-	g.DELETE("/images/:id", handleInstanceRemoveImage)
+	g.GET("/images", RequireRole(auth.RoleViewer), handleInstanceListImages)
+	g.POST("/images/pull", RequireRole(auth.RoleOperator), handleInstancePullImage)
+	g.DELETE("/images/:id", RequireRole(auth.RoleOperator), handleInstanceRemoveImage)
 
 	// Host routes
-	g.GET("/host/info", handleInstanceHostInfo)
-	g.GET("/host/stats", handleInstanceHostStats)
-	g.GET("/system/info", handleInstanceSystemInfo)
+	g.GET("/host/info", RequireRole(auth.RoleViewer), handleInstanceHostInfo)
+	g.GET("/host/stats", RequireRole(auth.RoleViewer), handleInstanceHostStats)
+	g.GET("/system/info", RequireRole(auth.RoleViewer), handleInstanceSystemInfo)
 
 	// Service routes
-	g.GET("/services", handleInstanceListServices)
-	g.DELETE("/services/:id", handleInstanceDeleteService)
+	g.GET("/services", RequireRole(auth.RoleViewer), handleInstanceListServices)
+	g.DELETE("/services/:id", RequireRole(auth.RoleOperator), handleInstanceDeleteService)
 
 	// Domain routes
-	g.GET("/domains", handleInstanceListDomains)
-	g.POST("/domains", handleInstanceCreateDomain)
-	g.DELETE("/domains/:id", handleInstanceDeleteDomain)
+	g.GET("/domains", RequireRole(auth.RoleViewer), handleInstanceListDomains)
+	g.POST("/domains", RequireRole(auth.RoleOperator), handleInstanceCreateDomain)
+	g.DELETE("/domains/:id", RequireRole(auth.RoleOperator), handleInstanceDeleteDomain)
 
 	// Registry routes
-	g.GET("/registries", handleInstanceListRegistries)
-	g.POST("/registries", handleInstanceCreateRegistry)
-	g.GET("/registries/:id", handleInstanceGetRegistry)
-	g.PUT("/registries/:id", handleInstanceUpdateRegistry)
-	g.DELETE("/registries/:id", handleInstanceDeleteRegistry)
-	g.POST("/registries/:id/test", handleInstanceTestRegistry)
+	g.GET("/registries", RequireRole(auth.RoleViewer), handleInstanceListRegistries)
+	g.POST("/registries", RequireRole(auth.RoleOperator), handleInstanceCreateRegistry)
+	g.GET("/registries/:id", RequireRole(auth.RoleViewer), handleInstanceGetRegistry)
+	g.PUT("/registries/:id", RequireRole(auth.RoleOperator), handleInstanceUpdateRegistry)
+	g.DELETE("/registries/:id", RequireRole(auth.RoleOperator), handleInstanceDeleteRegistry)
+	g.POST("/registries/:id/test", RequireRole(auth.RoleOperator), handleInstanceTestRegistry)
 }
 
 // handleInstanceListContainers lists all containers for the instance.

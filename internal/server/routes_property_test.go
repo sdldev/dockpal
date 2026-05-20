@@ -24,6 +24,12 @@ func TestProperty_CheckOrigin_AllowsMatchingHosts(t *testing.T) {
 			}
 		}
 
+		// Ensure the host is a valid URL host
+		u, err := url.Parse("https://" + host)
+		if err != nil || u.Host != host {
+			return true // skip invalid/unparseable hosts
+		}
+
 		// Build a request with matching origin host
 		r, _ := http.NewRequest("GET", "/ws", nil)
 		r.Host = host

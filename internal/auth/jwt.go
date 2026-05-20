@@ -14,14 +14,16 @@ type Claims struct {
 	UserID       string `json:"user_id"`
 	Username     string `json:"username"`
 	TokenVersion int    `json:"token_version"`
+	Role         string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-func GenerateJWT(userID, username, secret string, tokenVersion int) (string, error) {
+func GenerateJWT(userID, username, secret, role string, tokenVersion int) (string, error) {
 	claims := Claims{
 		UserID:       userID,
 		Username:     username,
 		TokenVersion: tokenVersion,
+		Role:         role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(4 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

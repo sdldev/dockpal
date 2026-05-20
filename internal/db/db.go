@@ -14,7 +14,20 @@ type User struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"password_hash"`
 	TokenVersion int    `json:"token_version"`
+	Role         string `json:"role"`
 	CreatedAt    int64  `json:"created_at"`
+}
+
+type AuditLog struct {
+	ID        string `json:"id"`
+	Timestamp int64  `json:"timestamp"`
+	Username  string `json:"username"`
+	UserRole  string `json:"user_role"`
+	Action    string `json:"action"`
+	Resource  string `json:"resource"`
+	Status    string `json:"status"`
+	Details   string `json:"details"`
+	IPAddress string `json:"ip_address"`
 }
 
 type Service struct {
@@ -75,6 +88,8 @@ var (
 	bucketDomains    = []byte("domains")
 	bucketRegistries = []byte("registries")
 	bucketInstances  = []byte("instances")
+	bucketAuditLogs  = []byte("audit_logs")
+	bucketWebhooks   = []byte("webhooks")
 )
 
 func New(path string) (*DB, error) {
@@ -84,7 +99,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -125,6 +140,14 @@ func (d *DB) GetUser(username string) (*User, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Normalize empty role for backward compatibility
+	if user.Role == "" {
+		if user.Username == "admin" {
+			user.Role = "admin"
+		} else {
+			user.Role = "viewer"
+		}
 	}
 	return &user, nil
 }
@@ -190,6 +213,7 @@ func (d *DB) EnsureDefaultAdmin(passwordHash string) error {
 			ID:           "admin-001",
 			Username:     "admin",
 			PasswordHash: passwordHash,
+			Role:         "admin",
 			CreatedAt:    time.Now().Unix(),
 		})
 	}
@@ -567,4 +591,57 @@ func (d *DB) EnsureLocalInstance() error {
 		return err
 	}
 	return nil
+}
+
+// Audit Logs
+func (d *DB) SaveAuditLog(log AuditLog) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketAuditLogs)
+		data, err := json.Marshal(log)
+		if err != nil {
+			return err
+		}
+		// Key: <unix_nano>_<id>
+		key := fmt.Sprintf("%019d_%s", time.Now().UnixNano(), log.ID)
+		return b.Put([]byte(key), data)
+	})
+}
+
+func (d *DB) ListAuditLogs(limit, offset int) ([]AuditLog, int, error) {
+	var logs []AuditLog
+	var total int
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketAuditLogs)
+		c := b.Cursor()
+		
+		// Count total
+		total = 0
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			total++
+		}
+		
+		if offset >= total {
+			return nil
+		}
+		
+		// Iterate backwards to get newest first
+		skipped := 0
+		var k, v []byte
+		for k, v = c.Last(); k != nil; k, v = c.Prev() {
+			if skipped < offset {
+				skipped++
+				continue
+			}
+			if len(logs) >= limit && limit > 0 {
+				break
+			}
+			var logEntry AuditLog
+			if err := json.Unmarshal(v, &logEntry); err != nil {
+				return err
+			}
+			logs = append(logs, logEntry)
+		}
+		return nil
+	})
+	return logs, total, err
 }

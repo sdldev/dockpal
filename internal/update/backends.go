@@ -47,15 +47,18 @@ type serviceController interface {
 type systemctlController struct{}
 
 func (c *systemctlController) Stop(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "sudo", "systemctl", "stop", "dockpal")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return execError(err, output)
-	}
+	// Stop is a no-op in production because stopping the service from within
+	// itself would kill the updater process before it replaces the binary.
+	// The binary swap is fully allowed on Linux while running, and the service
+	// reload/restart is initiated in the Start phase.
 	return nil
 }
 
 func (c *systemctlController) Start(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "sudo", "systemctl", "start", "dockpal")
+	// Asynchronously trigger service restart with --no-block.
+	// This schedules the restart with systemd immediately and exits.
+	// Dockpal can finish reporting the completion event before systemd halts and restarts it.
+	cmd := exec.CommandContext(ctx, "sudo", "systemctl", "restart", "dockpal", "--no-block")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return execError(err, output)
 	}

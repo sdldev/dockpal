@@ -5,13 +5,20 @@ Requires=docker.service
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=dockpal
+Group=docker
 WorkingDirectory=/opt/dockpal
 ExecStart=/usr/local/bin/dockpal server
 Restart=always
 RestartSec=5
 Environment="PORT=3012"
+# Hardening Directives
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/dockpal
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target

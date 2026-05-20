@@ -94,7 +94,7 @@ func TestProperty6_TokenVersionRoundTrip(t *testing.T) {
 		secret := "test-secret-key-for-property-testing"
 
 		// Generate a token with the given version
-		tokenStr, err := GenerateJWT("user-123", "testuser", secret, params.tokenVersion)
+		tokenStr, err := GenerateJWT("user-123", "testuser", secret, "admin", params.tokenVersion)
 		if err != nil {
 			return false
 		}
@@ -164,7 +164,7 @@ func TestProperty6_TokenVersionRoundTrip_WithDB(t *testing.T) {
 		}
 
 		// Generate JWT with matching version → should validate
-		tokenStr, err := GenerateJWT("user-123", "testuser", secret, params.tokenVersion)
+		tokenStr, err := GenerateJWT("user-123", "testuser", secret, "admin", params.tokenVersion)
 		if err != nil {
 			return false
 		}
@@ -178,7 +178,7 @@ func TestProperty6_TokenVersionRoundTrip_WithDB(t *testing.T) {
 		}
 
 		// Generate JWT with mismatched version → should reject
-		mismatchToken, err := GenerateJWT("user-123", "testuser", secret, params.mismatchVersion)
+		mismatchToken, err := GenerateJWT("user-123", "testuser", secret, "admin", params.mismatchVersion)
 		if err != nil {
 			return false
 		}
