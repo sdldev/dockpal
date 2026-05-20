@@ -410,39 +410,15 @@ func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML str
 
 // StopCompose stops all containers belonging to a compose project.
 func (c *Client) StopCompose(ctx context.Context, projectName string) error {
-	// LEGACY-DOCKARA: dual-read backward-compat untuk container Dockara pra-rebrand; akan dihapus pada v0.3.0
-	f1 := make(client.Filters)
-	f1 = f1.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
-	result1, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f1})
+	f := make(client.Filters)
+	f = f.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
+	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
 	if err != nil {
 		return err
-	}
-
-	f2 := make(client.Filters)
-	f2 = f2.Add("label", fmt.Sprintf("dockara.project=%s", projectName))
-	result2, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f2})
-	if err != nil {
-		return err
-	}
-
-	// Deduplicate by container ID
-	seen := make(map[string]bool)
-	var allContainers []container.Summary
-	for _, ctr := range result1.Items {
-		if !seen[ctr.ID] {
-			seen[ctr.ID] = true
-			allContainers = append(allContainers, ctr)
-		}
-	}
-	for _, ctr := range result2.Items {
-		if !seen[ctr.ID] {
-			seen[ctr.ID] = true
-			allContainers = append(allContainers, ctr)
-		}
 	}
 
 	timeout := 10
-	for _, ctr := range allContainers {
+	for _, ctr := range result.Items {
 		c.cli.ContainerStop(ctx, ctr.ID, client.ContainerStopOptions{Timeout: &timeout})
 	}
 
@@ -451,38 +427,14 @@ func (c *Client) StopCompose(ctx context.Context, projectName string) error {
 
 // RemoveCompose removes all containers and files belonging to a compose project.
 func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {
-	// LEGACY-DOCKARA: dual-read backward-compat untuk container Dockara pra-rebrand; akan dihapus pada v0.3.0
-	f1 := make(client.Filters)
-	f1 = f1.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
-	result1, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f1})
+	f := make(client.Filters)
+	f = f.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
+	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
 	if err != nil {
 		return err
 	}
 
-	f2 := make(client.Filters)
-	f2 = f2.Add("label", fmt.Sprintf("dockara.project=%s", projectName))
-	result2, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f2})
-	if err != nil {
-		return err
-	}
-
-	// Deduplicate by container ID
-	seen := make(map[string]bool)
-	var allContainers []container.Summary
-	for _, ctr := range result1.Items {
-		if !seen[ctr.ID] {
-			seen[ctr.ID] = true
-			allContainers = append(allContainers, ctr)
-		}
-	}
-	for _, ctr := range result2.Items {
-		if !seen[ctr.ID] {
-			seen[ctr.ID] = true
-			allContainers = append(allContainers, ctr)
-		}
-	}
-
-	for _, ctr := range allContainers {
+	for _, ctr := range result.Items {
 		c.cli.ContainerRemove(ctx, ctr.ID, client.ContainerRemoveOptions{Force: true})
 	}
 

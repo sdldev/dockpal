@@ -32,15 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/installer.sh | 
 
 This installs Dockpal as a systemd service on port `3012`. Open `http://localhost:3012` and log in with `admin` / `admin`.
 
----
-
-## Upgrading from Dockara
-
-If you're upgrading from Dockara, the installer automatically handles the migration:
-
-- **Data migration**: The installer copies all data from `/opt/dockara/` to `/opt/dockpal/`
-- **Service migration**: The installer replaces the systemd unit `dockara.service` with `dockpal.service` and enables it
-- **Binary cleanup**: The installer removes the old binary at `/usr/local/bin/dockara`
+> **Note:** The installer supports Debian/Ubuntu on `linux/amd64` only.
 
 ---
 

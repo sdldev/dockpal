@@ -16,5 +16,3 @@ logs/security/
 # Binary builds
 dockpal
 dockpal-linux-amd64
-dockpal-linux-arm64
-dockara

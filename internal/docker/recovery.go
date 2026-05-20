@@ -10,9 +10,7 @@ import (
 )
 
 // HealthMonitor periodically checks for containers labeled with
-// dockpal.auto-recover=true (or dockara.auto-recover=true for backward compatibility)
-// that are in exited/dead state and restarts them. Uses dual-read to support
-// containers deployed by both Dockara (pre-rebrand) and Dockpal.
+// dockpal.auto-recover=true that are in exited/dead state and restarts them.
 type HealthMonitor struct {
 	client     *Client
 	ticker     *time.Ticker
@@ -55,8 +53,7 @@ func (hm *HealthMonitor) run() {
 
 func (hm *HealthMonitor) check() {
 	ctx := context.Background()
-	// LEGACY-DOCKARA: backward-compat read untuk container Dockara pra-rebrand
-	containers, err := hm.client.ListContainersWithAnyLabel(ctx, []string{"dockpal.auto-recover=true", "dockara.auto-recover=true"})
+	containers, err := hm.client.ListContainersWithLabel(ctx, "dockpal.auto-recover=true")
 	if err != nil {
 		log.Printf("[recovery] failed to list containers: %v", err)
 		return
@@ -124,22 +121,4 @@ func (c *Client) ListContainersWithLabel(ctx context.Context, label string) ([]C
 	return containers, nil
 }
 
-// LEGACY-DOCKARA: dual-read mendukung container yang ter-deploy oleh Dockara pra-rebrand; akan dihapus pada v0.3.0
-func (c *Client) ListContainersWithAnyLabel(ctx context.Context, labels []string) ([]ContainerInfo, error) {
-	seen := make(map[string]struct{})
-	var combined []ContainerInfo
-	for _, label := range labels {
-		items, err := c.ListContainersWithLabel(ctx, label)
-		if err != nil {
-			return nil, err
-		}
-		for _, item := range items {
-			if _, dup := seen[item.ID]; dup {
-				continue
-			}
-			seen[item.ID] = struct{}{}
-			combined = append(combined, item)
-		}
-	}
-	return combined, nil
-}
+

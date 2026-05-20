@@ -28,7 +28,7 @@ const (
 	defaultDataDir = "/opt/dockpal/data"
 	defaultDBPath  = "/opt/dockpal/data/dockpal.db"
 	defaultLogPath = "/opt/dockpal/data/dockpal.log"
-	version        = "0.3.3"
+	version        = "0.6.0"
 )
 
 func main() {
