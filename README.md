@@ -72,6 +72,25 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now dockpal
 ```
 
+### Run without root (local development)
+
+By default Dockpal writes to `/opt/dockpal/`, which requires root permissions. To run as a regular user, set the data directory to a user-writable path:
+
+```bash
+# Use a local directory (e.g. ~/.dockpal or ./.data)
+export DOCKPAL_DATA_DIR="$HOME/.dockpal/data"
+export DOCKPAL_DB_PATH="$HOME/.dockpal/data/dockpal.db"
+export DOCKPAL_LOG_PATH="$HOME/.dockpal/data/dockpal.log"
+
+# Create the directory
+mkdir -p "$DOCKPAL_DATA_DIR"
+
+# Run
+go build -o dockpal . && ./dockpal server
+```
+
+> **Note:** Compose deployments, templates, Git repos, and Traefik configs also use hardcoded paths under `/opt/dockpal/`. For full non-root functionality, create symlinks or run with `sudo` for production-style setups. See [DEVELOPMENT.md](DEVELOPMENT.md) for the reflex-based dev workflow.
+
 ### Development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for setting up the file-watching development workflow with reflex.

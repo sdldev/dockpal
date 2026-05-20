@@ -122,7 +122,14 @@ Dockpal.templates = {
         tc.error = event.message;
         tc.deploying = false;
       }
-      if (event.step === 'complete') tc.deploying = false;
+      if (event.step === 'complete') {
+        tc.deploying = false;
+        // Redirect to containers page after successful deploy
+        setTimeout(() => {
+          this.currentPage = 'containers';
+          this.loadDashboard();
+        }, 1500);
+      }
     };
     ws.onerror = () => { tc.error = 'Connection lost'; tc.deploying = false; };
     ws.onclose = () => { if (tc.deploying) tc.deploying = false; };

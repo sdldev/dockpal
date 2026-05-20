@@ -39,6 +39,7 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.POST("/deploy/stream", handleInstanceDeployStream)
 	g.POST("/deploy/compose", handleInstanceDeployCompose)
 	g.POST("/deploy/git", handleInstanceDeployGit)
+	g.POST("/templates/:id/deploy/stream", handleInstanceTemplateDeployStream)
 
 	// Image routes
 	g.GET("/images", handleInstanceListImages)
@@ -283,7 +284,6 @@ func handleInstanceContainerLogs(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
 
 	// Get tail parameter, default to "100"
 	tail := c.DefaultQuery("tail", "100")
@@ -291,20 +291,11 @@ func handleInstanceContainerLogs(c *gin.Context) {
 	reader, err := client.ContainerLogs(c.Request.Context(), containerID, tail)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: failed to retrieve container logs from instance %s: %v", instanceID, err)))
+		conn.Close()
 		return
 	}
-	defer reader.Close()
 
-	buf := make([]byte, 4096)
-	for {
-		n, err := reader.Read(buf)
-		if n > 0 {
-			conn.WriteMessage(websocket.TextMessage, buf[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
+	streamContainerLogs(conn, reader)
 }
 
 // validateContainerName is a simple validation for container names.
@@ -370,9 +361,8 @@ func handleInstanceDeployStream(c *gin.Context) {
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, req.Compose)
 
-	// Create deploy session for streaming
-	deployManager := docker.NewDeployManager()
-	session := deployManager.CreateSession()
+	// Use the global deploy manager so the WebSocket handler can find the session
+	session := globalDeployManager.CreateSession()
 
 	// Run deploy in background goroutine
 	go func() {
@@ -397,7 +387,110 @@ func handleInstanceDeployStream(c *gin.Context) {
 		}
 		// Clean up session after 30 seconds
 		time.AfterFunc(30*time.Second, func() {
-			deployManager.RemoveSession(session.ID)
+			globalDeployManager.RemoveSession(session.ID)
+		})
+	}()
+
+	c.JSON(http.StatusOK, gin.H{"deploy_id": session.ID})
+}
+
+// handleInstanceTemplateDeployStream handles POST /templates/:id/deploy/stream for instance-scoped template deploys.
+func handleInstanceTemplateDeployStream(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	instanceID := c.MustGet("instance_id").(string)
+
+	templates, err := loadTemplates()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load templates"})
+		return
+	}
+
+	var tpl *Template
+	for _, t := range templates {
+		if t.ID == c.Param("id") {
+			tpl = &t
+			break
+		}
+	}
+	if tpl == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+		return
+	}
+
+	var req struct {
+		Env           map[string]string `json:"env"`
+		Ports         map[string]int    `json:"ports"`
+		CustomName    string            `json:"custom_name"`
+		RestartPolicy string            `json:"restart_policy"`
+		AutoRecover   bool              `json:"auto_recover"`
+		Domain        string            `json:"domain"`
+	}
+	c.ShouldBindJSON(&req)
+
+	compose := tpl.Compose
+	for k, v := range req.Env {
+		if err := validator.ValidateEnvVarName(k); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var name '%s': %s", k, err.Error())})
+			return
+		}
+		if err := validator.ValidateEnvVarValue(v); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var value for '%s': %s", k, err.Error())})
+			return
+		}
+		compose = strings.ReplaceAll(compose, "${"+k+"}", v)
+	}
+	// Replace port placeholders
+	for _, p := range tpl.Ports {
+		hostPort := p.Default
+		if customPort, ok := req.Ports[fmt.Sprintf("%d", p.ContainerPort)]; ok && customPort > 0 {
+			hostPort = customPort
+		}
+		oldPort := fmt.Sprintf("'%d:%d'", p.Default, p.ContainerPort)
+		newPort := fmt.Sprintf("'%d:%d'", hostPort, p.ContainerPort)
+		compose = strings.ReplaceAll(compose, oldPort, newPort)
+	}
+	// Apply restart policy override
+	if req.RestartPolicy != "" && req.RestartPolicy != "unless-stopped" {
+		compose = strings.ReplaceAll(compose, "unless-stopped", req.RestartPolicy)
+	}
+	// Add auto-recover label if requested
+	if req.AutoRecover {
+		compose = strings.ReplaceAll(compose, "image: ", "labels:\n      dockpal.auto-recover: \"true\"\n    image: ")
+	}
+
+	name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
+	if req.CustomName != "" {
+		if err := validator.ValidateContainerName(req.CustomName); err == nil {
+			name = req.CustomName
+		}
+	}
+
+	// Resolve registry credentials for this instance
+	registryAuths := resolveRegistryAuths(c, compose)
+
+	session := globalDeployManager.CreateSession()
+
+	go func() {
+		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
+		if err == nil {
+			if database := getDatabase(c); database != nil {
+				database.SaveService(db.Service{
+					ID:         generateID("svc"),
+					Name:       name,
+					Type:       "template",
+					Domain:     req.Domain,
+					Compose:    compose,
+					InstanceID: instanceID,
+					CreatedAt:  time.Now().Unix(),
+				})
+				if req.Domain != "" {
+					port := extractFirstPort(compose)
+					traefik.GenerateConfig(req.Domain, name, port)
+				}
+			}
+		}
+		time.AfterFunc(30*time.Second, func() {
+			globalDeployManager.RemoveSession(session.ID)
 		})
 	}()
 

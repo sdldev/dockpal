@@ -94,6 +94,10 @@ Dockpal.containers = {
             this.toast(data.error || 'Failed to remove container', 'error', 5000);
           } else {
             this.toast('Container removed', 'success');
+            // Redirect to containers list after successful removal
+            this.currentPage = 'containers';
+            this.selectedContainer = null;
+            this.destroyChart();
           }
           await this.loadDashboard();
         }

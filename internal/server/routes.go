@@ -14,11 +14,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
@@ -51,6 +53,52 @@ func checkOrigin(r *http.Request) bool {
 var upgrader = websocket.Upgrader{
 	CheckOrigin: checkOrigin,
 }
+
+// wsTextWriter wraps a WebSocket connection as an io.Writer,
+// sending each write as a TextMessage. Used to stream demultiplexed
+// container logs (stdout + stderr) over a single WebSocket.
+type wsTextWriter struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (w *wsTextWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.conn.WriteMessage(websocket.TextMessage, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// streamContainerLogs demultiplexes Docker's stdcopy stream and sends
+// plain text over the WebSocket. It blocks until the client disconnects.
+func streamContainerLogs(conn *websocket.Conn, reader io.ReadCloser) {
+	defer conn.Close()
+	defer reader.Close()
+
+	w := &wsTextWriter{conn: conn}
+
+	// stdcopy.StdCopy reads the multiplexed Docker log stream and writes
+	// each frame's payload to the provided writers. We use the same writer
+	// for both stdout and stderr so both streams arrive interleaved.
+	go func() {
+		stdcopy.StdCopy(w, w, reader)
+	}()
+
+	// Keep the connection alive by reading until the client disconnects.
+	// This also lets us detect client-side close promptly.
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+	}
+}
+
+// globalDeployManager is the shared deploy session manager used by both
+// the legacy routes and instance-scoped routes + WebSocket handlers.
+var globalDeployManager = docker.NewDeployManager()
 
 type TemplatePort struct {
 	Label         string `json:"label"`
@@ -446,29 +494,19 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		if err != nil {
 			return
 		}
-		defer conn.Close()
 
 		reader, err := client.ContainerLogs(c.Request.Context(), c.Param("id"), "100")
 		if err != nil {
 			conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
+			conn.Close()
 			return
 		}
-		defer reader.Close()
 
-		buf := make([]byte, 4096)
-		for {
-			n, err := reader.Read(buf)
-			if n > 0 {
-				conn.WriteMessage(websocket.TextMessage, buf[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
+		streamContainerLogs(conn, reader)
 	})
 
 	// Deploy
-	deployManager := docker.NewDeployManager()
+	deployManager := globalDeployManager
 
 	// Streamed deploy endpoint - returns deploy session ID
 	protected.POST("/deploy/stream", func(c *gin.Context) {
@@ -579,6 +617,63 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 				}
 			case <-session.Done:
 				// Drain remaining events
+				for {
+					select {
+					case event := <-session.Events:
+						conn.WriteJSON(event)
+					default:
+						return
+					}
+				}
+			}
+		}
+	})
+
+	// Instance-scoped WebSocket endpoint for deploy log streaming.
+	// Same logic as above but matches the instance-scoped URL pattern used by the frontend.
+	r.GET("/api/instances/:instance_id/deploy/stream/:id", func(c *gin.Context) {
+		token := c.Query("token")
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
+			return
+		}
+		claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+		_ = claims
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			u, parseErr := url.Parse(origin)
+			if parseErr != nil || (u.Host != c.Request.Host && !strings.HasPrefix(u.Host, "localhost:")) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
+				return
+			}
+		}
+
+		session := deployManager.GetSession(c.Param("id"))
+		if session == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "deploy session not found"})
+			return
+		}
+
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		for {
+			select {
+			case event, ok := <-session.Events:
+				if !ok {
+					return
+				}
+				if err := conn.WriteJSON(event); err != nil {
+					return
+				}
+			case <-session.Done:
 				for {
 					select {
 					case event := <-session.Events:

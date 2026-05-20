@@ -14,7 +14,22 @@ import (
 func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
+
+		// Fallback to query param token for WebSocket connections
+		// (WebSocket cannot send custom headers during upgrade)
 		if authHeader == "" {
+			if token := c.Query("token"); token != "" && c.IsWebsocket() {
+				claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
+				if err != nil {
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+					c.Abort()
+					return
+				}
+				c.Set("user_id", claims.UserID)
+				c.Set("username", claims.Username)
+				c.Next()
+				return
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
 			c.Abort()
 			return
