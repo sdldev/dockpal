@@ -162,24 +162,40 @@ type GitHubAsset struct {
 	Size               int64  `json:"size"`
 }
 
-// GetBrowserDownloadURL returns the browser download URL for the asset
-// matching the current OS and architecture. Falls back to the first asset.
-func (r *GitHubRelease) GetBrowserDownloadURL() string {
+// GetAssetForPlatform returns the asset URL matching the given GOOS and GOARCH.
+// It does NOT fall back to Assets[0]. Returns the matching asset URL or an error.
+func (r *GitHubRelease) GetAssetForPlatform(goos, goarch string) (string, error) {
 	if len(r.Assets) == 0 {
-		return ""
+		return "", fmt.Errorf("%s: no assets in release", ErrAssetNotFoundForOSArch)
 	}
-	suffix := assetSuffix()
+	suffix := platformSuffix(goos, goarch)
 	for _, a := range r.Assets {
 		if strings.Contains(a.Name, suffix) {
-			return a.BrowserDownloadURL
+			return a.BrowserDownloadURL, nil
 		}
 	}
-	return r.Assets[0].BrowserDownloadURL
+	return "", fmt.Errorf("%s: no asset found for %s/%s", ErrAssetNotFoundForOSArch, goos, goarch)
+}
+
+// GetBrowserDownloadURL returns the browser download URL for the asset
+// matching the current OS and architecture. Returns empty string on error
+// (preserving backward compatibility for VersionService callers).
+func (r *GitHubRelease) GetBrowserDownloadURL() string {
+	url, err := r.GetAssetForPlatform(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return ""
+	}
+	return url
 }
 
 // assetSuffix returns the expected filename suffix for the current GOOS/GOARCH.
 func assetSuffix() string {
-	arch := runtime.GOARCH
+	return platformSuffix(runtime.GOOS, runtime.GOARCH)
+}
+
+// platformSuffix returns the expected filename suffix for the given GOOS/GOARCH.
+func platformSuffix(goos, goarch string) string {
+	arch := goarch
 	switch arch {
 	case "amd64":
 		arch = "amd64"
@@ -188,7 +204,7 @@ func assetSuffix() string {
 	case "arm":
 		arch = "armv7"
 	}
-	return "-" + runtime.GOOS + "-" + arch
+	return "-" + goos + "-" + arch
 }
 
 // fetchFromGitHub fetches the latest release from GitHub API

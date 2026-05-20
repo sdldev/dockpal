@@ -1666,12 +1666,7 @@ func HandleUpdate(c *gin.Context, updateService *update.UpdateService, database 
 	c.Header("X-Accel-Buffering", "no")
 
 	// Helper to send progress updates
-	sendProgress := func(status, message string, percentage int) {
-		progress := update.UpdateProgress{
-			Status:     status,
-			Message:    message,
-			Percentage: percentage,
-		}
+	emit := func(progress update.UpdateProgress) {
 		data, _ := json.Marshal(progress)
 		c.Writer.Write([]byte("data: "))
 		c.Writer.Write(data)
@@ -1679,53 +1674,5 @@ func HandleUpdate(c *gin.Context, updateService *update.UpdateService, database 
 		c.Writer.Flush()
 	}
 
-	// Send initial progress
-	sendProgress(update.StatusDownloading, "Starting download...", 0)
-
-	// Check sudo access first
-	hasSudo, err := updateService.CheckSudoAccess()
-	if err != nil {
-		sendProgress(update.StatusError, "Failed to check sudo access: " + err.Error(), 0)
-		return
-	}
-	if !hasSudo {
-		sendProgress(update.StatusError, "Update requires root privileges", 0)
-		return
-	}
-
-	// Download the update
-	downloadCtx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-
-	downloadedPath, err := updateService.DownloadUpdate(downloadCtx, req.DownloadURL)
-	if err != nil {
-		sendProgress(update.StatusError, "Failed to download update: " + err.Error(), 0)
-		return
-	}
-	defer os.Remove(downloadedPath)
-
-	sendProgress(update.StatusInstalling, "Download complete, verifying binary...", 50)
-
-	// Verify the binary
-	if err := updateService.VerifyBinary(downloadedPath); err != nil {
-		sendProgress(update.StatusError, "Binary verification failed: " + err.Error(), 0)
-		return
-	}
-
-	sendProgress(update.StatusInstalling, "Binary verified, installing...", 70)
-
-	// Install the binary
-	installCtx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-
-	if err := updateService.InstallBinary(installCtx, downloadedPath); err != nil {
-		sendProgress(update.StatusError, "Failed to install binary: " + err.Error(), 0)
-		return
-	}
-
-	sendProgress(update.StatusRestarting, "Service restarted successfully", 90)
-
-	// Final success message
-	time.Sleep(500 * time.Millisecond)
-	sendProgress(update.StatusComplete, "Update completed successfully", 100)
+	_ = updateService.RunUpdate(c.Request.Context(), req.DownloadURL, emit)
 }
