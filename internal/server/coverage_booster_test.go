@@ -457,7 +457,8 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 
 	// 14. Test logout endpoint
 	t.Run("Logout API", func(t *testing.T) {
-		w, code := request("POST", "/api/logout", adminToken, nil)
+		freshAdminToken, _ := auth.GenerateJWT("u-admin", "admin", jwtSecret, auth.RoleAdmin, 1)
+		w, code := request("POST", "/api/logout", freshAdminToken, nil)
 		if code != http.StatusOK {
 			t.Errorf("expected 200, got %d. Body: %s", code, w.Body.String())
 		}

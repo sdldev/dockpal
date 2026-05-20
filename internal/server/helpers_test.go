@@ -60,7 +60,7 @@ services:
 		defer database.Close()
 
 		mgr := registry.NewManager(database, "secret")
-		auths := getRegistryAuths(mgr)
+		auths := getRegistryAuths(mgr, "services:\n  app:\n    image: nginx:latest")
 		if auths != nil {
 			t.Errorf("getRegistryAuths expected nil, got %v", auths)
 		}

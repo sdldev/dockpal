@@ -49,7 +49,7 @@ func loadOrGenerateSecret(secretFilePath string) (string, error) {
 
 	// Ensure the directory exists
 	dir := filepath.Dir(secretFilePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create data directory: %w", err)
 	}
 

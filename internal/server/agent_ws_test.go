@@ -19,6 +19,7 @@ import (
 
 func TestAgentWebSocketConnect(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	agentAuthRateLimiter = NewRateLimiter()
 
 	// Setup database
 	tmpDir := t.TempDir()
@@ -88,16 +89,6 @@ func TestAgentWebSocketConnect(t *testing.T) {
 		t.Fatalf("failed to write auth JSON: %v", err)
 	}
 
-	// Wait for status to become online in DB
-	time.Sleep(100 * time.Millisecond)
-	updatedInst, err := database.GetInstance("edge-inst")
-	if err != nil {
-		t.Fatalf("failed to get instance: %v", err)
-	}
-	if updatedInst.Status != "online" {
-		t.Errorf("expected status to be online, got %s", updatedInst.Status)
-	}
-
 	// Read the ping/request host-info request from server
 	_, msg, err := conn.ReadMessage()
 	if err != nil {
@@ -128,6 +119,18 @@ func TestAgentWebSocketConnect(t *testing.T) {
 		t.Fatalf("failed to write response JSON: %v", err)
 	}
 
-	// Wait for processing
-	time.Sleep(100 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		updatedInst, err := database.GetInstance("edge-inst")
+		if err != nil {
+			t.Fatalf("failed to get instance: %v", err)
+		}
+		if updatedInst.Status == "online" && updatedInst.DockerVersion == hostInfo.DockerVersion {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected status online with host info, got status=%s docker_version=%s", updatedInst.Status, updatedInst.DockerVersion)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

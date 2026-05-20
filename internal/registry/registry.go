@@ -58,6 +58,14 @@ type DockerAuthConfig struct {
 	Password string `json:"password"`
 }
 
+var registryHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	},
+}
+
 // NewManager creates a registry manager with an encryption key derived from the JWT secret.
 func NewManager(database *db.DB, jwtSecret string) *Manager {
 	key, err := DeriveKey(jwtSecret)
@@ -232,13 +240,14 @@ func (m *Manager) List() ([]CredentialSummary, error) {
 			})
 			continue
 		}
-		defer zeroBytes(token)
+		maskedToken := MaskToken(string(token))
+		zeroBytes(token)
 
 		summaries = append(summaries, CredentialSummary{
 			ID:              cred.ID,
 			Registry:        cred.Registry,
 			Username:        cred.Username,
-			MaskedToken:     MaskToken(string(token)),
+			MaskedToken:     maskedToken,
 			Status:          credentialStatus(cred.LastValidatedAt),
 			CreatedAt:       cred.CreatedAt,
 			UpdatedAt:       cred.UpdatedAt,
@@ -362,7 +371,7 @@ func (m *Manager) TestConnection(id string) (*TestResult, error) {
 	}
 	req.SetBasicAuth(cred.Username, string(token))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := registryHTTPClient.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return &TestResult{Status: "error", Message: "connection timeout"}, nil
@@ -449,6 +458,7 @@ func (m *Manager) GetTokenForDomain(domain string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt credentials for %s", domain)
 	}
+	defer zeroBytes(token)
 
 	return string(token), nil
 }

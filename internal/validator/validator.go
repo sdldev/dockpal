@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$`)
+	containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$`)
 	envVarNameRegex    = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 	domainRegex        = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$`)
 	branchNameRegex    = regexp.MustCompile(`^[a-zA-Z0-9/_.\-]+$`)
@@ -15,8 +15,7 @@ var (
 	yamlDangerous      = []string{"\n", "\r"}
 )
 
-// ValidateContainerName checks that a container name matches ^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$
-// and is at most 128 characters long.
+// ValidateContainerName checks that a container name is 1-128 characters and Docker-safe.
 func ValidateContainerName(name string) error {
 	if len(name) == 0 || len(name) > 128 {
 		return fmt.Errorf("container name must be 1-128 characters")

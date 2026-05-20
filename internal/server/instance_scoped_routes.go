@@ -330,6 +330,7 @@ func validateEnvVarValue(value string) error {
 	}
 	return nil
 }
+
 // Deploy handlers for instance-scoped routes
 
 // handleInstanceDeployStream handles POST /deploy/stream - deploy with streaming.
@@ -361,29 +362,30 @@ func handleInstanceDeployStream(c *gin.Context) {
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, req.Compose)
+	database := getDatabase(c)
+	name := req.Name
+	domain := req.Domain
+	compose := req.Compose
 
 	// Use the global deploy manager so the WebSocket handler can find the session
 	session := globalDeployManager.CreateSession()
 
 	// Run deploy in background goroutine
 	go func() {
-		err := client.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryAuths)
-		if err == nil {
-			// Save service to database
-			if database := getDatabase(c); database != nil {
-				database.SaveService(db.Service{
-					ID:         generateID("svc"),
-					Name:       req.Name,
-					Type:       "compose",
-					Domain:     req.Domain,
-					Compose:    req.Compose,
-					InstanceID: instanceID,
-					CreatedAt:  time.Now().Unix(),
-				})
-				if req.Domain != "" {
-					port := extractFirstPort(req.Compose)
-					traefik.GenerateConfig(req.Domain, req.Name, port)
-				}
+		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
+		if err == nil && database != nil {
+			database.SaveService(db.Service{
+				ID:         generateID("svc"),
+				Name:       name,
+				Type:       "compose",
+				Domain:     domain,
+				Compose:    compose,
+				InstanceID: instanceID,
+				CreatedAt:  time.Now().Unix(),
+			})
+			if domain != "" {
+				port := extractFirstPort(compose)
+				traefik.GenerateConfig(domain, name, port)
 			}
 		}
 		// Clean up session after 30 seconds
@@ -468,26 +470,26 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, compose)
+	database := getDatabase(c)
+	domain := req.Domain
 
 	session := globalDeployManager.CreateSession()
 
 	go func() {
 		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
-		if err == nil {
-			if database := getDatabase(c); database != nil {
-				database.SaveService(db.Service{
-					ID:         generateID("svc"),
-					Name:       name,
-					Type:       "template",
-					Domain:     req.Domain,
-					Compose:    compose,
-					InstanceID: instanceID,
-					CreatedAt:  time.Now().Unix(),
-				})
-				if req.Domain != "" {
-					port := extractFirstPort(compose)
-					traefik.GenerateConfig(req.Domain, name, port)
-				}
+		if err == nil && database != nil {
+			database.SaveService(db.Service{
+				ID:         generateID("svc"),
+				Name:       name,
+				Type:       "template",
+				Domain:     domain,
+				Compose:    compose,
+				InstanceID: instanceID,
+				CreatedAt:  time.Now().Unix(),
+			})
+			if domain != "" {
+				port := extractFirstPort(compose)
+				traefik.GenerateConfig(domain, name, port)
 			}
 		}
 		time.AfterFunc(30*time.Second, func() {
@@ -631,6 +633,10 @@ func handleInstanceDeployGit(c *gin.Context) {
 	projectName := req.Name
 	if projectName == "" {
 		projectName = filepath.Base(info.Path)
+	}
+	if err := validator.ValidateContainerName(projectName); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
+		return
 	}
 
 	composePath := filepath.Join(info.Path, selectedFile)
@@ -811,6 +817,7 @@ func getRegistryManager(c *gin.Context) *registry.Manager {
 	}
 	return nil
 }
+
 // =============================================================================
 // Image handlers
 // =============================================================================
@@ -933,15 +940,15 @@ func handleInstanceSystemInfo(c *gin.Context) {
 
 	// Merge HostInfo and HostStats into SystemInfo format
 	systemInfo := gin.H{
-		"hostname":     info.Hostname,
-		"os":           info.OS,
-		"cpu_cores":    info.CPUCores,
+		"hostname":       info.Hostname,
+		"os":             info.OS,
+		"cpu_cores":      info.CPUCores,
 		"docker_version": info.DockerVersion,
-		"cpu_percent":  stats.CPUPercent,
-		"used_ram":     stats.UsedRAM,
-		"total_ram":    stats.TotalRAM,
-		"used_disk":    stats.UsedDisk,
-		"total_disk":   stats.TotalDisk,
+		"cpu_percent":    stats.CPUPercent,
+		"used_ram":       stats.UsedRAM,
+		"total_ram":      stats.TotalRAM,
+		"used_disk":      stats.UsedDisk,
+		"total_disk":     stats.TotalDisk,
 	}
 
 	c.JSON(http.StatusOK, systemInfo)
@@ -1046,9 +1053,9 @@ func handleInstanceCreateDomain(c *gin.Context) {
 	}
 
 	var req struct {
-		Domain string `json:"domain" binding:"required"`
+		Domain  string `json:"domain" binding:"required"`
 		Service string `json:"service" binding:"required"`
-		Port   int    `json:"port" binding:"required"`
+		Port    int    `json:"port" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: domain, service, and port are required"})

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -135,9 +137,29 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	defer database.Close()
 
 	// Ensure default admin user exists
-	defaultHash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	adminPassword := os.Getenv("DOCKPAL_INITIAL_ADMIN_PASSWORD")
+	generatedAdminPassword := false
+	if adminPassword == "" {
+		passwordBytes := make([]byte, 18)
+		if _, err := rand.Read(passwordBytes); err != nil {
+			log.Fatalf("Failed to generate initial admin password: %v", err)
+		}
+		adminPassword = hex.EncodeToString(passwordBytes)
+		generatedAdminPassword = true
+	}
+	if len(adminPassword) < 8 {
+		log.Fatal("DOCKPAL_INITIAL_ADMIN_PASSWORD must be at least 8 characters")
+	}
+	defaultHash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatalf("Failed to hash default admin password: %v", err)
+	}
 	if err := database.EnsureDefaultAdmin(string(defaultHash)); err != nil {
 		log.Fatalf("Failed to create default admin: %v", err)
+	}
+	if generatedAdminPassword {
+		log.Printf("Generated initial admin password for username admin: %s", adminPassword)
+		log.Printf("Set DOCKPAL_INITIAL_ADMIN_PASSWORD before first startup to choose a bootstrap password")
 	}
 
 	// Ensure local instance exists
@@ -161,6 +183,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	defer healthMonitor.Stop()
 
 	srv := server.New(tls, tlsCert, tlsKey, tlsDomain, dataDir)
+	srv.Router().Use(server.SecurityHeadersMiddleware())
 	srv.Router().Use(server.CORSMiddleware())
 
 	// Initialize version service
@@ -234,8 +257,8 @@ func resetPassword() {
 	var password string
 	fmt.Scanln(&password)
 
-	if len(password) < 4 {
-		log.Fatal("Password must be at least 4 characters")
+	if len(password) < 8 {
+		log.Fatal("Password must be at least 8 characters")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -243,7 +266,7 @@ func resetPassword() {
 		log.Fatalf("Failed to hash password: %v", err)
 	}
 
-	if err := database.UpdatePassword("admin", string(hash)); err != nil {
+	if err := database.UpdatePasswordWithVersion("admin", string(hash)); err != nil {
 		log.Fatalf("Failed to update password: %v", err)
 	}
 

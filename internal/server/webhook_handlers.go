@@ -37,6 +37,30 @@ func hmacSha256(message, key []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
+type webhookResponse struct {
+	ID          string `json:"id"`
+	InstanceID  string `json:"instance_id"`
+	Name        string `json:"name"`
+	Repo        string `json:"repo"`
+	Branch      string `json:"branch"`
+	ComposeFile string `json:"compose_file"`
+	HasSecret   bool   `json:"has_secret"`
+	CreatedAt   int64  `json:"created_at"`
+}
+
+func sanitizeWebhook(wh db.Webhook) webhookResponse {
+	return webhookResponse{
+		ID:          wh.ID,
+		InstanceID:  wh.InstanceID,
+		Name:        wh.Name,
+		Repo:        wh.Repo,
+		Branch:      wh.Branch,
+		ComposeFile: wh.ComposeFile,
+		HasSecret:   wh.Secret != "",
+		CreatedAt:   wh.CreatedAt,
+	}
+}
+
 // HandleWebhookDeploy processes incoming Git webhook triggers and deploys on remote agent.
 func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -53,6 +77,7 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 		}
 
 		// Read body for signature verification
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 		bodyBytes, err := io.ReadAll(c.Request.Body)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read body"})
@@ -164,7 +189,11 @@ func HandleListWebhooks(database *db.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, list)
+		response := make([]webhookResponse, 0, len(list))
+		for _, wh := range list {
+			response = append(response, sanitizeWebhook(wh))
+		}
+		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -200,7 +229,7 @@ func HandleCreateWebhook(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, wh)
+		c.JSON(http.StatusOK, sanitizeWebhook(wh))
 	}
 }
 

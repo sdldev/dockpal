@@ -14,7 +14,7 @@ import (
 // Property 8: Container Name Validation — accept iff matches regex and length ≤ 128
 // **Validates: Requirements 7.1**
 
-var containerNameOracle = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]+$`)
+var containerNameOracle = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$`)
 
 func TestProperty8_ContainerNameValidation(t *testing.T) {
 	// Property: ValidateContainerName accepts a name iff it matches the regex AND length ≤ 128
@@ -56,7 +56,7 @@ func containerNameGenerator(values []reflect.Value, rng *rand.Rand) {
 		case 0:
 			name = ""
 		case 1:
-			name = string(alnumChars[rng.Intn(len(alnumChars))])
+			name = string([]byte{0})
 		case 2:
 			name = generateValidContainerName128(rng)
 		}

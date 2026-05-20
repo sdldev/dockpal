@@ -3,7 +3,6 @@ package docker
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -59,10 +58,15 @@ type FileInfo struct {
 }
 
 func execCommand(ctx context.Context, cli *client.Client, containerID string, cmd []string) (string, error) {
+	return execCommandWithInput(ctx, cli, containerID, cmd, nil)
+}
+
+func execCommandWithInput(ctx context.Context, cli *client.Client, containerID string, cmd []string, input io.Reader) (string, error) {
 	execOpts := client.ExecCreateOptions{
 		Cmd:          cmd,
 		AttachStdout: true,
 		AttachStderr: true,
+		AttachStdin:  input != nil,
 	}
 
 	result, err := cli.ExecCreate(ctx, containerID, execOpts)
@@ -76,6 +80,13 @@ func execCommand(ctx context.Context, cli *client.Client, containerID string, cm
 		return "", fmt.Errorf("exec attach: %w", err)
 	}
 	defer resp.Close()
+
+	if input != nil {
+		go func() {
+			_, _ = io.Copy(resp.Conn, input)
+			_ = resp.CloseWrite()
+		}()
+	}
 
 	var buf bytes.Buffer
 	io.Copy(&buf, resp.Reader)
@@ -142,11 +153,9 @@ func (c *Client) WriteFile(ctx context.Context, containerID, path, content strin
 		return err
 	}
 
-	// Base64 encode content to avoid shell escaping issues
-	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	cmd := []string{"sh", "-c", fmt.Sprintf("echo '%s' | base64 -d > '%s'", encoded, cleanPath)}
+	cmd := []string{"tee", cleanPath}
 
-	output, err := execCommand(ctx, c.cli, containerID, cmd)
+	output, err := execCommandWithInput(ctx, c.cli, containerID, cmd, strings.NewReader(content))
 	if err != nil {
 		return fmt.Errorf("file write failed: %w (output: %s)", err, output)
 	}

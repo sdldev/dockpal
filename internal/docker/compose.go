@@ -11,6 +11,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
+	"github.com/sdldev/dockpal/internal/validator"
 	"gopkg.in/yaml.v3"
 )
 
@@ -255,9 +256,29 @@ func (c *Client) pullImageIfNeeded(ctx context.Context, image string, registryAu
 	return c.PullImage(ctx, image)
 }
 
+const composeBaseDir = "/opt/dockpal/compose"
+
+func composeProjectDir(projectName string) (string, error) {
+	if err := validator.ValidateContainerName(projectName); err != nil {
+		return "", fmt.Errorf("invalid project name: %w", err)
+	}
+	if strings.Contains(projectName, "..") || strings.ContainsAny(projectName, `/\\`) {
+		return "", fmt.Errorf("invalid project name")
+	}
+	base := filepath.Clean(composeBaseDir)
+	composeDir := filepath.Clean(filepath.Join(base, projectName))
+	if composeDir == base || !strings.HasPrefix(composeDir, base+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid project path")
+	}
+	return composeDir, nil
+}
+
 // writeComposeFile saves the compose YAML to disk.
 func writeComposeFile(projectName, composeYAML string) error {
-	composeDir := filepath.Join("/opt/dockpal/compose", projectName)
+	composeDir, err := composeProjectDir(projectName)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(composeDir, 0755); err != nil {
 		return fmt.Errorf("failed to create compose directory: %w", err)
 	}
@@ -270,7 +291,11 @@ func writeComposeFile(projectName, composeYAML string) error {
 
 // createAndStartService creates and starts a single service container.
 func (c *Client) createAndStartService(ctx context.Context, projectName, svcName string, svc ComposeService, cf *ComposeFile) error {
-	composeFilePath := filepath.Join("/opt/dockpal/compose", projectName, "docker-compose.yml")
+	composeDir, err := composeProjectDir(projectName)
+	if err != nil {
+		return err
+	}
+	composeFilePath := filepath.Join(composeDir, "docker-compose.yml")
 	baseLabels := map[string]string{
 		"dockpal.managed": "true",
 		"dockpal.project": projectName,
@@ -410,6 +435,9 @@ func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML str
 
 // StopCompose stops all containers belonging to a compose project.
 func (c *Client) StopCompose(ctx context.Context, projectName string) error {
+	if _, err := composeProjectDir(projectName); err != nil {
+		return err
+	}
 	f := make(client.Filters)
 	f = f.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
 	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
@@ -427,6 +455,10 @@ func (c *Client) StopCompose(ctx context.Context, projectName string) error {
 
 // RemoveCompose removes all containers and files belonging to a compose project.
 func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {
+	composeDir, err := composeProjectDir(projectName)
+	if err != nil {
+		return err
+	}
 	f := make(client.Filters)
 	f = f.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
 	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
@@ -438,7 +470,6 @@ func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {
 		c.cli.ContainerRemove(ctx, ctr.ID, client.ContainerRemoveOptions{Force: true})
 	}
 
-	composeDir := filepath.Join("/opt/dockpal/compose", projectName)
 	os.RemoveAll(composeDir)
 
 	return nil

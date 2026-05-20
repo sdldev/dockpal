@@ -54,6 +54,14 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: checkOrigin,
 }
 
+var githubHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	},
+}
+
 // wsTextWriter wraps a WebSocket connection as an io.Writer,
 // sending each write as a TextMessage. Used to stream demultiplexed
 // container logs (stdout + stderr) over a single WebSocket.
@@ -83,7 +91,9 @@ func streamContainerLogs(conn *websocket.Conn, reader io.ReadCloser) {
 	// each frame's payload to the provided writers. We use the same writer
 	// for both stdout and stderr so both streams arrive interleaved.
 	go func() {
-		stdcopy.StdCopy(w, w, reader)
+		_, _ = stdcopy.StdCopy(w, w, reader)
+		reader.Close()
+		conn.Close()
 	}()
 
 	// Keep the connection alive by reading until the client disconnects.
@@ -228,7 +238,6 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// Auth (unprotected)
 	api.POST("/login", RateLimitMiddleware(loginRateLimiter), func(c *gin.Context) { auth.HandleLogin(c, jwtSecret, database) })
-	api.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
 
 	// Webhooks public trigger
 	api.POST("/webhooks/deploy/:webhook_id", HandleWebhookDeploy(database, agentMgr, jwtSecret))
@@ -252,6 +261,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	}
 
 	// Auth protected
+	protected.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
 	protected.POST("/auth/reset-password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
 	// Webhooks management
@@ -526,13 +536,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		detail, err := client.EditContainer(c.Request.Context(), containerID, req)
 		if err != nil {
-			// TODO: remove debug detail before release
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "debug": true})
+			internalError(c, err)
 			return
 		}
 
 		response := gin.H{
-			"status":  "updated",
+			"status":    "updated",
 			"container": detail,
 		}
 		if needsRecreate {
@@ -603,7 +612,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		// Get auth headers for registries
-		registryAuths := getRegistryAuths(registryManager)
+		registryAuths := getRegistryAuths(registryManager, req.Compose)
 
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -659,14 +668,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 			return
 		}
-		// Verify origin matches to prevent CSRF via WebSocket
-		origin := c.GetHeader("Origin")
-		if origin != "" {
-			u, parseErr := url.Parse(origin)
-			if parseErr != nil || (u.Host != c.Request.Host && !strings.HasPrefix(u.Host, "localhost:")) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
-				return
-			}
+		if !checkOrigin(c.Request) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
+			return
 		}
 
 		session := deployManager.GetSession(c.Param("id"))
@@ -721,13 +725,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 			return
 		}
-		origin := c.GetHeader("Origin")
-		if origin != "" {
-			u, parseErr := url.Parse(origin)
-			if parseErr != nil || (u.Host != c.Request.Host && !strings.HasPrefix(u.Host, "localhost:")) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
-				return
-			}
+		if !checkOrigin(c.Request) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
+			return
 		}
 
 		session := deployManager.GetSession(c.Param("id"))
@@ -781,7 +781,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		// Get auth headers for registries
-		registryAuths := getRegistryAuths(registryManager)
+		registryAuths := getRegistryAuths(registryManager, req.Compose)
 
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -887,6 +887,10 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		if projectName == "" {
 			projectName = filepath.Base(info.Path)
 		}
+		if err := validator.ValidateContainerName(projectName); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
+			return
+		}
 
 		composePath := filepath.Join(info.Path, selectedFile)
 		composeData, err := os.ReadFile(composePath)
@@ -896,7 +900,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		// Get auth headers for registries
-		registryAuths := getRegistryAuths(registryManager)
+		registryAuths := getRegistryAuths(registryManager, string(composeData))
 
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -940,7 +944,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Accept", "application/vnd.github.v3+json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := githubHTTPClient.Do(req)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -1096,7 +1100,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		// Get auth headers for registries
-		registryAuths := getRegistryAuths(registryManager)
+		registryAuths := getRegistryAuths(registryManager, compose)
 
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -1190,7 +1194,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		// Get auth headers for registries
-		registryAuths := getRegistryAuths(registryManager)
+		registryAuths := getRegistryAuths(registryManager, compose)
 
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -1333,14 +1337,24 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file required (max 10MB)"})
 			return
 		}
-		src, _ := file.Open()
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to open uploaded file"})
+			return
+		}
 		defer src.Close()
 		data, err := io.ReadAll(io.LimitReader(src, 10<<20))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read file"})
 			return
 		}
-		if err := dockerClient.WriteFile(c.Request.Context(), c.PostForm("container"), c.PostForm("path")+"/"+file.Filename, string(data)); err != nil {
+		filename := filepath.Base(file.Filename)
+		if filename == "." || filename == string(filepath.Separator) || filename == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid filename"})
+			return
+		}
+		targetPath := filepath.Join(c.PostForm("path"), filename)
+		if err := dockerClient.WriteFile(c.Request.Context(), c.PostForm("container"), targetPath, string(data)); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -1781,14 +1795,23 @@ func extractFirstPort(composeYAML string) int {
 
 // getRegistryAuths extracts registry authentication headers from the registry manager.
 // Returns a map of registry domain to auth header string.
-// Note: Currently returns nil because CredentialSummary masks tokens.
-// The registry manager's GetAuthHeader method should be used for single-image operations.
-func getRegistryAuths(registryMgr *registry.Manager) map[string]string {
-	// TODO: Add method to registry.Manager to get raw tokens for bulk operations
-	// For now, return nil - per-image auth is handled via GetAuthHeader calls
-	// in the pull/DeployCompose paths when specific image references are known.
-	return nil
+func getRegistryAuths(registryMgr *registry.Manager, composeYAML string) map[string]string {
+	if registryMgr == nil {
+		return nil
+	}
+	auths := make(map[string]string)
+	for _, domain := range extractDomainsFromCompose(composeYAML) {
+		authHeader, err := registryMgr.GetAuthHeader(domain + "/image:latest")
+		if err == nil && authHeader != "" {
+			auths[domain] = authHeader
+		}
+	}
+	if len(auths) == 0 {
+		return nil
+	}
+	return auths
 }
+
 // HandleGetVersion handles the GET /api/system/version endpoint
 func HandleGetVersion(c *gin.Context, versionService *update.VersionService) {
 	if versionService == nil {
@@ -1804,6 +1827,7 @@ func HandleGetVersion(c *gin.Context, versionService *update.VersionService) {
 
 	c.JSON(http.StatusOK, versionInfo)
 }
+
 // HandleUpdate handles the POST /api/system/update endpoint
 // It performs a streaming update with progress notifications
 func HandleUpdate(c *gin.Context, updateService *update.UpdateService, database *db.DB) {

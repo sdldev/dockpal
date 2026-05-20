@@ -28,7 +28,7 @@ make dev
 
 This builds the binary and starts the server on port 3012 with local data directory (`.data/`).
 
-Open http://localhost:3012 — login: `admin` / `admin`
+Open http://localhost:3012 and log in as `admin`. On first startup, DockPal generates an initial admin password and prints it in the server logs. To choose the bootstrap password yourself, set `DOCKPAL_INITIAL_ADMIN_PASSWORD` before the first startup.
 
 ## Development
 
@@ -55,6 +55,7 @@ make clean            # Remove build artifacts
 | `DOCKPAL_DB_PATH` | `<DATA_DIR>/dockpal.db` | BBolt database path |
 | `DOCKPAL_LOG_PATH` | `<DATA_DIR>/dockpal.log` | Log file path |
 | `DOCKPAL_SECRET_PATH` | `<DATA_DIR>/.secret` | JWT secret file |
+| `DOCKPAL_INITIAL_ADMIN_PASSWORD` | auto-generated | Initial `admin` password used only when the admin user is first created |
 | `JWT_SECRET` | auto-generated | Override JWT signing key |
 | `DOCKPAL_TLS_DOMAIN` | | ACME Let's Encrypt domain |
 | `DOCKPAL_TLS_CERT` | | Custom TLS certificate path |

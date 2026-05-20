@@ -23,7 +23,7 @@ func TestValidateContainerName(t *testing.T) {
 		{"starts with dash", "-container", true},
 		{"contains space", "my container", true},
 		{"contains shell char", "my;container", true},
-		{"single char", "a", true}, // regex requires at least 2 chars
+		{"single char", "a", false},
 	}
 
 	for _, tt := range tests {

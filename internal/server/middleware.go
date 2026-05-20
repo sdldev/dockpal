@@ -1,7 +1,9 @@
 package server
 
 import (
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -76,18 +78,22 @@ func RequireRole(requiredRole string) gin.HandlerFunc {
 	}
 }
 
+func SecurityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "0")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Next()
+	}
+}
+
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
-		host := c.Request.Host
-
-		// Only allow same-origin requests or explicit host match
 		allowed := ""
-		if origin != "" {
-			// Allow if origin host matches request host (same-origin)
-			if strings.Contains(origin, "://"+host) || strings.Contains(origin, "://localhost:") {
-				allowed = origin
-			}
+		if origin != "" && originAllowed(origin, c.Request.Host) {
+			allowed = origin
 		}
 
 		if allowed != "" {
@@ -105,6 +111,29 @@ func CORSMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func originAllowed(origin, requestHost string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if u.Host == requestHost {
+		return true
+	}
+	originHost, _, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		originHost = u.Hostname()
+	}
+	requestHostname, _, err := net.SplitHostPort(requestHost)
+	if err != nil {
+		requestHostname = requestHost
+	}
+	originIP := net.ParseIP(originHost)
+	requestIP := net.ParseIP(requestHostname)
+	originLoopback := originHost == "localhost" || (originIP != nil && originIP.IsLoopback())
+	requestLoopback := requestHostname == "localhost" || (requestIP != nil && requestIP.IsLoopback())
+	return originLoopback && requestLoopback
 }
 
 // InstanceMiddleware resolves the instance from the URL parameter and validates it's available.

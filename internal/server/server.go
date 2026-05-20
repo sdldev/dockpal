@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/acme/autocert"
@@ -52,6 +53,17 @@ func (s *Server) Router() *gin.Engine {
 	return s.router
 }
 
+func (s *Server) newHTTPServer() *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%s", s.port),
+		Handler:           s.router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
 func (s *Server) Run() error {
 	if s.tls {
 		if s.tlsDomain != "" {
@@ -64,11 +76,8 @@ func (s *Server) Run() error {
 				HostPolicy: autocert.HostWhitelist(s.tlsDomain),
 				Cache:      autocert.DirCache(certDir),
 			}
-			s.srv = &http.Server{
-				Addr:      fmt.Sprintf(":%s", s.port),
-				Handler:   s.router,
-				TLSConfig: m.TLSConfig(),
-			}
+			s.srv = s.newHTTPServer()
+			s.srv.TLSConfig = m.TLSConfig()
 
 			// Start HTTP-01 challenge responder on port 80 (Let's Encrypt requirement)
 			go func() {
@@ -97,18 +106,12 @@ func (s *Server) Run() error {
 			}
 		}
 
-		s.srv = &http.Server{
-			Addr:    fmt.Sprintf(":%s", s.port),
-			Handler: s.router,
-		}
+		s.srv = s.newHTTPServer()
 		log.Printf("Dockpal server starting with TLS on port %s (cert: %s, key: %s)", s.port, certFile, keyFile)
 		return s.srv.ListenAndServeTLS(certFile, keyFile)
 	}
 
-	s.srv = &http.Server{
-		Addr:    fmt.Sprintf(":%s", s.port),
-		Handler: s.router,
-	}
+	s.srv = s.newHTTPServer()
 
 	log.Printf("Dockpal server starting on port %s (HTTP)", s.port)
 	return s.srv.ListenAndServe()

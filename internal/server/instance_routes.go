@@ -32,30 +32,30 @@ type CreateInstanceRequest struct {
 }
 
 type InstanceResponse struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	Host                string `json:"host"`
-	Port                int    `json:"port"`
-	Mode                string `json:"mode"`
-	Status              string `json:"status"`
-	DockerVersion       string `json:"docker_version,omitempty"`
-	OS                  string `json:"os,omitempty"`
-	CPUCores            int    `json:"cpu_cores,omitempty"`
-	TotalMemory         int64  `json:"total_memory,omitempty"`
-	LastSeen            int64  `json:"last_seen,omitempty"`
-	CreatedAt           int64  `json:"created_at,omitempty"`
-	InstallCommand      string `json:"install_command,omitempty"`
-	AgentVersion        string `json:"agent_version,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Host           string `json:"host"`
+	Port           int    `json:"port"`
+	Mode           string `json:"mode"`
+	Status         string `json:"status"`
+	DockerVersion  string `json:"docker_version,omitempty"`
+	OS             string `json:"os,omitempty"`
+	CPUCores       int    `json:"cpu_cores,omitempty"`
+	TotalMemory    int64  `json:"total_memory,omitempty"`
+	LastSeen       int64  `json:"last_seen,omitempty"`
+	CreatedAt      int64  `json:"created_at,omitempty"`
+	InstallCommand string `json:"install_command,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
 }
 
 type InstanceListItem struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Host      string `json:"host"`
-	Port      int    `json:"port"`
-	Mode      string `json:"mode"`
-	Status    string `json:"status"`
-	LastSeen  int64  `json:"last_seen"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Mode     string `json:"mode"`
+	Status   string `json:"status"`
+	LastSeen int64  `json:"last_seen"`
 }
 
 type UpdateInstanceRequest struct {
@@ -649,7 +649,7 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 			if err != nil {
 				log.Printf("SSH Install on instance %s failed: %v", id, err)
 				logsManager.WriteLogf(id, "[Dockpal Installer] Error: %v\n", err)
-				
+
 				// update status to offline if failed
 				instCopy, _ := database.GetInstance(id)
 				if instCopy != nil {
@@ -670,9 +670,7 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 var installWebSocketUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow UI origin
-	},
+	CheckOrigin:     checkOrigin,
 }
 
 func handleInstallAgentLogs(logsManager *InstallLogsManager) gin.HandlerFunc {

@@ -95,7 +95,11 @@ func (m *Manager) RegisterEdgeConnection(instanceID string, conn *websocket.Conn
 
 	// Close existing connection if any
 	if existing, ok := m.edge[instanceID]; ok {
-		close(existing.done)
+		select {
+		case <-existing.done:
+		default:
+			close(existing.done)
+		}
 		existing.conn.Close()
 	}
 
@@ -111,13 +115,27 @@ func (m *Manager) RegisterEdgeConnection(instanceID string, conn *websocket.Conn
 	go m.edgeReadLoop(ec)
 }
 
+func (m *Manager) WaitForDisconnect(instanceID string) {
+	m.mu.RLock()
+	ec := m.edge[instanceID]
+	m.mu.RUnlock()
+	if ec == nil {
+		return
+	}
+	<-ec.done
+}
+
 // UnregisterEdgeConnection removes an edge connection and marks instance offline in the database.
 func (m *Manager) UnregisterEdgeConnection(instanceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if ec, ok := m.edge[instanceID]; ok {
-		close(ec.done)
+		select {
+		case <-ec.done:
+		default:
+			close(ec.done)
+		}
 		ec.conn.Close()
 		delete(m.edge, instanceID)
 	}
@@ -203,7 +221,11 @@ func (m *Manager) Close() {
 	defer m.mu.Unlock()
 
 	for id, ec := range m.edge {
-		close(ec.done)
+		select {
+		case <-ec.done:
+		default:
+			close(ec.done)
+		}
 		ec.conn.Close()
 		delete(m.edge, id)
 	}

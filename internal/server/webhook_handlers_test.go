@@ -29,7 +29,7 @@ func TestWebhookHandlers(t *testing.T) {
 	r.POST("/api/webhooks", HandleCreateWebhook(database))
 	r.DELETE("/api/webhooks/:webhook_id", HandleDeleteWebhook(database))
 
-	var createdWh db.Webhook
+	var createdWh webhookResponse
 
 	t.Run("CreateWebhook", func(t *testing.T) {
 		reqBody, _ := json.Marshal(map[string]string{
@@ -54,8 +54,11 @@ func TestWebhookHandlers(t *testing.T) {
 			t.Fatalf("failed to parse response: %v", err)
 		}
 
-		if createdWh.ID == "" || createdWh.Secret != "my-webhook-secret" {
+		if createdWh.ID == "" || !createdWh.HasSecret {
 			t.Errorf("webhook not created properly: %+v", createdWh)
+		}
+		if bytes.Contains(w.Body.Bytes(), []byte("my-webhook-secret")) {
+			t.Errorf("webhook response leaked secret: %s", w.Body.String())
 		}
 	})
 
@@ -68,7 +71,7 @@ func TestWebhookHandlers(t *testing.T) {
 			t.Errorf("expected 200, got %d", w.Code)
 		}
 
-		var list []db.Webhook
+		var list []webhookResponse
 		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
 			t.Fatalf("failed to parse list: %v", err)
 		}
@@ -92,7 +95,7 @@ func TestWebhookHandlers(t *testing.T) {
 		req2, _ := http.NewRequest("GET", "/api/webhooks", nil)
 		r.ServeHTTP(w2, req2)
 
-		var list []db.Webhook
+		var list []webhookResponse
 		json.Unmarshal(w2.Body.Bytes(), &list)
 		if len(list) != 0 {
 			t.Errorf("expected list to be empty after deletion, got %d items", len(list))

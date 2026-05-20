@@ -343,7 +343,7 @@ func TestProperty_OriginalToken_VerifiesCorrectly(t *testing.T) {
 		token := generateTestToken()
 
 		// Hash the token using bcrypt
-		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return false
@@ -377,7 +377,7 @@ func TestProperty_ModifiedToken_DoesNotVerify(t *testing.T) {
 		token := generateTestToken()
 
 		// Hash the token using bcrypt
-		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip this iteration
@@ -450,7 +450,7 @@ func TestProperty_DifferentToken_DoesNotVerify(t *testing.T) {
 	f := func() bool {
 		// Generate first random token and hash it
 		token1 := generateTestToken()
-		hash, err := bcrypt.GenerateFromPassword([]byte(token1), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(token1), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip this iteration
@@ -485,7 +485,7 @@ func TestProperty_EmptyToken_DoesNotVerify(t *testing.T) {
 	f := func() bool {
 		// Generate random token and hash it
 		token := generateTestToken()
-		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip this iteration
@@ -851,13 +851,13 @@ func TestProperty_BCryptHashUniqueness(t *testing.T) {
 		token := generateTestToken()
 
 		// Generate two hashes for the same token
-		hash1, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+		hash1, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip
 		}
 
-		hash2, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+		hash2, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip
@@ -889,6 +889,7 @@ func TestProperty_BCryptHashUniqueness(t *testing.T) {
 		t.Errorf("Property violated - bcrypt hash uniqueness: %v", err)
 	}
 }
+
 // **Validates: Requirement 4.8**
 
 // Property 13: Token rotation produces distinct credentials
@@ -905,7 +906,7 @@ func TestProperty_TokenRotation_ProducesDistinctHash(t *testing.T) {
 		token1 := hex.EncodeToString(tokenBytes1)
 
 		// Hash the initial token
-		hash1, err := bcrypt.GenerateFromPassword([]byte(token1), bcrypt.DefaultCost)
+		hash1, err := bcrypt.GenerateFromPassword([]byte(token1), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip this iteration
@@ -917,7 +918,7 @@ func TestProperty_TokenRotation_ProducesDistinctHash(t *testing.T) {
 		token2 := hex.EncodeToString(tokenBytes2)
 
 		// Hash the rotated token
-		hash2, err := bcrypt.GenerateFromPassword([]byte(token2), bcrypt.DefaultCost)
+		hash2, err := bcrypt.GenerateFromPassword([]byte(token2), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash: %v", err)
 			return true // skip this iteration
@@ -1040,7 +1041,7 @@ func TestProperty_TokenRotation_BothHashAndEncryptedDiffer(t *testing.T) {
 		token1 := hex.EncodeToString(tokenBytes1)
 
 		// Hash initial token
-		hash1, err := bcrypt.GenerateFromPassword([]byte(token1), bcrypt.DefaultCost)
+		hash1, err := bcrypt.GenerateFromPassword([]byte(token1), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash1: %v", err)
 			return true // skip
@@ -1059,7 +1060,7 @@ func TestProperty_TokenRotation_BothHashAndEncryptedDiffer(t *testing.T) {
 		token2 := hex.EncodeToString(tokenBytes2)
 
 		// Hash rotated token
-		hash2, err := bcrypt.GenerateFromPassword([]byte(token2), bcrypt.DefaultCost)
+		hash2, err := bcrypt.GenerateFromPassword([]byte(token2), bcrypt.MinCost)
 		if err != nil {
 			t.Logf("failed to generate hash2: %v", err)
 			return true // skip

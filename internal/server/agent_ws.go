@@ -36,6 +36,8 @@ var agentWebSocketUpgrader = websocket.Upgrader{
 	CheckOrigin:     checkOrigin,
 }
 
+var agentAuthRateLimiter = NewRateLimiter()
+
 // RegisterAgentRoutes adds the edge agent WebSocket endpoint.
 func RegisterAgentRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager) {
 	g.GET("/agent/connect", HandleAgentConnect(database, agentMgr))
@@ -45,6 +47,13 @@ func RegisterAgentRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Ma
 // It authenticates the agent via token and maintains the connection.
 func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		allowed, retryAfter := agentAuthRateLimiter.Allow(c.ClientIP())
+		if !allowed {
+			c.Header("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())+1))
+			c.JSON(429, gin.H{"error": "rate limit exceeded"})
+			return
+		}
+
 		// Upgrade to WebSocket
 		conn, err := agentWebSocketUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
@@ -81,6 +90,9 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 			return
 		}
 
+		conn.SetReadDeadline(time.Time{})
+		conn.SetWriteDeadline(time.Time{})
+
 		// Authentication successful - register the connection
 		agentMgr.RegisterEdgeConnection(instance.ID, conn)
 
@@ -94,62 +106,31 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 
 		// Request host info from the agent
 		reqID := generateRequestID()
-		agentMgr.SendEdgeRequest(instance.ID, &agent.AgentRequest{
+		if resp, err := agentMgr.SendEdgeRequest(instance.ID, &agent.AgentRequest{
 			RequestID: reqID,
 			Method:    "GET",
 			Path:      "/agent/host-info",
-		})
-
-		// Handle incoming messages and keep connection alive
-		// The connection stays open until the agent disconnects
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				// Connection closed or error - handle disconnect
-				if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("Agent WebSocket: agent %s disconnected", instance.ID)
-				} else {
-					log.Printf("Agent WebSocket: error reading from agent %s: %v", instance.ID, err)
-				}
-				break
-			}
-
-			// Handle ping or other messages from agent
-			var resp agent.AgentResponse
-			if err := json.Unmarshal(message, &resp); err != nil {
-				// Invalid message format - discard and continue per requirement 6.9
-				continue
-			}
-
-			// If this is a host info response, update the instance record
-			if resp.RequestID == reqID && len(resp.Body) > 0 {
-				var hostInfo hostInfoUpdate
-				if err := json.Unmarshal(resp.Body, &hostInfo); err == nil {
-					database.UpdateInstanceInfo(instance.ID, db.Instance{
-						DockerVersion: hostInfo.DockerVersion,
-						OS:            hostInfo.OS,
-						CPUCores:      hostInfo.CPUCores,
-						TotalMemory:   hostInfo.TotalMemory,
-					})
-					if hostInfo.AgentVersion != "" {
-						instance, _ := database.GetInstance(instance.ID)
-						if instance != nil {
-							instance.AgentVersion = hostInfo.AgentVersion
-							database.SaveInstance(*instance)
-						}
+		}); err == nil && len(resp.Body) > 0 {
+			var hostInfo hostInfoUpdate
+			if err := json.Unmarshal(resp.Body, &hostInfo); err == nil {
+				database.UpdateInstanceInfo(instance.ID, db.Instance{
+					DockerVersion: hostInfo.DockerVersion,
+					OS:            hostInfo.OS,
+					CPUCores:      hostInfo.CPUCores,
+					TotalMemory:   hostInfo.TotalMemory,
+				})
+				if hostInfo.AgentVersion != "" {
+					instance, _ := database.GetInstance(instance.ID)
+					if instance != nil {
+						instance.AgentVersion = hostInfo.AgentVersion
+						database.SaveInstance(*instance)
 					}
-					log.Printf("Agent WebSocket: updated host info for agent %s", instance.ID)
 				}
+				log.Printf("Agent WebSocket: updated host info for agent %s", instance.ID)
 			}
-
-			// Handle any other messages as needed
-			// Per requirement 6.5, we expect ping frames at least every 30 seconds
-			// The connection handling continues here - if the agent sends a ping, we respond
 		}
 
-		// Agent disconnected - mark as offline and unregister
-		database.UpdateInstanceStatus(instance.ID, "offline")
-		agentMgr.UnregisterEdgeConnection(instance.ID)
+		agentMgr.WaitForDisconnect(instance.ID)
 		log.Printf("Agent WebSocket: agent %s marked as offline", instance.ID)
 	}
 }
