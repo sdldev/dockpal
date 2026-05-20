@@ -166,6 +166,31 @@ curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/installer.sh | 
 
 Installs as systemd service on port 3012. Supports Debian/Ubuntu on linux/amd64.
 
+## Update
+
+Update an existing systemd installation to the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
+```
+
+Install a specific release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo DOCKPAL_VERSION=v1.1.1 bash
+```
+
+The updater downloads and verifies the release binary, backs up the current binary and templates, restarts the service, and rolls back automatically if health checks fail.
+
+Optional variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCKPAL_VERSION` | `latest` | Release tag to install |
+| `DOCKPAL_UPDATE_TEMPLATES` | `1` | Refresh templates from the release archive |
+| `DOCKPAL_FORCE` | `0` | Reinstall even when already on the target version |
+| `DOCKPAL_BACKUP_DIR` | `/opt/dockpal/backups` | Backup directory for binary/templates |
+
 ## License
 
 MIT
