@@ -13,12 +13,18 @@ Manage containers, deploy stacks from compose or templates, monitor resources, a
 - **Compose & Git deploy** — Deploy from raw YAML or Git repository with auto-pull
 - **Streamed deployment logs** — WebSocket-based live progress with smart error diagnostics
 - **Container management** — Start, stop, restart, remove, and in-place edit (memory/CPU limits, restart policy, ports, volumes)
+- **Fleet Dashboard & Bulk Deploy** — Monitor remote agent resource metrics globally and orchestrate multi-agent compose stack deployments in parallel
+- **Webhook Deploy Trigger** — Automate deployment updates via HMAC-SHA256 authenticated webhook endpoints
+- **Role-Based Access Control (RBAC)** — Secure access with roles (`admin`, `operator`, `viewer`) mapped to endpoints and WebSocket logs
+- **System Audit Log** — Store and display structured database action logs for administrator inspection
+- **Built-in HTTPS/TLS** — Zero-config self-signed certificates fallback, manual custom certificate paths, or automated ACME Let's Encrypt certificates
+- **Interactive OpenAPI Documentation** — Fully integrated Redoc API UI interactive documentation at `/api/docs`
 - **Private registry support** — Store encrypted GitHub PAT tokens to pull from private ghcr.io registries
 - **Live log viewer** — Tail container logs over WebSocket
 - **Traefik integration** — Auto-generate reverse proxy config with Let's Encrypt
 - **Cloudflare Tunnel** — Expose services without opening firewall ports
 - **Auto-recovery** — Background health monitor restarts crashed containers
-- **Auto-update** — Checks for new versions on login, shows changelog modal with one-click update
+- **Auto-update** — Safe, asynchronous self-updates utilizing `--no-block` systemd service restarts
 - **Security hardened** — JWT versioning, rate limiting, AES-256-GCM encrypted credentials, input validation
 - **Embedded UI** — No external CDN, works offline, single binary deployment
 
@@ -107,6 +113,9 @@ Environment variables (optional):
 | `DOCKPAL_DATA_DIR` | `/opt/dockpal/data` | Data directory for database and secrets |
 | `DOCKPAL_DB_PATH` | `<DATA_DIR>/dockpal.db` | BBolt database path |
 | `DOCKPAL_LOG_PATH` | `<DATA_DIR>/dockpal.log` | Log file path (auto-rotated at 2MB, retains 5 files) |
+| `DOCKPAL_TLS_DOMAIN`| | Domain name to request ACME Let's Encrypt TLS certificates |
+| `DOCKPAL_TLS_CERT`  | | Path to custom SSL/TLS certificate file |
+| `DOCKPAL_TLS_KEY`   | | Path to custom SSL/TLS private key file |
 
 Reset admin password:
 
@@ -118,7 +127,7 @@ dockpal reset-password
 
 ## 📋 Recommendations
 
-- **Run behind a reverse proxy** (Traefik, Caddy, Nginx) with HTTPS — Dockpal serves plain HTTP
+- **Secure with HTTPS/TLS** — Either configure built-in TLS (via Let's Encrypt or custom cert environment variables) or run behind a reverse proxy (Traefik, Caddy, Nginx).
 - **Change default password** immediately after first login
 - **Use templates first** before writing custom compose files — saves time and avoids common pitfalls
 - **Mark critical containers** with label `dockpal.auto-recover=true` to enable auto-restart
