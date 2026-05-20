@@ -76,6 +76,12 @@ type Instance struct {
 	TotalMemory         int64  `json:"total_memory"`
 	LastSeen            int64  `json:"last_seen"`
 	CreatedAt           int64  `json:"created_at"`
+	SSHHost             string `json:"ssh_host,omitempty"`
+	SSHPort             int    `json:"ssh_port,omitempty"`
+	SSHUser             string `json:"ssh_user,omitempty"`
+	SSHAuthType         string `json:"ssh_auth_type,omitempty"` // "password" | "key"
+	SSHPasswordEncrypted []byte `json:"ssh_password_encrypted,omitempty"`
+	SSHKeyEncrypted      []byte `json:"ssh_key_encrypted,omitempty"`
 }
 
 type DB struct {

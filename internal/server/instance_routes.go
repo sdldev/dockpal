@@ -5,15 +5,19 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/registry"
+	"github.com/sdldev/dockpal/internal/ssh"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -66,7 +70,7 @@ type TestResult struct {
 }
 
 // RegisterInstanceRoutes adds instance CRUD and enrollment endpoints.
-func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string) {
+func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string, logsManager *InstallLogsManager) {
 	g.POST("/instances", RequireRole(auth.RoleAdmin), handleCreateInstance(database, jwtSecret))
 	g.GET("/instances", RequireRole(auth.RoleViewer), handleListInstances(database))
 	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database))
@@ -74,6 +78,8 @@ func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent
 	g.DELETE("/instances/:instance_id", RequireRole(auth.RoleAdmin), handleDeleteInstance(database, agentMgr))
 	g.POST("/instances/:instance_id/test", RequireRole(auth.RoleOperator), handleTestInstance(agentMgr))
 	g.POST("/instances/:instance_id/rotate-token", RequireRole(auth.RoleAdmin), handleRotateToken(database, jwtSecret))
+	g.POST("/instances/:instance_id/install", RequireRole(auth.RoleAdmin), handleInstallAgent(database, jwtSecret, logsManager))
+	g.GET("/instances/:instance_id/install/logs", RequireRole(auth.RoleAdmin), handleInstallAgentLogs(logsManager))
 }
 
 // handleCreateInstance creates a new instance with a generated agent token.
@@ -465,22 +471,242 @@ func generateInstanceID() string {
 
 // generateInstallCommand generates the Docker run command for agent installation.
 func generateInstallCommand(mode, serverHost, token string) string {
+	agentImg := os.Getenv("DOCKPAL_AGENT_IMAGE")
+	if agentImg == "" {
+		agentImg = "ghcr.io/sdldev/dockpal-agent:latest"
+	}
+
+	var runCmd string
 	switch mode {
 	case "direct":
 		// For direct mode: include host, port mapping, token
-		return fmt.Sprintf(
-			"docker run -d --name dockpal-agent \\\n  -e DOCKPAL_MODE=direct \\\n  -e DOCKPAL_TOKEN=%s \\\n  -p 9273:9273 \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  sdldev/dockpal-agent:latest",
+		runCmd = fmt.Sprintf(
+			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=direct \\\n  -e DOCKPAL_TOKEN=%s \\\n  -p 9273:9273 \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  %s",
 			token,
+			agentImg,
 		)
 	case "edge":
 		// For edge mode: include server WebSocket URL, token, no port mapping
 		wsURL := fmt.Sprintf("wss://%s/api/agent/connect", serverHost)
-		return fmt.Sprintf(
-			"docker run -d --name dockpal-agent \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  sdldev/dockpal-agent:latest",
+		runCmd = fmt.Sprintf(
+			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  %s",
 			wsURL,
 			token,
+			agentImg,
 		)
 	default:
 		return ""
+	}
+
+	return fmt.Sprintf(
+		"if ! command -v docker >/dev/null 2>&1; then\n  echo \"[Dockpal] Docker is not installed. Installing Docker...\"\n  curl -fsSL https://get.docker.com | sh\n  sudo systemctl enable --now docker || true\nfi\n\n%s",
+		runCmd,
+	)
+}
+
+type InstallAgentRequest struct {
+	SSHHost       string `json:"ssh_host" binding:"required"`
+	SSHPort       int    `json:"ssh_port"`
+	SSHUser       string `json:"ssh_user"`
+	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key"`
+	SSHSecret     string `json:"ssh_secret" binding:"required"`
+	InstallDocker bool   `json:"install_docker"`
+}
+
+type logWriter struct {
+	instanceID string
+	mgr        *InstallLogsManager
+}
+
+func (lw *logWriter) Write(p []byte) (n int, err error) {
+	lines := strings.Split(string(p), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimRight(line, "\r")
+		if trimmed != "" {
+			lw.mgr.WriteLog(lw.instanceID, trimmed)
+		}
+	}
+	return len(p), nil
+}
+
+func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallLogsManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("instance_id")
+
+		var req InstallAgentRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request: %v", err)})
+			return
+		}
+
+		inst, err := database.GetInstance(id)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get instance"})
+			return
+		}
+
+		// Decrypt agent token
+		cryptoKey, err := registry.DeriveKey(jwtSecret)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive decryption key"})
+			return
+		}
+
+		tokenBytes, err := registry.Decrypt(inst.AgentTokenEncrypted, cryptoKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt agent token"})
+			return
+		}
+		token := hex.EncodeToString(tokenBytes)
+
+		// Encrypt SSH Secret (password or key)
+		encryptedSecret, err := registry.Encrypt([]byte(req.SSHSecret), cryptoKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt SSH secret"})
+			return
+		}
+
+		// Update SSH details in database
+		inst.SSHHost = req.SSHHost
+		inst.SSHPort = req.SSHPort
+		if inst.SSHPort == 0 {
+			inst.SSHPort = 22
+		}
+		inst.SSHUser = req.SSHUser
+		if inst.SSHUser == "" {
+			inst.SSHUser = "root"
+		}
+		inst.SSHAuthType = req.SSHAuthType
+		if req.SSHAuthType == "key" {
+			inst.SSHKeyEncrypted = encryptedSecret
+			inst.SSHPasswordEncrypted = nil
+		} else {
+			inst.SSHPasswordEncrypted = encryptedSecret
+			inst.SSHKeyEncrypted = nil
+		}
+		inst.Status = "enrolling"
+
+		if err := database.SaveInstance(*inst); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save instance details"})
+			return
+		}
+
+		LogAudit(c, database, "instance.install_start", id, "success", fmt.Sprintf("Started agent installation on remote host %s:%d", req.SSHHost, req.SSHPort))
+
+		// Clear/Reset logs for this session
+		logsManager.RemoveSession(id)
+
+		// Capture parameters for the background goroutine
+		host := c.Request.Host
+		isSecureWS := c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https"
+
+		go func() {
+			lw := &logWriter{instanceID: id, mgr: logsManager}
+			logsManager.WriteLogf(id, "[Dockpal Installer] Initializing installation on remote host %s:%d...\n", req.SSHHost, req.SSHPort)
+
+			agentImg := os.Getenv("DOCKPAL_AGENT_IMAGE")
+			if agentImg == "" {
+				agentImg = "ghcr.io/sdldev/dockpal-agent:latest"
+			}
+
+			params := ssh.InstallParams{
+				Host:          req.SSHHost,
+				Port:          req.SSHPort,
+				User:          req.SSHUser,
+				AuthType:      req.SSHAuthType,
+				AuthSecret:    req.SSHSecret,
+				InstallDocker: req.InstallDocker,
+				Mode:          inst.Mode,
+				Token:         token,
+				ServerHost:    host,
+				AgentImage:    agentImg,
+				IsSecureWS:    isSecureWS,
+			}
+
+			err := ssh.InstallAgent(params, lw)
+			if err != nil {
+				log.Printf("SSH Install on instance %s failed: %v", id, err)
+				logsManager.WriteLogf(id, "[Dockpal Installer] Error: %v\n", err)
+				
+				// update status to offline if failed
+				instCopy, _ := database.GetInstance(id)
+				if instCopy != nil {
+					instCopy.Status = "offline"
+					database.SaveInstance(*instCopy)
+				}
+			} else {
+				log.Printf("SSH Install on instance %s completed successfully", id)
+				logsManager.WriteLog(id, "[Dockpal Installer] Installation completed successfully! Waiting for agent to connect...")
+			}
+			logsManager.CompleteSession(id)
+		}()
+
+		c.JSON(http.StatusAccepted, gin.H{"message": "installation started"})
+	}
+}
+
+var installWebSocketUpgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow UI origin
+	},
+}
+
+func handleInstallAgentLogs(logsManager *InstallLogsManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("instance_id")
+
+		conn, err := installWebSocketUpgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			log.Printf("Failed to upgrade installation logs WebSocket: %v", err)
+			return
+		}
+		defer conn.Close()
+
+		ch, history, deregister := logsManager.RegisterListener(id)
+		defer deregister()
+
+		// 1. Send all existing log history
+		for _, line := range history {
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+				return
+			}
+		}
+
+		// 2. Stream new logs as they arrive
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		go func() {
+			for {
+				_, _, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+			}
+		}()
+
+		for {
+			select {
+			case line, ok := <-ch:
+				if !ok {
+					// Channel closed, session completed
+					_ = conn.WriteMessage(websocket.TextMessage, []byte("[Dockpal Installer] Session disconnected."))
+					return
+				}
+				if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+					return
+				}
+			case <-ticker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			}
+		}
 	}
 }

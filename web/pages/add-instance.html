@@ -1,0 +1,412 @@
+<!-- ===== ADD NEW INSTANCE PAGE ===== -->
+<div x-show="currentPage === 'add-instance'" x-cloak class="max-w-6xl mx-auto space-y-6">
+  
+  <!-- Breadcrumbs & Header -->
+  <div class="flex items-center justify-between">
+    <div class="space-y-1">
+      <div class="flex items-center gap-2 text-xs text-zinc-500 font-medium">
+        <button @click="currentPage = 'instances'; loadInstances();" class="hover:text-zinc-300 transition-colors">Instances</button>
+        <svg class="w-3 h-3 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        <span class="text-zinc-400">Add New Instance</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button @click="currentPage = 'instances'; loadInstances();" class="p-1 text-zinc-400 hover:text-white hover:bg-zinc-900 border border-zinc-800 rounded transition-colors" title="Back">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+        </button>
+        <h2 class="text-xl font-bold text-white tracking-tight">Add New Instance</h2>
+      </div>
+    </div>
+  </div>
+
+  <form @submit.prevent="addInstance()" class="space-y-6">
+    
+    <!-- MAIN FORM VIEW (Shown when NOT installing and NOT showing manual install command) -->
+    <div x-show="!instanceForm.installing && !instanceForm.installCommand" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      
+      <!-- Left Column: Form Fields (2/3 width) -->
+      <div class="lg:col-span-2 space-y-6">
+        
+        <!-- Step 1: Profile & Mode Selection -->
+        <div class="bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-6 space-y-5 backdrop-blur-sm">
+          <div class="flex items-center gap-2.5 pb-3 border-b border-zinc-800/50">
+            <span class="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs font-semibold">1</span>
+            <h3 class="text-sm font-semibold text-white">Profile & Connection Mode</h3>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Name Input -->
+            <div class="space-y-1.5">
+              <label class="text-xs font-medium text-zinc-400">Instance Name</label>
+              <input type="text" x-model="instanceForm.name" required minlength="1" maxlength="64"
+                class="w-full px-3.5 py-2.5 bg-zinc-950/70 border border-zinc-800 rounded-md text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                placeholder="e.g. production-vps-1">
+              <p class="text-[10px] text-zinc-500">A unique, friendly name to identify this server in your fleet.</p>
+            </div>
+
+            <!-- Mode Radio Cards -->
+            <div class="space-y-2">
+              <label class="text-xs font-medium text-zinc-400">Connection Mode</label>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                
+                <!-- Direct Mode Card -->
+                <div @click="instanceForm.mode = 'direct'; instanceForm.host = ''; instanceForm.port = 9273;"
+                  :class="instanceForm.mode === 'direct' ? 'border-blue-600 bg-blue-500/[0.03] ring-1 ring-blue-600' : 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-700'"
+                  class="border rounded-lg p-4 cursor-pointer transition-all flex flex-col justify-between">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="space-y-1">
+                      <div class="font-medium text-sm" :class="instanceForm.mode === 'direct' ? 'text-white' : 'text-zinc-300'">Direct Mode</div>
+                      <p class="text-xs text-zinc-500 leading-normal">Server connects to Agent. Best if the remote server has a public static IP or VPN access.</p>
+                    </div>
+                    <div :class="instanceForm.mode === 'direct' ? 'border-blue-500 bg-blue-500' : 'border-zinc-700'" class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0">
+                      <div x-show="instanceForm.mode === 'direct'" class="w-1.5 h-1.5 bg-zinc-950 rounded-full"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Edge Mode Card -->
+                <div @click="instanceForm.mode = 'edge'; instanceForm.host = ''; instanceForm.port = 9273;"
+                  :class="instanceForm.mode === 'edge' ? 'border-blue-600 bg-blue-500/[0.03] ring-1 ring-blue-600' : 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-700'"
+                  class="border rounded-lg p-4 cursor-pointer transition-all flex flex-col justify-between">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="space-y-1">
+                      <div class="font-medium text-sm" :class="instanceForm.mode === 'edge' ? 'text-white' : 'text-zinc-300'">Edge Mode (Recommended)</div>
+                      <p class="text-xs text-zinc-500 leading-normal">Agent initiates connection to Server. Perfect for NAT, home-labs, or strict firewalls.</p>
+                    </div>
+                    <div :class="instanceForm.mode === 'edge' ? 'border-blue-500 bg-blue-500' : 'border-zinc-700'" class="w-4 h-4 rounded-full border flex items-center justify-center shrink-0">
+                      <div x-show="instanceForm.mode === 'edge'" class="w-1.5 h-1.5 bg-zinc-950 rounded-full"></div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- Host/Port inputs (Direct Mode only) -->
+            <div x-show="instanceForm.mode === 'direct'" x-transition class="grid grid-cols-3 gap-4 pt-2">
+              <div class="col-span-2 space-y-1.5">
+                <label class="text-xs font-medium text-zinc-400">Agent Host IP / Domain</label>
+                <input type="text" x-model="instanceForm.host" :required="instanceForm.mode === 'direct'"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  placeholder="192.168.1.100">
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-zinc-400">Agent HTTP Port</label>
+                <input type="number" x-model.number="instanceForm.port" min="1" max="65535"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  placeholder="9273">
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Step 2: Deployment Method Selector -->
+        <div class="bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-6 space-y-5 backdrop-blur-sm">
+          <div class="flex items-center gap-2.5 pb-3 border-b border-zinc-800/50">
+            <span class="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs font-semibold">2</span>
+            <h3 class="text-sm font-semibold text-white">Deployment & Installation Setup</h3>
+          </div>
+
+          <div class="space-y-4">
+            
+            <!-- Install Option Tabs -->
+            <div class="grid grid-cols-2 bg-zinc-950 p-1 rounded-lg border border-zinc-800/60">
+              <button type="button" @click="instanceForm.autoInstall = false"
+                :class="!instanceForm.autoInstall ? 'bg-zinc-800 text-white font-medium shadow-sm' : 'text-zinc-400 hover:text-zinc-200'"
+                class="py-2 text-xs rounded-md transition-all">
+                Manual Setup (Run Command)
+              </button>
+              <button type="button" @click="instanceForm.autoInstall = true"
+                :class="instanceForm.autoInstall ? 'bg-zinc-800 text-white font-medium shadow-sm' : 'text-zinc-400 hover:text-zinc-200'"
+                class="py-2 text-xs rounded-md transition-all">
+                Auto-Install via SSH (Recommended)
+              </button>
+            </div>
+
+            <!-- Manual Setup Helper Text -->
+            <div x-show="!instanceForm.autoInstall" x-transition class="p-4 bg-zinc-950/40 border border-zinc-800/60 rounded-lg flex gap-3">
+              <span class="text-zinc-500 mt-0.5 text-base">📋</span>
+              <div class="space-y-1">
+                <div class="text-xs font-semibold text-zinc-300">How manual setup works</div>
+                <p class="text-xs text-zinc-500 leading-relaxed">
+                  Dockpal will register this instance in an enrolling state. We will provide a pre-configured <code>docker run</code> command.
+                  You simply copy and execute that command on your remote server's terminal to deploy and link the agent.
+                </p>
+              </div>
+            </div>
+
+            <!-- Auto-Install via SSH Form Fields -->
+            <div x-show="instanceForm.autoInstall" x-transition class="space-y-4 pt-2">
+              
+              <!-- SSH Host & Port -->
+              <div class="grid grid-cols-3 gap-4">
+                <div class="col-span-2 space-y-1.5">
+                  <label class="text-xs font-medium text-zinc-400">SSH Target Host / VPS IP</label>
+                  <input type="text" x-model="instanceForm.sshHost" :required="instanceForm.autoInstall"
+                    class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    placeholder="e.g. 159.223.45.10">
+                </div>
+                <div class="space-y-1.5">
+                  <label class="text-xs font-medium text-zinc-400">SSH Port</label>
+                  <input type="number" x-model.number="instanceForm.sshPort" required min="1" max="65535"
+                    class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    placeholder="22">
+                </div>
+              </div>
+
+              <!-- SSH User -->
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-zinc-400">SSH Username</label>
+                <input type="text" x-model="instanceForm.sshUser" required
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  placeholder="root">
+              </div>
+
+              <!-- Auth Type Tab Select -->
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-zinc-400">SSH Authentication Mode</label>
+                <div class="flex gap-2">
+                  <button type="button" @click="instanceForm.sshAuthType = 'password'"
+                    :class="instanceForm.sshAuthType === 'password' ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-zinc-950 text-zinc-400 border-zinc-850 hover:bg-zinc-900'"
+                    class="flex-1 py-2 px-3 border rounded text-xs font-medium transition-colors">
+                    Password Authentication
+                  </button>
+                  <button type="button" @click="instanceForm.sshAuthType = 'key'"
+                    :class="instanceForm.sshAuthType === 'key' ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-zinc-950 text-zinc-400 border-zinc-850 hover:bg-zinc-900'"
+                    class="flex-1 py-2 px-3 border rounded text-xs font-medium transition-colors">
+                    SSH Private Key Authentication
+                  </button>
+                </div>
+              </div>
+
+              <!-- Auth Secrets Form -->
+              <div class="space-y-1.5">
+                <label class="text-xs font-medium text-zinc-400" x-text="instanceForm.sshAuthType === 'key' ? 'SSH Private Key Content' : 'SSH Password'"></label>
+                
+                <!-- Password input -->
+                <template x-if="instanceForm.sshAuthType === 'password'">
+                  <input type="password" x-model="instanceForm.sshSecret" :required="instanceForm.autoInstall && instanceForm.sshAuthType === 'password'"
+                    class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600 placeholder:text-zinc-700"
+                    placeholder="Enter SSH connection password">
+                </template>
+
+                <!-- Private Key textarea -->
+                <template x-if="instanceForm.sshAuthType === 'key'">
+                  <textarea x-model="instanceForm.sshSecret" :required="instanceForm.autoInstall && instanceForm.sshAuthType === 'key'" rows="5"
+                    class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-md text-xs text-white font-mono placeholder:text-zinc-700 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"></textarea>
+                </template>
+              </div>
+
+              <!-- Install Docker Checkbox -->
+              <div class="flex items-center gap-2.5 pt-2">
+                <input type="checkbox" id="installDocker" x-model="instanceForm.installDocker"
+                  class="w-4 h-4 rounded border-zinc-800 bg-zinc-950 text-blue-600 focus:ring-0 focus:ring-offset-0 cursor-pointer">
+                <label for="installDocker" class="text-xs text-zinc-400 select-none cursor-pointer hover:text-zinc-300">
+                  Automatically check and install Docker engine if not present
+                </label>
+              </div>
+
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Form Submission Actions -->
+        <div class="flex items-center justify-end gap-3 pt-2">
+          <button type="button" @click="currentPage = 'instances'; loadInstances();" class="px-5 py-2.5 text-sm text-zinc-400 hover:text-white transition-colors">
+            Cancel
+          </button>
+          <button type="submit" :disabled="!instanceForm.name || (instanceForm.mode === 'direct' && !instanceForm.host) || (instanceForm.autoInstall && (!instanceForm.sshHost || !instanceForm.sshSecret))"
+            :class="!instanceForm.name || (instanceForm.mode === 'direct' && !instanceForm.host) || (instanceForm.autoInstall && (!instanceForm.sshHost || !instanceForm.sshSecret)) ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50' : 'bg-white hover:bg-zinc-200 text-zinc-900 hover:scale-[1.01] active:scale-100'"
+            class="px-6 py-2.5 rounded-md text-sm font-semibold transition-all shadow-md flex items-center gap-2">
+            <span x-text="instanceForm.autoInstall ? 'Register & Auto-Install' : 'Register & Generate Command'"></span>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Right Column: Sidebar Info (1/3 width) -->
+      <div class="space-y-6">
+        
+        <!-- Mode Guide Info Card -->
+        <div class="bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-5 space-y-4 backdrop-blur-sm text-xs">
+          <h4 class="text-sm font-semibold text-white">Dockpal Connection Modes</h4>
+          
+          <div class="space-y-3.5 leading-relaxed text-zinc-400">
+            <div class="space-y-1">
+              <span class="font-medium text-white block">🌐 Direct Mode</span>
+              <p>In direct mode, the Dockpal server acts as the client and initiates API requests to the agent running on port <code>9273</code>. Ensure that port is open on your firewall and the agent host is reachable via VPN or public IP.</p>
+            </div>
+            
+            <div class="space-y-1">
+              <span class="font-medium text-white block">☁️ Edge Mode (Recommended)</span>
+              <p>In edge mode, the remote agent connects directly to the Dockpal server using a secure persistent WebSocket connection. No inbound firewall rules are needed on the remote agent server, making this highly secure and firewall friendly.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Security Info Card -->
+        <div class="bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-5 space-y-3 backdrop-blur-sm text-xs">
+          <div class="flex items-center gap-2 font-semibold text-white">
+            <span class="text-blue-400">🛡️</span>
+            <span>Security & Cryptography</span>
+          </div>
+          <p class="text-zinc-400 leading-relaxed">
+            All SSH passwords and private keys are encrypted at rest using high-performance <strong>AES-256-GCM</strong>. 
+            The unique cryptographic encryption key is securely derived on startup using cryptographic secrets unique to this Dockpal instance.
+            Your credentials are never stored in plaintext and never leave this server.
+          </p>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- FULLSCREEN TERMINAL LOG VIEW (Shown when auto-installing) -->
+    <div x-show="instanceForm.installing" x-cloak class="bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-6 space-y-6 backdrop-blur-sm">
+      
+      <!-- Installation Title Header -->
+      <div class="flex items-center justify-between pb-4 border-b border-zinc-800/50">
+        <div class="space-y-1">
+          <span class="text-xs text-zinc-500 font-semibold tracking-wider uppercase">SSH Agent Deployment</span>
+          <div class="flex items-center gap-2.5">
+            <span class="flex h-2 h-2 w-2 relative">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+            </span>
+            <h3 class="text-base font-bold text-white">Installing Dockpal Agent on <span x-text="instanceForm.sshHost || instanceForm.host"></span></h3>
+          </div>
+        </div>
+        <span class="text-[10px] text-zinc-500 font-mono bg-zinc-950 px-2 py-1 rounded border border-zinc-850">Log stream active</span>
+      </div>
+
+      <!-- Main Log Body Grid (Steps + Terminal Output) -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        
+        <!-- Left panel: Visual Step Progress Tracker -->
+        <div class="md:col-span-1 space-y-4">
+          <div class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Installation Steps</div>
+          
+          <div class="relative pl-4 border-l border-zinc-800 space-y-6 text-xs">
+            
+            <!-- Step 1: SSH Connection -->
+            <div class="relative">
+              <span :class="instanceForm.installLogs.some(l => l.includes('established successfully')) ? 'bg-green-500/20 border-green-500 text-green-400' : 
+                            (instanceForm.installLogs.some(l => l.includes('Connecting to')) ? 'bg-blue-500/20 border-blue-500 text-blue-400 animate-pulse' : 'bg-zinc-950 border-zinc-800 text-zinc-600')"
+                class="absolute -left-[25px] top-0 w-[18px] h-[18px] rounded-full border bg-zinc-950 text-[10px] flex items-center justify-center font-bold">1</span>
+              <div class="font-medium" :class="instanceForm.installLogs.some(l => l.includes('established successfully')) ? 'text-green-400 font-semibold' : 'text-zinc-400'">
+                SSH Connection
+              </div>
+              <p class="text-[10px] text-zinc-500 mt-0.5">Authenticate & link shell</p>
+            </div>
+
+            <!-- Step 2: Docker Verification -->
+            <div class="relative">
+              <span :class="instanceForm.installLogs.some(l => l.includes('Docker installation finished') || l.includes('Docker is already installed')) ? 'bg-green-500/20 border-green-500 text-green-400' : 
+                            (instanceForm.installLogs.some(l => l.includes('Checking if Docker is installed')) ? 'bg-blue-500/20 border-blue-500 text-blue-400 animate-pulse' : 'bg-zinc-950 border-zinc-800 text-zinc-600')"
+                class="absolute -left-[25px] top-0 w-[18px] h-[18px] rounded-full border bg-zinc-950 text-[10px] flex items-center justify-center font-bold">2</span>
+              <div class="font-medium" :class="instanceForm.installLogs.some(l => l.includes('Docker installation finished') || l.includes('Docker is already installed')) ? 'text-green-400 font-semibold' : 'text-zinc-400'">
+                Verify Docker
+              </div>
+              <p class="text-[10px] text-zinc-500 mt-0.5">Ensure Docker is active</p>
+            </div>
+
+            <!-- Step 3: Fetching Agent Image -->
+            <div class="relative">
+              <span :class="instanceForm.installLogs.some(l => l.includes('Cleaning up any existing')) ? 'bg-green-500/20 border-green-500 text-green-400' : 
+                            (instanceForm.installLogs.some(l => l.includes('Pulling Agent Docker image')) ? 'bg-blue-500/20 border-blue-500 text-blue-400 animate-pulse' : 'bg-zinc-950 border-zinc-800 text-zinc-600')"
+                class="absolute -left-[25px] top-0 w-[18px] h-[18px] rounded-full border bg-zinc-950 text-[10px] flex items-center justify-center font-bold">3</span>
+              <div class="font-medium" :class="instanceForm.installLogs.some(l => l.includes('Cleaning up any existing')) ? 'text-green-400 font-semibold' : 'text-zinc-400'">
+                Pull Agent Image
+              </div>
+              <p class="text-[10px] text-zinc-500 mt-0.5">Download official agent</p>
+            </div>
+
+            <!-- Step 4: Starting Agent Container -->
+            <div class="relative">
+              <span :class="instanceForm.installLogs.some(l => l.includes('Installation completed successfully')) ? 'bg-green-500/20 border-green-500 text-green-400' : 
+                            (instanceForm.installLogs.some(l => l.includes('Starting Dockpal Agent container')) ? 'bg-blue-500/20 border-blue-500 text-blue-400 animate-pulse' : 'bg-zinc-950 border-zinc-800 text-zinc-600')"
+                class="absolute -left-[25px] top-0 w-[18px] h-[18px] rounded-full border bg-zinc-950 text-[10px] flex items-center justify-center font-bold">4</span>
+              <div class="font-medium" :class="instanceForm.installLogs.some(l => l.includes('Installation completed successfully')) ? 'text-green-400 font-semibold' : 'text-zinc-400'">
+                Run Container
+              </div>
+              <p class="text-[10px] text-zinc-500 mt-0.5">Spin up agent container</p>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Right panel: Spacious Terminal Log Window -->
+        <div class="md:col-span-3 space-y-4">
+          <div class="flex items-center justify-between text-xs text-zinc-400 font-medium">
+            <span>Terminal Logs</span>
+            <!-- Stop signal/Error status -->
+            <span x-show="instanceForm.installLogs.some(l => l.includes('Error') || l.includes('failed'))" class="text-red-400 font-semibold flex items-center gap-1">
+              <span>⚠️ Installation Failed</span>
+            </span>
+          </div>
+
+          <div id="install-terminal-logs" class="h-80 px-5 py-4 bg-black border border-zinc-850 rounded-lg text-xs font-mono text-zinc-300 overflow-y-auto space-y-1.5 shadow-inner">
+            <template x-for="(logLine, index) in instanceForm.installLogs" :key="index">
+              <div :class="logLine.includes('Error') || logLine.includes('failed') ? 'text-red-400 font-semibold' : 
+                            logLine.includes('success') || logLine.includes('completed') || logLine.includes('successfully') ? 'text-green-400 font-semibold' : 
+                            logLine.includes('[Dockpal Installer]') ? 'text-blue-400' : 'text-zinc-300'" 
+                   x-text="logLine"></div>
+            </template>
+          </div>
+
+          <p class="text-[10px] text-zinc-500 text-center">Do not close this page or navigate away during the installation process.</p>
+        </div>
+
+      </div>
+
+      <!-- Action buttons (Only shows when installation finishes or fails) -->
+      <div x-show="!instanceForm.installing" class="flex justify-end pt-4 border-t border-zinc-800/50">
+        <button type="button" @click="currentPage = 'instances'; loadInstances();"
+          class="px-6 py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-md text-sm font-semibold transition-all shadow-md">
+          Done
+        </button>
+      </div>
+
+    </div>
+
+    <!-- SUCCESS VIEW FOR MANUAL INSTALLATION (Shown when installCommand is generated) -->
+    <div x-show="instanceForm.installCommand" x-cloak class="bg-zinc-900/60 border border-zinc-800/80 rounded-lg p-8 space-y-6 max-w-2xl mx-auto backdrop-blur-sm text-center">
+      
+      <!-- Big green check check icon -->
+      <div class="mx-auto w-14 h-14 bg-green-500/10 text-green-400 border border-green-500/20 rounded-full flex items-center justify-center text-2xl font-bold">
+        ✓
+      </div>
+
+      <div class="space-y-2">
+        <h3 class="text-lg font-bold text-white">Instance Created Successfully!</h3>
+        <p class="text-xs text-zinc-400 max-w-md mx-auto leading-relaxed">
+          Dockpal registered <strong><span x-text="instanceForm.name"></span></strong>. Run the following Docker command on your remote server to start managing it.
+        </p>
+      </div>
+
+      <!-- Custom terminal presentation for the code -->
+      <div class="space-y-2 text-left">
+        <div class="flex items-center justify-between text-xs text-zinc-400 font-medium px-1">
+          <span>Docker Run Command</span>
+          <button type="button" @click="copyInstallCommand()" class="text-blue-400 hover:text-blue-300 font-semibold transition-colors flex items-center gap-1">
+            <span>Copy Command</span>
+          </button>
+        </div>
+        <div class="relative">
+          <code class="block w-full px-4 py-3 bg-black border border-zinc-850 rounded-lg text-xs text-blue-400 font-mono overflow-x-auto whitespace-pre leading-relaxed" x-text="instanceForm.installCommand"></code>
+        </div>
+      </div>
+
+      <div class="flex justify-center pt-4">
+        <button type="button" @click="currentPage = 'instances'; loadInstances();" class="px-6 py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-md text-sm font-semibold transition-all shadow-md">
+          Done, Back to Instances
+        </button>
+      </div>
+
+    </div>
+
+  </form>
+</div>

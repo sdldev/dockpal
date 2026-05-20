@@ -6,7 +6,7 @@
       <h2 class="text-lg font-semibold text-white">Instances</h2>
       <p class="text-sm text-zinc-500">Manage Docker hosts</p>
     </div>
-    <button @click="showAddInstanceModal()" class="px-4 py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all">
+    <button @click="navigateToAddInstance()" class="px-4 py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all">
       Add Instance
     </button>
   </div>
@@ -75,7 +75,7 @@
     <!-- Empty state -->
     <div x-show="instances.length === 0" class="text-center py-12 text-zinc-600 text-sm">
       <p>No instances found</p>
-      <button @click="showAddInstanceModal()" class="mt-2 text-blue-400 hover:text-blue-300">Add your first instance</button>
+      <button @click="navigateToAddInstance()" class="mt-2 text-blue-400 hover:text-blue-300">Add your first instance</button>
     </div>
   </div>
   
@@ -88,68 +88,5 @@
     </p>
   </div>
 
-  <!-- Add Instance Modal -->
-  <div x-show="addInstanceModalVisible" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <!-- Backdrop -->
-    <div x-show="addInstanceModalVisible" @click="addInstanceModalVisible = false" class="absolute inset-0 bg-black/70"></div>
-    <!-- Modal -->
-    <div x-show="addInstanceModalVisible" class="relative bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-full max-w-md">
-      <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h3 class="text-base font-semibold text-white">Add Instance</h3>
-        <button @click="addInstanceModalVisible = false" class="text-zinc-500 hover:text-white">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-      </div>
-      <form @submit.prevent="addInstance()" class="p-6 space-y-4">
-        <div class="space-y-1.5">
-          <label class="text-xs text-zinc-400">Name</label>
-          <input type="text" x-model="instanceForm.name" required minlength="1" maxlength="64"
-            class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600"
-            placeholder="my-docker-host">
-        </div>
-        <div class="space-y-1.5">
-          <label class="text-xs text-zinc-400">Mode</label>
-          <select x-model="instanceForm.mode" @change="instanceForm.host = ''; instanceForm.port = 9273;"
-            class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600">
-            <option value="direct">Direct (agent reachable via HTTP)</option>
-            <option value="edge">Edge (agent connects to server)</option>
-          </select>
-        </div>
-        <!-- Host and port - only for direct mode -->
-        <template x-if="instanceForm.mode === 'direct'">
-          <div class="grid grid-cols-3 gap-3">
-            <div class="col-span-2 space-y-1.5">
-              <label class="text-xs text-zinc-400">Host</label>
-              <input type="text" x-model="instanceForm.host" :required="instanceForm.mode === 'direct'"
-                class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600"
-                placeholder="192.168.1.100">
-            </div>
-            <div class="space-y-1.5">
-              <label class="text-xs text-zinc-400">Port</label>
-              <input type="number" x-model.number="instanceForm.port" min="1" max="65535"
-                class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-                placeholder="9273">
-            </div>
-          </div>
-        </template>
-        <!-- Install command display -->
-        <div x-show="instanceForm.installCommand" class="space-y-1.5">
-          <label class="text-xs text-zinc-400">Install Command</label>
-          <div class="flex gap-2">
-            <code class="flex-1 px-3 py-2 bg-black/50 border border-zinc-800 rounded-sm text-xs text-blue-400 font-mono overflow-x-auto" x-text="instanceForm.installCommand"></code>
-            <button type="button" @click="copyInstallCommand()" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-sm text-xs">
-              Copy
-            </button>
-          </div>
-        </div>
-        <div class="flex justify-end gap-3 pt-4">
-          <button type="button" @click="addInstanceModalVisible = false" class="px-4 py-2 text-sm text-zinc-400 hover:text-white">Cancel</button>
-          <button x-show="!instanceForm.installCommand" type="submit" :disabled="!instanceForm.name || (instanceForm.mode === 'direct' && !instanceForm.host)"
-            class="px-4 py-2 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium">
-            Add Instance
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
+
 </div>

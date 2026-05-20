@@ -33,7 +33,7 @@
           </div>
           <!-- Nav link -->
           <button x-show="!item.type" @click="currentPage=item.id; sidebarOpen=false; loadPageData(item.id)"
-            :class="currentPage===item.id ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'"
+            :class="(currentPage === item.id || (item.id === 'instances' && currentPage === 'add-instance')) ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-800/50'"
             class="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm font-medium transition-colors">
             <span x-html="item.icon" class="w-5 h-5 flex items-center justify-center"></span>
             <span x-text="item.label"></span>

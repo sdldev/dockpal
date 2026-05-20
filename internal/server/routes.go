@@ -260,7 +260,8 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.DELETE("/webhooks/:webhook_id", HandleDeleteWebhook(database))
 
 	// Instance management routes (new)
-	RegisterInstanceRoutes(baseProtected, database, agentMgr, jwtSecret)
+	logsManager := NewInstallLogsManager()
+	RegisterInstanceRoutes(baseProtected, database, agentMgr, jwtSecret, logsManager)
 
 	// Agent WebSocket endpoint (unauthenticated — agent uses token in message)
 	r.GET("/api/agent/connect", HandleAgentConnect(database, agentMgr))

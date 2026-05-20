@@ -80,8 +80,6 @@ Dockpal.initialState = function() {
       domains: { search: '' }
     },
 
-    // Instance management modal state (Requirement 11)
-    addInstanceModalVisible: false,
     instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' },
 
     // Update modal state
@@ -200,10 +198,24 @@ Dockpal.instances = {
     }
   },
 
-  // Instance management functions (Requirements 11.2-11.7)
-  showAddInstanceModal() {
-    this.instanceForm = { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' };
-    this.addInstanceModalVisible = true;
+  navigateToAddInstance() {
+    this.instanceForm = {
+      name: '',
+      mode: 'direct',
+      host: '',
+      port: 9273,
+      installCommand: '',
+      autoInstall: false,
+      sshHost: '',
+      sshPort: 22,
+      sshUser: 'root',
+      sshAuthType: 'password',
+      sshSecret: '',
+      installDocker: true,
+      installing: false,
+      installLogs: []
+    };
+    this.currentPage = 'add-instance';
   },
 
   async addInstance() {
@@ -222,8 +234,15 @@ Dockpal.instances = {
       const resp = await this.api('POST', '/api/instances', payload);
       if (resp && resp.ok) {
         const data = await resp.json();
-        // Show install command
-        this.instanceForm.installCommand = data.install_command || '';
+        
+        if (form.autoInstall) {
+          this.instanceForm.installing = true;
+          this.startSSHInstall(data.id);
+        } else {
+          // Show install command
+          this.instanceForm.installCommand = data.install_command || '';
+        }
+        
         // Reload instances list
         await this.loadInstances();
       } else {
@@ -233,6 +252,62 @@ Dockpal.instances = {
     } catch (e) {
       this.toast('Failed to connect to server', 'error', 5000);
     }
+  },
+
+  startSSHInstall(instanceId) {
+    this.instanceForm.installLogs = [];
+    this.instanceForm.installLogs.push('[Dockpal] Connecting to logs channel...');
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/instances/${instanceId}/install/logs`;
+    
+    const ws = new WebSocket(wsUrl);
+    
+    ws.onmessage = (event) => {
+      this.instanceForm.installLogs.push(event.data);
+      setTimeout(() => {
+        const terminal = document.getElementById('install-terminal-logs');
+        if (terminal) {
+          terminal.scrollTop = terminal.scrollHeight;
+        }
+      }, 30);
+    };
+    
+    ws.onerror = (err) => {
+      this.instanceForm.installLogs.push('[Dockpal] WebSocket error connecting to logs stream.');
+    };
+    
+    ws.onclose = () => {
+      this.instanceForm.installLogs.push('[Dockpal] Disconnected from logs channel.');
+      this.instanceForm.installing = false;
+      this.loadInstances();
+    };
+    
+    const payload = {
+      ssh_host: this.instanceForm.sshHost || this.instanceForm.host,
+      ssh_port: parseInt(this.instanceForm.sshPort) || 22,
+      ssh_user: this.instanceForm.sshUser || 'root',
+      ssh_auth_type: this.instanceForm.sshAuthType,
+      ssh_secret: this.instanceForm.sshSecret,
+      install_docker: this.instanceForm.installDocker
+    };
+    
+    this.api('POST', `/api/instances/${instanceId}/install`, payload)
+      .then(async (resp) => {
+        if (resp && resp.ok) {
+          this.toast('SSH agent installation started', 'success');
+        } else {
+          const data = await resp.json().catch(() => ({}));
+          this.instanceForm.installLogs.push(`[Dockpal] Error starting installation: ${data.error || 'Unknown error'}`);
+          this.instanceForm.installing = false;
+          ws.close();
+        }
+      })
+      .catch((err) => {
+        this.instanceForm.installLogs.push(`[Dockpal] Connection error: ${err.message || 'Failed to connect'}`);
+        this.instanceForm.installing = false;
+        ws.close();
+      });
   },
 
   async testInstanceConnection(instanceId) {

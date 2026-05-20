@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -21,7 +22,7 @@ import (
 
 // TestProperty_DirectMode_ContainsRequiredElements verifies that direct mode
 // install commands contain all required elements:
-// - Image "sdldev/dockpal-agent:latest"
+// - Image "ghcr.io/sdldev/dockpal-agent:latest"
 // - DOCKPAL_MODE=direct environment variable
 // - DOCKPAL_TOKEN environment variable with the token value
 // - Port mapping 9273:9273
@@ -45,12 +46,17 @@ func TestProperty_DirectMode_ContainsRequiredElements(t *testing.T) {
 
 		cmd := generateInstallCommand("direct", host, token)
 
+		expectedImg := os.Getenv("DOCKPAL_AGENT_IMAGE")
+		if expectedImg == "" {
+			expectedImg = "ghcr.io/sdldev/dockpal-agent:latest"
+		}
+
 		// Verify all required elements are present
 		checks := []struct {
 			name    string
 			present bool
 		}{
-			{"image sdldev/dockpal-agent:latest", strings.Contains(cmd, "sdldev/dockpal-agent:latest")},
+			{"image " + expectedImg, strings.Contains(cmd, expectedImg)},
 			{"DOCKPAL_MODE=direct", strings.Contains(cmd, "DOCKPAL_MODE=direct")},
 			{"DOCKPAL_TOKEN=" + token, strings.Contains(cmd, "DOCKPAL_TOKEN="+token)},
 			{"port mapping 9273:9273", strings.Contains(cmd, "9273:9273")},
@@ -109,7 +115,7 @@ func TestProperty_DirectMode_NoServerURL(t *testing.T) {
 
 // TestProperty_EdgeMode_ContainsRequiredElements verifies that edge mode
 // install commands contain all required elements:
-// - Image "sdldev/dockpal-agent:latest"
+// - Image "ghcr.io/sdldev/dockpal-agent:latest"
 // - DOCKPAL_MODE=edge environment variable
 // - DOCKPAL_SERVER environment variable with WebSocket URL (wss://host/api/agent/connect)
 // - DOCKPAL_TOKEN environment variable with the token value
@@ -137,12 +143,17 @@ func TestProperty_EdgeMode_ContainsRequiredElements(t *testing.T) {
 		// Build expected WebSocket URL
 		wsURL := "wss://" + host + "/api/agent/connect"
 
+		expectedImg := os.Getenv("DOCKPAL_AGENT_IMAGE")
+		if expectedImg == "" {
+			expectedImg = "ghcr.io/sdldev/dockpal-agent:latest"
+		}
+
 		// Verify all required elements are present
 		checks := []struct {
 			name    string
 			present bool
 		}{
-			{"image sdldev/dockpal-agent:latest", strings.Contains(cmd, "sdldev/dockpal-agent:latest")},
+			{"image " + expectedImg, strings.Contains(cmd, expectedImg)},
 			{"DOCKPAL_MODE=edge", strings.Contains(cmd, "DOCKPAL_MODE=edge")},
 			{"DOCKPAL_SERVER=" + wsURL, strings.Contains(cmd, "DOCKPAL_SERVER="+wsURL)},
 			{"DOCKPAL_TOKEN=" + token, strings.Contains(cmd, "DOCKPAL_TOKEN="+token)},
