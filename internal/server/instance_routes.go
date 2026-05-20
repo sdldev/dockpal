@@ -68,11 +68,11 @@ type TestResult struct {
 func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string) {
 	g.POST("/instances", handleCreateInstance(database, jwtSecret))
 	g.GET("/instances", handleListInstances(database))
-	g.GET("/instances/:id", handleGetInstance(database))
-	g.PUT("/instances/:id", handleUpdateInstance(database))
-	g.DELETE("/instances/:id", handleDeleteInstance(database, agentMgr))
-	g.POST("/instances/:id/test", handleTestInstance(agentMgr))
-	g.POST("/instances/:id/rotate-token", handleRotateToken(database, jwtSecret))
+	g.GET("/instances/:instance_id", handleGetInstance(database))
+	g.PUT("/instances/:instance_id", handleUpdateInstance(database))
+	g.DELETE("/instances/:instance_id", handleDeleteInstance(database, agentMgr))
+	g.POST("/instances/:instance_id/test", handleTestInstance(agentMgr))
+	g.POST("/instances/:instance_id/rotate-token", handleRotateToken(database, jwtSecret))
 }
 
 // handleCreateInstance creates a new instance with a generated agent token.
@@ -196,7 +196,7 @@ func handleListInstances(database *db.DB) gin.HandlerFunc {
 // handleGetInstance returns full instance details or 404.
 func handleGetInstance(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
+		id := c.Param("instance_id")
 
 		inst, err := database.GetInstance(id)
 		if err != nil {
@@ -229,7 +229,7 @@ func handleGetInstance(database *db.DB) gin.HandlerFunc {
 // handleUpdateInstance updates instance fields with validation.
 func handleUpdateInstance(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
+		id := c.Param("instance_id")
 
 		// Check if instance exists
 		inst, err := database.GetInstance(id)
@@ -295,7 +295,7 @@ func handleUpdateInstance(database *db.DB) gin.HandlerFunc {
 // handleDeleteInstance removes an instance or rejects deletion of local instance.
 func handleDeleteInstance(database *db.DB, agentMgr *agent.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
+		id := c.Param("instance_id")
 
 		// Reject deletion of local instance
 		if id == "local" {
@@ -340,7 +340,7 @@ func handleDeleteInstance(database *db.DB, agentMgr *agent.Manager) gin.HandlerF
 // handleTestInstance tests connectivity to an agent with 10s timeout.
 func handleTestInstance(agentMgr *agent.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
+		id := c.Param("instance_id")
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 		defer cancel()
@@ -373,7 +373,7 @@ func handleTestInstance(agentMgr *agent.Manager) gin.HandlerFunc {
 // handleRotateToken generates a new token for an instance.
 func handleRotateToken(database *db.DB, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
+		id := c.Param("instance_id")
 
 		// Get existing instance
 		inst, err := database.GetInstance(id)

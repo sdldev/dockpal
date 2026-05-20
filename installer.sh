@@ -293,16 +293,42 @@ verify_installation() {
 
     while [ $count -lt $max_wait ]; do
         if systemctl is-active --quiet dockpal 2>/dev/null; then
-            log_info "Dockpal service is running"
-            return 0
+            # Service active; also check the port is actually bound
+            if ss -tlnp 2>/dev/null | grep -q ":3012 "; then
+                log_info "Dockpal service is running and listening on :3012"
+                return 0
+            fi
         fi
         sleep 1
         count=$((count + 1))
     done
 
-    log_error "Dockpal service failed to start within $max_wait seconds"
+    if ! systemctl is-active --quiet dockpal 2>/dev/null; then
+        log_error "Dockpal service failed to start within $max_wait seconds"
+    else
+        log_error "Dockpal service is active but not listening on port 3012 within $max_wait seconds"
+    fi
     log_error "Check logs with: journalctl -u dockpal -n 100 --no-pager"
     return 1
+}
+
+open_firewall() {
+    # Open port 3012 in any active host firewall so the UI is reachable from outside.
+    # Failures are non-fatal: the service is already running, the user can open it manually.
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -qi "Status: active"; then
+            log_info "UFW is active, allowing port 3012/tcp..."
+            ufw allow 3012/tcp >/dev/null 2>&1 || log_warn "Failed to add UFW rule (run manually: ufw allow 3012/tcp)"
+        fi
+    fi
+
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        if firewall-cmd --state >/dev/null 2>&1; then
+            log_info "firewalld is active, allowing port 3012/tcp..."
+            firewall-cmd --permanent --add-port=3012/tcp >/dev/null 2>&1 || true
+            firewall-cmd --reload >/dev/null 2>&1 || true
+        fi
+    fi
 }
 
 primary_ip() {
@@ -340,6 +366,7 @@ main() {
     setup_systemd
 
     verify_installation
+    open_firewall
 
     local ip
     ip=$(primary_ip)
