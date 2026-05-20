@@ -29,6 +29,26 @@ lint:
 	@echo "Running go vet..."
 	go vet ./...
 
+## install-hooks: Setup local Git pre-commit hooks for testing
+install-hooks:
+	@echo "Installing pre-commit hook..."
+	@mkdir -p .git/hooks
+	@echo '#!/bin/sh' > .git/hooks/pre-commit
+	@echo 'echo "🔍 Running pre-commit verification..."' >> .git/hooks/pre-commit
+	@echo 'go vet ./...' >> .git/hooks/pre-commit
+	@echo 'if [ $$? -ne 0 ]; then' >> .git/hooks/pre-commit
+	@echo '    echo "❌ [Pre-Commit] Go vet failed. Commit aborted."' >> .git/hooks/pre-commit
+	@echo '    exit 1' >> .git/hooks/pre-commit
+	@echo 'fi' >> .git/hooks/pre-commit
+	@echo 'go test ./...' >> .git/hooks/pre-commit
+	@echo 'if [ $$? -ne 0 ]; then' >> .git/hooks/pre-commit
+	@echo '    echo "❌ [Pre-Commit] Go tests failed. Commit aborted."' >> .git/hooks/pre-commit
+	@echo '    exit 1' >> .git/hooks/pre-commit
+	@echo 'fi' >> .git/hooks/pre-commit
+	@echo 'echo "✅ [Pre-Commit] All verification passed. Committing..."' >> .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed successfully."
+
 ## clean: Clean build artifacts and temporary files
 clean:
 	@echo "Cleaning up..."
