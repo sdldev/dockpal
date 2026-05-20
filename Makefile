@@ -5,7 +5,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.9.0-dev")
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
-.PHONY: all build build-linux-amd64 test lint clean help
+.PHONY: all build build-linux-amd64 dev test lint clean help
 
 all: build
 
@@ -18,6 +18,11 @@ build:
 build-linux-amd64:
 	@echo "Building Dockpal for Linux AMD64 version $(VERSION)..."
 	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dockpal-linux-amd64 .
+
+## dev: Build and run locally for development
+dev: build
+	@echo "Starting Dockpal dev server on port 3012..."
+	DOCKPAL_DATA_DIR=$(CURDIR)/.data ./dockpal server
 
 ## test: Run unit tests
 test:

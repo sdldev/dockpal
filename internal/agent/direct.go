@@ -245,7 +245,7 @@ func (c *DirectClient) ContainerLogs(ctx context.Context, id string, tail string
 // DeployComposeRequest is the request body for deploying compose.
 type DeployComposeRequest struct {
 	Name          string            `json:"name"`
-	ComposeYAML   string            `json:"compose_yaml"`
+	ComposeYAML   string            `json:"compose"`
 	RegistryAuths map[string]string `json:"registry_auths"`
 }
 
@@ -274,7 +274,7 @@ func (c *DirectClient) DeployCompose(ctx context.Context, name, composeYAML stri
 // DeployStreamRequest is the request body for initiating a streamed deploy.
 type DeployStreamRequest struct {
 	Name          string            `json:"name"`
-	ComposeYAML   string            `json:"compose_yaml"`
+	ComposeYAML   string            `json:"compose"`
 	RegistryAuths map[string]string `json:"registry_auths"`
 }
 
@@ -321,6 +321,7 @@ func (c *DirectClient) DeployComposeStreamed(ctx context.Context, name, composeY
 	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1) + "/agent/docker/deploy/stream/" + deployID
 
 	wsConn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPClient: c.httpClient,
 		HTTPHeader: http.Header{
 			"Authorization": []string{"Bearer " + c.authToken},
 		},

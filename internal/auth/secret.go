@@ -19,6 +19,12 @@ func LoadOrGenerateSecret() (string, error) {
 	return loadOrGenerateSecret(defaultSecretFilePath)
 }
 
+// LoadOrGenerateSecretAt resolves the JWT signing secret using the same priority
+// chain as LoadOrGenerateSecret, but allows specifying a custom secret file path.
+func LoadOrGenerateSecretAt(secretFilePath string) (string, error) {
+	return loadOrGenerateSecret(secretFilePath)
+}
+
 // loadOrGenerateSecret is the internal implementation that accepts a configurable path
 // for testability.
 func loadOrGenerateSecret(secretFilePath string) (string, error) {

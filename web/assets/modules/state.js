@@ -81,6 +81,7 @@ Dockpal.initialState = function() {
     },
 
     instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' },
+    installCommandModal: { show: false, command: '', instanceId: '' },
 
     // Update modal state
     updateAvailable: false,
@@ -184,7 +185,7 @@ Dockpal.instances = {
   // Load all instances from the server
   async loadInstances() {
     try {
-      const resp = await Dockpal.auth.api('GET', '/api/instances');
+      const resp = await this.api('GET', '/api/instances');
       if (resp && resp.ok) {
         const data = await resp.json();
         const list = Array.isArray(data) ? data : (data.instances || []);
@@ -380,5 +381,61 @@ Dockpal.instances = {
     if (diff < 3600) return Math.floor(diff / 60) + ' minutes ago';
     if (diff < 86400) return Math.floor(diff / 3600) + ' hours ago';
     return Math.floor(diff / 86400) + ' days ago';
+  },
+
+  async showInstallCommand(instanceId) {
+    try {
+      const resp = await this.api('GET', '/api/instances/' + instanceId);
+      if (resp && resp.ok) {
+        const data = await resp.json();
+        this.installCommandModal = {
+          show: true,
+          command: data.install_command || 'No install command available. Try rotating the token.',
+          instanceId: instanceId
+        };
+      } else {
+        this.toast('Failed to get instance details', 'error', 5000);
+      }
+    } catch (e) {
+      this.toast('Failed to get instance details', 'error', 5000);
+    }
+  },
+
+  async rotateInstanceToken(instanceId) {
+    const inst = this.instances.find(i => i.id === instanceId);
+    this.showConfirm({
+      title: 'Rotate Agent Token',
+      message: 'Rotate the token for "' + (inst?.name || instanceId) + '"? The agent will need to be re-installed with the new token.',
+      confirmText: 'Rotate',
+      onConfirm: async () => {
+        try {
+          const resp = await this.api('POST', '/api/instances/' + instanceId + '/rotate-token');
+          if (resp && resp.ok) {
+            const data = await resp.json();
+            this.toast('Token rotated successfully', 'success');
+            this.installCommandModal = {
+              show: true,
+              command: data.install_command || '',
+              instanceId: instanceId
+            };
+          } else {
+            const data = await resp.json().catch(() => ({}));
+            this.toast(data.error || 'Failed to rotate token', 'error', 5000);
+          }
+        } catch (e) {
+          this.toast('Failed to rotate token', 'error', 5000);
+        }
+      }
+    });
+  },
+
+  copyToClipboard(text) {
+    if (text) {
+      navigator.clipboard.writeText(text).then(() => {
+        this.toast('Copied to clipboard', 'success', 2000);
+      }).catch(() => {
+        this.toast('Failed to copy', 'error', 2000);
+      });
+    }
   },
 };

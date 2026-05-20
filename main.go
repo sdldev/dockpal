@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -99,7 +100,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	// Set up log rotation
 	logPath := os.Getenv("DOCKPAL_LOG_PATH")
 	if logPath == "" {
-		logPath = defaultLogPath
+		logPath = filepath.Join(dataDir, "dockpal.log")
 	}
 	logPath = mustAbs("DOCKPAL_LOG_PATH", logPath)
 
@@ -112,11 +113,17 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 
 	dbPath := os.Getenv("DOCKPAL_DB_PATH")
 	if dbPath == "" {
-		dbPath = defaultDBPath
+		dbPath = filepath.Join(dataDir, "dockpal.db")
 	}
 	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
 
-	jwtSecret, err := auth.LoadOrGenerateSecret()
+	secretPath := os.Getenv("DOCKPAL_SECRET_PATH")
+	if secretPath == "" {
+		secretPath = filepath.Join(dataDir, ".secret")
+	}
+	secretPath = mustAbs("DOCKPAL_SECRET_PATH", secretPath)
+
+	jwtSecret, err := auth.LoadOrGenerateSecretAt(secretPath)
 	if err != nil {
 		log.Fatalf("Failed to load or generate JWT secret: %v", err)
 	}
@@ -131,6 +138,11 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	defaultHash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
 	if err := database.EnsureDefaultAdmin(string(defaultHash)); err != nil {
 		log.Fatalf("Failed to create default admin: %v", err)
+	}
+
+	// Ensure local instance exists
+	if err := database.EnsureLocalInstance(); err != nil {
+		log.Fatalf("Failed to ensure local instance: %v", err)
 	}
 
 	dockerClient, err := docker.NewClient()

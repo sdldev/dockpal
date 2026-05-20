@@ -1,6 +1,7 @@
 # Auto Claude data directory
 .auto-claude/
 .claude
+.antigravitycli
 .playwright-mcp
 # Auto Claude generated files
 .auto-claude-security.json
@@ -9,7 +10,7 @@
 .worktrees/
 .security-key
 logs/security/
-
+dockpal-agent/
 # Local development data
 .data/
 

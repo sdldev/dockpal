@@ -73,10 +73,10 @@ type TestResult struct {
 func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string, logsManager *InstallLogsManager) {
 	g.POST("/instances", RequireRole(auth.RoleAdmin), handleCreateInstance(database, jwtSecret))
 	g.GET("/instances", RequireRole(auth.RoleViewer), handleListInstances(database))
-	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database))
+	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database, jwtSecret))
 	g.PUT("/instances/:instance_id", RequireRole(auth.RoleAdmin), handleUpdateInstance(database))
 	g.DELETE("/instances/:instance_id", RequireRole(auth.RoleAdmin), handleDeleteInstance(database, agentMgr))
-	g.POST("/instances/:instance_id/test", RequireRole(auth.RoleOperator), handleTestInstance(agentMgr))
+	g.POST("/instances/:instance_id/test", RequireRole(auth.RoleOperator), handleTestInstance(agentMgr, database))
 	g.POST("/instances/:instance_id/rotate-token", RequireRole(auth.RoleAdmin), handleRotateToken(database, jwtSecret))
 	g.POST("/instances/:instance_id/install", RequireRole(auth.RoleAdmin), handleInstallAgent(database, jwtSecret, logsManager))
 	g.GET("/instances/:instance_id/install/logs", RequireRole(auth.RoleAdmin), handleInstallAgentLogs(logsManager))
@@ -124,7 +124,7 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive encryption key"})
 			return
 		}
-		encryptedToken, err := registry.Encrypt(tokenBytes, cryptoKey)
+		encryptedToken, err := registry.Encrypt([]byte(token), cryptoKey)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt token"})
 			return
@@ -203,7 +203,7 @@ func handleListInstances(database *db.DB) gin.HandlerFunc {
 }
 
 // handleGetInstance returns full instance details or 404.
-func handleGetInstance(database *db.DB) gin.HandlerFunc {
+func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("instance_id")
 
@@ -217,20 +217,34 @@ func handleGetInstance(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		// Generate install command if token is available
+		var installCmd string
+		if len(inst.AgentTokenEncrypted) > 0 {
+			cryptoKey, err := registry.DeriveKey(jwtSecret)
+			if err == nil {
+				token, err := registry.Decrypt(inst.AgentTokenEncrypted, cryptoKey)
+				if err == nil {
+					serverHost := c.Request.Host
+					installCmd = generateInstallCommand(inst.Mode, serverHost, string(token))
+				}
+			}
+		}
+
 		c.JSON(http.StatusOK, InstanceResponse{
-			ID:            inst.ID,
-			Name:          inst.Name,
-			Host:          inst.Host,
-			Port:          inst.Port,
-			Mode:          inst.Mode,
-			Status:        inst.Status,
-			LastSeen:      inst.LastSeen,
-			CreatedAt:     inst.CreatedAt,
-			AgentVersion:  inst.AgentVersion,
-			DockerVersion: inst.DockerVersion,
-			OS:            inst.OS,
-			CPUCores:      inst.CPUCores,
-			TotalMemory:   inst.TotalMemory,
+			ID:             inst.ID,
+			Name:           inst.Name,
+			Host:           inst.Host,
+			Port:           inst.Port,
+			Mode:           inst.Mode,
+			Status:         inst.Status,
+			LastSeen:       inst.LastSeen,
+			CreatedAt:      inst.CreatedAt,
+			AgentVersion:   inst.AgentVersion,
+			DockerVersion:  inst.DockerVersion,
+			OS:             inst.OS,
+			CPUCores:       inst.CPUCores,
+			TotalMemory:    inst.TotalMemory,
+			InstallCommand: installCmd,
 		})
 	}
 }
@@ -351,7 +365,7 @@ func handleDeleteInstance(database *db.DB, agentMgr *agent.Manager) gin.HandlerF
 }
 
 // handleTestInstance tests connectivity to an agent with 10s timeout.
-func handleTestInstance(agentMgr *agent.Manager) gin.HandlerFunc {
+func handleTestInstance(agentMgr *agent.Manager, database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("instance_id")
 
@@ -378,6 +392,10 @@ func handleTestInstance(agentMgr *agent.Manager) gin.HandlerFunc {
 			c.JSON(http.StatusOK, TestResult{Status: "error", Message: fmt.Sprintf("connection failed: %v", err)})
 			return
 		}
+
+		// Ping successful — update status to online and last_seen
+		database.UpdateInstanceStatus(id, "online")
+		database.UpdateInstanceLastSeen(id, time.Now().Unix())
 
 		c.JSON(http.StatusOK, TestResult{Status: "ok", Message: "connection successful"})
 	}
@@ -420,7 +438,7 @@ func handleRotateToken(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive encryption key"})
 			return
 		}
-		encryptedToken, err := registry.Encrypt(tokenBytes, cryptoKey)
+		encryptedToken, err := registry.Encrypt([]byte(token), cryptoKey)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt token"})
 			return
@@ -481,7 +499,7 @@ func generateInstallCommand(mode, serverHost, token string) string {
 	case "direct":
 		// For direct mode: include host, port mapping, token
 		runCmd = fmt.Sprintf(
-			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=direct \\\n  -e DOCKPAL_TOKEN=%s \\\n  -p 9273:9273 \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  %s",
+			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=direct \\\n  -e DOCKPAL_TOKEN=%s \\\n  -p 9273:9273 \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
 			token,
 			agentImg,
 		)
@@ -489,7 +507,7 @@ func generateInstallCommand(mode, serverHost, token string) string {
 		// For edge mode: include server WebSocket URL, token, no port mapping
 		wsURL := fmt.Sprintf("wss://%s/api/agent/connect", serverHost)
 		runCmd = fmt.Sprintf(
-			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  %s",
+			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
 			wsURL,
 			token,
 			agentImg,
