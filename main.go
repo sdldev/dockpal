@@ -310,8 +310,12 @@ func restore(fromPath string, force bool) {
 	}
 	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
 
-	if err := db.ValidateBackup(fromPath); err != nil {
+	checksumVerified, err := db.ValidateBackup(fromPath)
+	if err != nil {
 		log.Fatalf("Backup validation failed: %v", err)
+	}
+	if !checksumVerified {
+		fmt.Println("WARNING: No .sha256 checksum file found — backup integrity could not be fully verified.")
 	}
 
 	if !force {

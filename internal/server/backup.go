@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,11 +24,18 @@ func HandleTriggerBackup(database *db.DB, dataDir string) gin.HandlerFunc {
 			return
 		}
 
+		backupDir := filepath.Join(dataDir, "backups")
 		backupPath := req.Path
 		if backupPath == "" {
-			backupDir := filepath.Join(dataDir, "backups")
 			timestamp := time.Now().Format("20060102-150405")
 			backupPath = filepath.Join(backupDir, fmt.Sprintf("dockpal-%s.db", timestamp))
+		}
+
+		cleaned := filepath.Clean(backupPath)
+		allowedDir := filepath.Clean(backupDir) + string(filepath.Separator)
+		if !strings.HasPrefix(cleaned, allowedDir) && cleaned != filepath.Clean(backupDir) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "backup path must be within the designated backup directory"})
+			return
 		}
 
 		if err := database.BackupTo(backupPath); err != nil {

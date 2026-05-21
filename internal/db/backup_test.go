@@ -41,8 +41,12 @@ func TestBackupToCreatesValidBackup(t *testing.T) {
 	}
 
 	// Validate backup
-	if err := ValidateBackup(backupPath); err != nil {
+	verified, err := ValidateBackup(backupPath)
+	if err != nil {
 		t.Fatalf("ValidateBackup failed: %v", err)
+	}
+	if !verified {
+		t.Fatal("expected checksum to be verified")
 	}
 
 	// Verify data integrity by opening backup as a new DB
@@ -82,7 +86,8 @@ func TestValidateBackupDetectsCorruption(t *testing.T) {
 	_ = f.Close()
 
 	// Validation should fail because checksum no longer matches
-	if err := ValidateBackup(backupPath); err == nil {
+	_, err = ValidateBackup(backupPath)
+	if err == nil {
 		t.Fatal("expected ValidateBackup to fail on corrupted file, got nil")
 	}
 }
@@ -103,7 +108,11 @@ func TestValidateBackupWithoutChecksum(t *testing.T) {
 		t.Fatalf("failed to remove checksum: %v", err)
 	}
 
-	if err := ValidateBackup(backupPath); err != nil {
+	verified, err := ValidateBackup(backupPath)
+	if err != nil {
 		t.Fatalf("ValidateBackup failed without checksum: %v", err)
+	}
+	if verified {
+		t.Fatal("expected checksum verification to be skipped")
 	}
 }

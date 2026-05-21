@@ -80,24 +80,28 @@ func fileSHA256(path string) (string, error) {
 
 // ValidateBackup checks whether the file at path is a valid BBolt database.
 // If a .sha256 sidecar file exists, it also verifies the checksum.
-func ValidateBackup(path string) error {
-	db, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: 1 * time.Second, ReadOnly: true})
+// Returns true if checksum verification was performed, false if the sidecar was missing.
+func ValidateBackup(path string) (bool, error) {
+	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: 1 * time.Second, ReadOnly: true})
 	if err != nil {
-		return fmt.Errorf("invalid backup file: %w", err)
+		return false, fmt.Errorf("invalid backup file: %w", err)
 	}
-	_ = db.Close()
+	_ = bdb.Close()
 
 	checksumPath := path + ".sha256"
-	if data, err := os.ReadFile(checksumPath); err == nil {
-		expected := strings.TrimSpace(string(data))
-		actual, err := fileSHA256(path)
-		if err != nil {
-			return fmt.Errorf("failed to compute checksum: %w", err)
-		}
-		if actual != expected {
-			return fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actual)
-		}
+	data, err := os.ReadFile(checksumPath)
+	if err != nil {
+		return false, nil
 	}
 
-	return nil
+	expected := strings.TrimSpace(string(data))
+	actual, err := fileSHA256(path)
+	if err != nil {
+		return false, fmt.Errorf("failed to compute checksum: %w", err)
+	}
+	if actual != expected {
+		return false, fmt.Errorf("checksum mismatch: expected %s, got %s", expected, actual)
+	}
+
+	return true, nil
 }
