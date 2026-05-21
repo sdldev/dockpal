@@ -37,6 +37,7 @@ func HandleTriggerBackup(database *db.DB, dataDir string) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "backup path must be within the designated backup directory"})
 			return
 		}
+		backupPath = cleaned
 
 		if err := database.BackupTo(backupPath); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("backup failed: %v", err)})
