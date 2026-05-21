@@ -116,13 +116,6 @@ DOCKPAL_BACKUP_INTERVAL=0 ./dockpal server
 DOCKPAL_BACKUP_INTERVAL=6h DOCKPAL_BACKUP_RETENTION=72h ./dockpal server
 ```
 
-**Standalone scheduler** (for systemd timer setups):
-
-```bash
-# Runs as a foreground process; use systemd or nohup to daemonize
-./dockpal backup-scheduler
-```
-
 The scheduler logs every backup success/failure and automatically removes backups
 older than the retention period.
 

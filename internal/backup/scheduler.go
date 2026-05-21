@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sdldev/dockpal/internal/db"
@@ -18,6 +19,7 @@ type Scheduler struct {
 	dataDir   string
 	interval  time.Duration
 	retention time.Duration
+	mu        sync.Mutex
 	stopCh    chan struct{}
 	running   bool
 }
@@ -29,8 +31,6 @@ func NewScheduler(database *db.DB, dataDir string, interval, retention time.Dura
 		dataDir:   dataDir,
 		interval:  interval,
 		retention: retention,
-		stopCh:    make(chan struct{}),
-		running:   false,
 	}
 }
 
@@ -40,15 +40,20 @@ func (s *Scheduler) Start(ctx context.Context) {
 	if s.interval <= 0 {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.running {
 		return
 	}
+	s.stopCh = make(chan struct{})
 	s.running = true
 	go s.run(ctx)
 }
 
 // Stop gracefully stops the background backup loop.
 func (s *Scheduler) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.running {
 		return
 	}
@@ -130,5 +135,7 @@ func (s *Scheduler) cleanupOldBackups() {
 
 // IsRunning returns whether the scheduler is currently running.
 func (s *Scheduler) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.running
 }

@@ -50,7 +50,6 @@ func main() {
 		fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
 		fmt.Println("  dockpal backup          Create a database backup")
 		fmt.Println("  dockpal restore         Restore database from a backup")
-		fmt.Println("  dockpal backup-scheduler  Run scheduled background backups")
 		fmt.Println("  dockpal reset-password  Reset admin password")
 		fmt.Println("  dockpal version         Show version")
 		fmt.Println("  dockpal help            Show this help")
@@ -84,8 +83,6 @@ func main() {
 		force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
 		restoreCmd.Parse(os.Args[2:])
 		restore(*from, *force)
-	case "backup-scheduler":
-		backupSchedulerCmd()
 	case "reset-password":
 		resetPassword()
 	case "version":
@@ -98,7 +95,6 @@ func main() {
 		fmt.Println("  server          Start the HTTP/HTTPS server")
 		fmt.Println("  backup          Create a database backup")
 		fmt.Println("  restore         Restore database from a backup")
-		fmt.Println("  backup-scheduler  Run scheduled background backups")
 		fmt.Println("  reset-password  Reset admin password")
 		fmt.Println("  version         Show version")
 		fmt.Println("  help            Show this help")
@@ -385,43 +381,6 @@ func resetPassword() {
 	}
 
 	fmt.Println("Dockpal: password reset successfully")
-}
-
-func backupSchedulerCmd() {
-	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
-	if dataDir == "" {
-		dataDir = defaultDataDir
-	}
-	dataDir = mustAbs("DOCKPAL_DATA_DIR", dataDir)
-
-	dbPath := os.Getenv("DOCKPAL_DB_PATH")
-	if dbPath == "" {
-		dbPath = filepath.Join(dataDir, "dockpal.db")
-	}
-	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
-
-	database, err := db.New(dbPath)
-	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
-	}
-	defer database.Close()
-
-	interval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
-	retention := parseDurationEnv("DOCKPAL_BACKUP_RETENTION", 168*time.Hour)
-
-	scheduler := backupPkg.NewScheduler(database, dataDir, interval, retention)
-	ctx, cancel := context.WithCancel(context.Background())
-	scheduler.Start(ctx)
-
-	log.Printf("Dockpal backup scheduler started (interval=%s, retention=%s)", interval, retention)
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Println("Shutting down backup scheduler...")
-	cancel()
-	scheduler.Stop()
 }
 
 // parseDurationEnv reads a duration from an environment variable.
