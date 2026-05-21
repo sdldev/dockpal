@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/sdldev/dockpal/internal/db"
-	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/registry"
 )
 
@@ -66,39 +65,4 @@ services:
 		}
 	})
 
-	// 5. getSystemInfo and other metrics
-	t.Run("getSystemInfo", func(t *testing.T) {
-		dockerClient, err := docker.NewClient()
-		if err == nil {
-			defer dockerClient.Close()
-			info := getSystemInfo(dockerClient)
-			if info.OS == "" {
-				t.Errorf("getSystemInfo returned empty OS")
-			}
-		}
-	})
-
-	// 6. getMemoryInfo
-	t.Run("getMemoryInfo", func(t *testing.T) {
-		total, used := getMemoryInfo()
-		t.Logf("memory info: total=%d, used=%d", total, used)
-	})
-
-	// 7. getCPUPercent
-	t.Run("getCPUPercent", func(t *testing.T) {
-		pct := getCPUPercent()
-		t.Logf("cpu percent: %f", pct)
-	})
-
-	// 8. getCgroupMemoryUsage
-	t.Run("getCgroupMemoryUsage", func(t *testing.T) {
-		usage := getCgroupMemoryUsage()
-		t.Logf("cgroup memory usage: %d", usage)
-	})
-
-	// 9. getHostname
-	t.Run("getHostname", func(t *testing.T) {
-		hostname := getHostname()
-		t.Logf("hostname: %s", hostname)
-	})
 }

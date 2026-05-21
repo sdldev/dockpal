@@ -2,26 +2,20 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
@@ -33,179 +27,6 @@ import (
 	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/internal/validator"
 )
-
-// checkOrigin validates WebSocket upgrade requests by comparing
-// the Origin header's host against the request's Host header.
-// Rejects empty/missing origins and mismatched hosts.
-func checkOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return false
-	}
-
-	u, err := url.Parse(origin)
-	if err != nil || u.Host == "" {
-		return false
-	}
-
-	return u.Host == r.Host
-}
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: checkOrigin,
-}
-
-var githubHTTPClient = &http.Client{
-	Timeout: 30 * time.Second,
-	Transport: &http.Transport{
-		TLSHandshakeTimeout:   10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-	},
-}
-
-// wsTextWriter wraps a WebSocket connection as an io.Writer,
-// sending each write as a TextMessage. Used to stream demultiplexed
-// container logs (stdout + stderr) over a single WebSocket.
-type wsTextWriter struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
-}
-
-func (w *wsTextWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if err := w.conn.WriteMessage(websocket.TextMessage, p); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-// streamContainerLogs demultiplexes Docker's stdcopy stream and sends
-// plain text over the WebSocket. It blocks until the client disconnects.
-func streamContainerLogs(conn *websocket.Conn, reader io.ReadCloser) {
-	defer conn.Close()
-	defer reader.Close()
-
-	w := &wsTextWriter{conn: conn}
-
-	// stdcopy.StdCopy reads the multiplexed Docker log stream and writes
-	// each frame's payload to the provided writers. We use the same writer
-	// for both stdout and stderr so both streams arrive interleaved.
-	go func() {
-		_, _ = stdcopy.StdCopy(w, w, reader)
-		reader.Close()
-		conn.Close()
-	}()
-
-	// Keep the connection alive by reading until the client disconnects.
-	// This also lets us detect client-side close promptly.
-	for {
-		_, _, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-	}
-}
-
-// globalDeployManager is the shared deploy session manager used by both
-// the legacy routes and instance-scoped routes + WebSocket handlers.
-var globalDeployManager = docker.NewDeployManager()
-
-type TemplatePort struct {
-	Label         string `json:"label"`
-	Default       int    `json:"default"`
-	ContainerPort int    `json:"container_port"`
-}
-
-type Template struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Category    string         `json:"category"`
-	Icon        string         `json:"icon"`
-	EnvRequired []string       `json:"env_required,omitempty"`
-	Ports       []TemplatePort `json:"ports,omitempty"`
-	Compose     string         `json:"compose"`
-}
-
-func loadTemplates() ([]Template, error) {
-	// Try local templates directory first
-	templates, err := loadTemplatesFromDir("templates")
-	if err == nil && len(templates) > 0 {
-		return templates, nil
-	}
-
-	// Fallback to system-wide directory
-	templates, err = loadTemplatesFromDir("/opt/dockpal/templates")
-	if err != nil {
-		return nil, fmt.Errorf("no templates available: %w", err)
-	}
-	if len(templates) == 0 {
-		return nil, fmt.Errorf("no template files found in fallback directory")
-	}
-
-	return templates, nil
-}
-
-// loadTemplatesFromDir reads all .json files in the given directory,
-// unmarshals each into a Template, and returns the collected slice.
-func loadTemplatesFromDir(dir string) ([]Template, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("reading templates directory %s: %w", dir, err)
-	}
-
-	var templates []Template
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-
-		filePath := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			return nil, fmt.Errorf("reading template file %s: %w", filePath, err)
-		}
-
-		var tmpl Template
-		if err := json.Unmarshal(data, &tmpl); err != nil {
-			return nil, fmt.Errorf("parsing template file %s: %w", filePath, err)
-		}
-
-		templates = append(templates, tmpl)
-	}
-
-	return templates, nil
-}
-
-type roleRouterWrapper struct {
-	viewerGroup   *gin.RouterGroup
-	operatorGroup *gin.RouterGroup
-	adminGroup    *gin.RouterGroup
-}
-
-func (r *roleRouterWrapper) GET(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
-	return r.viewerGroup.GET(path, handlers...)
-}
-
-func (r *roleRouterWrapper) POST(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
-	if path == "/system/update" {
-		return r.adminGroup.POST(path, handlers...)
-	}
-	return r.operatorGroup.POST(path, handlers...)
-}
-
-func (r *roleRouterWrapper) PUT(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
-	return r.operatorGroup.PUT(path, handlers...)
-}
-
-func (r *roleRouterWrapper) DELETE(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
-	return r.operatorGroup.DELETE(path, handlers...)
-}
 
 func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager) {
 	api := r.Group("/api")
@@ -311,7 +132,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.GET("/registries/:id", func(c *gin.Context) {
 		cred, err := registryManager.Get(c.Param("id"))
 		if err != nil {
-			if err.Error() == "credential not found" {
+			if errors.Is(err, registry.ErrCredentialNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
@@ -328,7 +149,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 		if err := registryManager.Update(c.Param("id"), req); err != nil {
-			if err.Error() == "credential not found" {
+			if errors.Is(err, registry.ErrCredentialNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
@@ -340,7 +161,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	protected.DELETE("/registries/:id", func(c *gin.Context) {
 		if err := registryManager.Delete(c.Param("id")); err != nil {
-			if err.Error() == "credential not found" {
+			if errors.Is(err, registry.ErrCredentialNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
@@ -353,7 +174,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.POST("/registries/:id/test", func(c *gin.Context) {
 		result, err := registryManager.TestConnection(c.Param("id"))
 		if err != nil {
-			if err.Error() == "credential not found" {
+			if errors.Is(err, registry.ErrCredentialNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
@@ -674,117 +495,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// Note: WebSocket cannot send custom headers during upgrade, so token
 	// must be passed as query param. The token is short-lived (30 days max)
 	// and the endpoint is read-only (streaming logs only).
-	r.GET("/api/deploy/stream/:id", func(c *gin.Context) {
-		// Auth via query param for WebSocket
-		token := c.Query("token")
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
-			return
-		}
-		claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		if !auth.HasRole(claims.Role, auth.RoleViewer) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-			return
-		}
-		if !checkOrigin(c.Request) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
-			return
-		}
-
-		session := deployManager.GetSession(c.Param("id"))
-		if session == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "deploy session not found"})
-			return
-		}
-
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		for {
-			select {
-			case event, ok := <-session.Events:
-				if !ok {
-					return
-				}
-				if err := conn.WriteJSON(event); err != nil {
-					return
-				}
-			case <-session.Done:
-				// Drain remaining events
-				for {
-					select {
-					case event := <-session.Events:
-						conn.WriteJSON(event)
-					default:
-						return
-					}
-				}
-			}
-		}
-	})
+	deployStreamWS := handleDeployStreamWS(jwtSecret, database, deployManager)
+	r.GET("/api/deploy/stream/:id", deployStreamWS)
 
 	// Instance-scoped WebSocket endpoint for deploy log streaming.
 	// Same logic as above but matches the instance-scoped URL pattern used by the frontend.
-	r.GET("/api/instances/:instance_id/deploy/stream/:id", func(c *gin.Context) {
-		token := c.Query("token")
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
-			return
-		}
-		claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		if !auth.HasRole(claims.Role, auth.RoleViewer) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-			return
-		}
-		if !checkOrigin(c.Request) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
-			return
-		}
-
-		session := deployManager.GetSession(c.Param("id"))
-		if session == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "deploy session not found"})
-			return
-		}
-
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		for {
-			select {
-			case event, ok := <-session.Events:
-				if !ok {
-					return
-				}
-				if err := conn.WriteJSON(event); err != nil {
-					return
-				}
-			case <-session.Done:
-				for {
-					select {
-					case event := <-session.Events:
-						conn.WriteJSON(event)
-					default:
-						return
-					}
-				}
-			}
-		}
-	})
+	r.GET("/api/instances/:instance_id/deploy/stream/:id", deployStreamWS)
 
 	protected.POST("/deploy/compose", func(c *gin.Context) {
 		var req struct {
@@ -954,10 +670,16 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
-		page := c.DefaultQuery("page", "1")
-		perPage := c.DefaultQuery("per_page", "30")
+		pageNum, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		if pageNum < 1 {
+			pageNum = 1
+		}
+		perPageNum, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+		if perPageNum < 1 || perPageNum > 100 {
+			perPageNum = 30
+		}
 
-		apiURL := fmt.Sprintf("https://api.github.com/user/repos?sort=updated&direction=desc&page=%s&per_page=%s&type=all", page, perPage)
+		apiURL := fmt.Sprintf("https://api.github.com/user/repos?sort=updated&direction=desc&page=%d&per_page=%d&type=all", pageNum, perPageNum)
 		req, err := http.NewRequestWithContext(c.Request.Context(), "GET", apiURL, nil)
 		if err != nil {
 			internalError(c, err)
@@ -1057,7 +779,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// Templates
 	protected.GET("/templates", func(c *gin.Context) {
-		templates, err := loadTemplates()
+		templates, err := getCachedTemplates(5 * time.Minute)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -1066,7 +788,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.GET("/templates/:id", func(c *gin.Context) {
-		templates, err := loadTemplates()
+		templates, err := getCachedTemplates(5 * time.Minute)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -1081,7 +803,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	protected.POST("/templates/:id/deploy", func(c *gin.Context) {
-		templates, err := loadTemplates()
+		templates, err := getCachedTemplates(5 * time.Minute)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -1149,7 +871,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 	// Streamed template deploy
 	protected.POST("/templates/:id/deploy/stream", func(c *gin.Context) {
-		templates, err := loadTemplates()
+		templates, err := getCachedTemplates(5 * time.Minute)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -1540,361 +1262,4 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
 	})
-}
-
-// SystemInfo contains host hardware metrics and Docker version information.
-type SystemInfo struct {
-	Hostname      string  `json:"hostname"`
-	OS            string  `json:"os"`
-	CPUCores      int     `json:"cpu_cores"`
-	CPUPercent    float64 `json:"cpu_percent"`
-	TotalRAM      uint64  `json:"total_ram"`
-	UsedRAM       uint64  `json:"used_ram"`
-	TotalDisk     uint64  `json:"total_disk"`
-	UsedDisk      uint64  `json:"used_disk"`
-	DockerVersion string  `json:"docker_version"`
-}
-
-// getSystemInfo gathers host metrics (CPU, RAM, disk) and the Docker daemon version.
-// On LXC/cgroup-limited environments, reads memory from cgroup to get the correct
-// allocated limit rather than the host's total RAM.
-func getSystemInfo(dockerClient *docker.Client) SystemInfo {
-	hostname, _ := os.Hostname()
-
-	totalRAM, usedRAM := getMemoryInfo()
-
-	var stat syscall.Statfs_t
-	syscall.Statfs("/", &stat)
-
-	totalDisk := stat.Blocks * uint64(stat.Bsize)
-	freeDisk := stat.Bfree * uint64(stat.Bsize)
-
-	dockerVersion := ""
-	if ver, err := dockerClient.ServerVersion(context.Background()); err == nil {
-		dockerVersion = ver
-	}
-
-	return SystemInfo{
-		Hostname:      hostname,
-		OS:            runtime.GOOS,
-		CPUCores:      runtime.NumCPU(),
-		CPUPercent:    getCPUPercent(),
-		TotalRAM:      totalRAM,
-		UsedRAM:       usedRAM,
-		TotalDisk:     totalDisk,
-		UsedDisk:      totalDisk - freeDisk,
-		DockerVersion: dockerVersion,
-	}
-}
-
-// getMemoryInfo reads memory information from cgroup (if available) or falls back to /proc/meminfo.
-// This correctly reports memory on LXC containers where syscall.Sysinfo returns host memory.
-func getMemoryInfo() (total, used uint64) {
-	// Try cgroup v2 first
-	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
-		s := strings.TrimSpace(string(data))
-		if s != "max" {
-			if limit, err := strconv.ParseUint(s, 10, 64); err == nil && limit > 0 {
-				total = limit
-				used = getCgroupMemoryUsage()
-				if used > 0 {
-					return total, used
-				}
-			}
-		}
-	}
-
-	// Try cgroup v1
-	if data, err := os.ReadFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); err == nil {
-		s := strings.TrimSpace(string(data))
-		if limit, err := strconv.ParseUint(s, 10, 64); err == nil && limit > 0 && limit < (1<<62) {
-			total = limit
-			if usage, err := os.ReadFile("/sys/fs/cgroup/memory/memory.usage_in_bytes"); err == nil {
-				s2 := strings.TrimSpace(string(usage))
-				if u, err := strconv.ParseUint(s2, 10, 64); err == nil {
-					return total, u
-				}
-			}
-		}
-	}
-
-	// Fall back to /proc/meminfo (works correctly on VPS/bare metal and most containers)
-	if data, err := os.ReadFile("/proc/meminfo"); err == nil {
-		var memTotal, memAvailable uint64
-		for _, line := range strings.Split(string(data), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				continue
-			}
-			val, _ := strconv.ParseUint(fields[1], 10, 64)
-			val *= 1024 // /proc/meminfo reports in kB
-			switch fields[0] {
-			case "MemTotal:":
-				memTotal = val
-			case "MemAvailable:":
-				memAvailable = val
-			}
-		}
-		if memTotal > 0 {
-			return memTotal, memTotal - memAvailable
-		}
-	}
-
-	// Last resort: syscall (may report host memory on LXC)
-	var sysinfo syscall.Sysinfo_t
-	syscall.Sysinfo(&sysinfo)
-	return uint64(sysinfo.Totalram), uint64(sysinfo.Totalram) - uint64(sysinfo.Freeram)
-}
-
-// getCgroupMemoryUsage reads current memory usage from cgroup v2.
-func getCgroupMemoryUsage() uint64 {
-	if data, err := os.ReadFile("/sys/fs/cgroup/memory.current"); err == nil {
-		s := strings.TrimSpace(string(data))
-		if val, err := strconv.ParseUint(s, 10, 64); err == nil {
-			return val
-		}
-	}
-	return 0
-}
-
-// getCPUPercent reads /proc/stat twice with a 200ms interval to compute CPU usage.
-func getCPUPercent() float64 {
-	read := func() (idle, total uint64) {
-		data, err := os.ReadFile("/proc/stat")
-		if err != nil {
-			return 0, 0
-		}
-		lines := strings.Split(string(data), "\n")
-		if len(lines) == 0 {
-			return 0, 0
-		}
-		fields := strings.Fields(lines[0])
-		if len(fields) < 5 {
-			return 0, 0
-		}
-		var sum uint64
-		for i := 1; i < len(fields); i++ {
-			val, _ := strconv.ParseUint(fields[i], 10, 64)
-			sum += val
-			if i == 4 {
-				idle = val
-			}
-		}
-		return idle, sum
-	}
-
-	idle1, total1 := read()
-	time.Sleep(200 * time.Millisecond)
-	idle2, total2 := read()
-
-	totalDelta := float64(total2 - total1)
-	if totalDelta == 0 {
-		return 0
-	}
-	idleDelta := float64(idle2 - idle1)
-	return (1.0 - idleDelta/totalDelta) * 100.0
-}
-
-func getHostname() string {
-	h, _ := os.Hostname()
-	return h
-}
-
-// handleStatsStream streams real-time container resource stats over WebSocket.
-// It sends JSON stats every 2 seconds and stops on client disconnect or error.
-func handleStatsStream(c *gin.Context, agentMgr *agent.Manager) {
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	client, err := agentMgr.GetClient("local")
-	if err != nil {
-		conn.WriteJSON(gin.H{"error": "failed to get client"})
-		return
-	}
-
-	containerID := c.Param("id")
-	ctx, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-
-	// Check if container is running before starting the stream
-	detail, err := client.InspectContainer(ctx, containerID)
-	if err != nil {
-		conn.WriteJSON(gin.H{"error": "container not found"})
-		return
-	}
-	if detail.State != "running" {
-		conn.WriteJSON(gin.H{"error": "container is not running"})
-		return
-	}
-
-	// Monitor for client disconnect by reading messages in a goroutine
-	go func() {
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				cancel()
-				return
-			}
-		}
-	}()
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	// Send initial stats immediately
-	stats, err := client.GetContainerStats(ctx, containerID)
-	if err != nil {
-		conn.WriteJSON(gin.H{"error": "failed to get container stats"})
-		return
-	}
-	if err := conn.WriteJSON(stats); err != nil {
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			stats, err := client.GetContainerStats(ctx, containerID)
-			if err != nil {
-				conn.WriteJSON(gin.H{"error": "failed to get container stats"})
-				return
-			}
-			if err := conn.WriteJSON(stats); err != nil {
-				return
-			}
-		}
-	}
-}
-
-// sanitizeFilename removes CR/LF and quotes from a filename to prevent
-// Content-Disposition header injection.
-func sanitizeFilename(name string) string {
-	name = strings.ReplaceAll(name, "\r", "")
-	name = strings.ReplaceAll(name, "\n", "")
-	name = strings.ReplaceAll(name, `"`, "'")
-	return name
-}
-
-// generateID creates a prefixed, unpredictable ID using crypto/rand.
-func generateID(prefix string) string {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		// Fallback should never happen
-		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
-	}
-	return fmt.Sprintf("%s-%x", prefix, b)
-}
-
-// internalError returns a generic error message to the client while logging
-// the real error. This prevents leaking internal details (file paths, DB
-// errors, etc.) in API responses.
-func internalError(c *gin.Context, err error) {
-	log.Printf("[ERROR] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
-}
-
-// extractFirstPort parses the compose YAML and extracts the first container port
-// from the first service that has port bindings. Returns 80 as default if no ports found.
-func extractFirstPort(composeYAML string) int {
-	cf, err := docker.ParseComposeFile(composeYAML)
-	if err != nil {
-		return 80
-	}
-	for _, svc := range cf.Services {
-		for _, portSpec := range svc.Ports {
-			pb, err := docker.ParsePort(portSpec)
-			if err == nil {
-				return pb.ContainerPort
-			}
-		}
-	}
-	return 80
-}
-
-// getRegistryAuths extracts registry authentication headers from the registry manager.
-// Returns a map of registry domain to auth header string.
-func getRegistryAuths(registryMgr *registry.Manager, composeYAML string) map[string]string {
-	if registryMgr == nil {
-		return nil
-	}
-	auths := make(map[string]string)
-	for _, domain := range extractDomainsFromCompose(composeYAML) {
-		authHeader, err := registryMgr.GetAuthHeader(domain + "/image:latest")
-		if err == nil && authHeader != "" {
-			auths[domain] = authHeader
-		}
-	}
-	if len(auths) == 0 {
-		return nil
-	}
-	return auths
-}
-
-// HandleGetVersion handles the GET /api/system/version endpoint
-func HandleGetVersion(c *gin.Context, versionService *update.VersionService) {
-	if versionService == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "version service not configured"})
-		return
-	}
-
-	versionInfo, err := versionService.GetVersionInfo(c.Request.Context())
-	if err != nil {
-		internalError(c, err)
-		return
-	}
-
-	c.JSON(http.StatusOK, versionInfo)
-}
-
-// HandleUpdate handles the POST /api/system/update endpoint
-// It performs a streaming update with progress notifications
-func HandleUpdate(c *gin.Context, updateService *update.UpdateService, database *db.DB) {
-	if updateService == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "update service not configured"})
-		return
-	}
-
-	// Get username from context (set by auth middleware)
-	username, exists := c.Get("username")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-
-	// Check if user is admin
-	user, err := database.GetUser(username.(string))
-	if err != nil || user.Username != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
-		return
-	}
-
-	// Parse request body
-	var req struct {
-		DownloadURL string `json:"downloadUrl" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "downloadUrl is required"})
-		return
-	}
-
-	// Set up Server-Sent Events for streaming progress
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-
-	// Helper to send progress updates
-	emit := func(progress update.UpdateProgress) {
-		data, _ := json.Marshal(progress)
-		c.Writer.Write([]byte("data: "))
-		c.Writer.Write(data)
-		c.Writer.Write([]byte("\n\n"))
-		c.Writer.Flush()
-	}
-
-	_ = updateService.RunUpdate(c.Request.Context(), req.DownloadURL, emit)
 }

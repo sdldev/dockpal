@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/sdldev/dockpal/internal/db"
 )
+
+// ErrCredentialNotFound is returned when a registry credential cannot be found.
+var ErrCredentialNotFound = errors.New("credential not found")
 
 // Manager handles registry credential operations.
 type Manager struct {
@@ -266,7 +270,7 @@ func (m *Manager) Get(id string) (*CredentialSummary, error) {
 
 	cred, err := m.db.GetRegistryCredential(id)
 	if err != nil {
-		return nil, fmt.Errorf("credential not found")
+		return nil, ErrCredentialNotFound
 	}
 
 	token, err := Decrypt(cred.EncryptedToken, m.cryptoKey)
@@ -295,7 +299,7 @@ func (m *Manager) Update(id string, req UpdateRequest) error {
 
 	cred, err := m.db.GetRegistryCredential(id)
 	if err != nil {
-		return fmt.Errorf("credential not found")
+		return ErrCredentialNotFound
 	}
 
 	if req.Username != "" {
@@ -333,7 +337,7 @@ func (m *Manager) Delete(id string) error {
 	// Verify it exists first
 	_, err := m.db.GetRegistryCredential(id)
 	if err != nil {
-		return fmt.Errorf("credential not found")
+		return ErrCredentialNotFound
 	}
 
 	if err := m.db.DeleteRegistryCredential(id); err != nil {
@@ -351,7 +355,7 @@ func (m *Manager) TestConnection(id string) (*TestResult, error) {
 
 	cred, err := m.db.GetRegistryCredential(id)
 	if err != nil {
-		return nil, fmt.Errorf("credential not found")
+		return nil, ErrCredentialNotFound
 	}
 
 	token, err := Decrypt(cred.EncryptedToken, m.cryptoKey)
