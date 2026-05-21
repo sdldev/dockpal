@@ -17,6 +17,7 @@ Manage containers, deploy stacks, monitor resources, and orchestrate remote Dock
 - Auto-recovery for crashed containers
 - Self-update mechanism
 - Embedded UI — works offline, no CDN dependencies
+- Prometheus metrics export for external monitoring
 
 ## Quick Start (Development)
 
@@ -118,6 +119,48 @@ DOCKPAL_BACKUP_INTERVAL=6h DOCKPAL_BACKUP_RETENTION=72h ./dockpal server
 
 The scheduler logs every backup success/failure and automatically removes backups
 older than the retention period.
+
+## Prometheus Metrics
+
+DockPal exports Prometheus-compatible metrics at `/api/metrics` for external monitoring and alerting.
+
+### Available Metrics
+
+- **Container metrics**: CPU, memory, network I/O per container
+- **Host metrics**: CPU, memory, disk usage per instance  
+- **HTTP metrics**: Request count, duration, and error rates
+- **Build info**: Version and build information
+
+### Quick Setup
+
+Add to your `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'dockpal'
+    static_configs:
+      - targets: ['localhost:3012']
+    metrics_path: '/api/metrics'
+    scrape_interval: 15s
+```
+
+### Example Queries
+
+```promql
+# Total running containers
+sum(dockpal_containers_total{status="running"})
+
+# Host CPU usage
+dockpal_host_cpu_percent
+
+# Container memory usage
+topk(10, dockpal_container_memory_bytes)
+
+# HTTP request rate
+sum(rate(dockpal_http_requests_total[5m])) by (endpoint)
+```
+
+For detailed documentation, see [docs/PROMETHEUS_METRICS.md](docs/PROMETHEUS_METRICS.md).
 
 ## Multi-Instance Architecture
 

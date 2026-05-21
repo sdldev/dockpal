@@ -21,6 +21,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/git"
+	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
 	"github.com/sdldev/dockpal/internal/tunnel"
@@ -52,6 +53,11 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
     <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"> </script>
   </body>
 </html>`)
+	})
+
+	// Prometheus metrics endpoint (public)
+	api.GET("/metrics", func(c *gin.Context) {
+		metrics.Handler().ServeHTTP(c.Writer, c.Request)
 	})
 
 	// Rate limiters

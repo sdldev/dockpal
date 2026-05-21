@@ -221,6 +221,11 @@ func (m *Manager) edgeReadLoop(ec *EdgeConnection) {
 	}
 }
 
+// ListInstances returns all instances from the database
+func (m *Manager) ListInstances() ([]db.Instance, error) {
+	return m.db.ListInstances()
+}
+
 // Close shuts down all active edge connections.
 func (m *Manager) Close() {
 	m.mu.Lock()

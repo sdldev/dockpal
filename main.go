@@ -23,6 +23,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/logging"
+	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/server"
 	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/web"
@@ -214,7 +215,18 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 		log.Fatalf("Failed to create agent manager: %v", err)
 	}
 
-	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir)
+// Initialize Prometheus metrics
+	if err := metrics.RegisterMetrics("v" + version); err != nil {
+		log.Fatalf("Failed to register Prometheus metrics: %v", err)
+	}
+	metricsCollector := metrics.NewMetricsCollector(agentMgr, "v"+version)
+	metricsCollector.Start()
+	defer metricsCollector.Stop()
+
+	// Add HTTP metrics middleware
+	srv.Router().Use(metrics.MetricsMiddleware())
+
+	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr)
 
 	// Initialize and start background version check scheduler (6-hour interval)
 	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)
@@ -239,9 +251,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	srv.Router().GET("/", func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
 	})
-	srv.Router().NoRoute(func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
-	})
+	// Note: NoRoute handler removed to avoid conflicts with API routes like /metrics
 
 	go func() {
 		if err := srv.Run(); err != nil {
