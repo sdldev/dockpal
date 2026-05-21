@@ -64,6 +64,50 @@ make clean            # Remove build artifacts
 | `DOCKPAL_BACKUP_INTERVAL` | `24h` | Automatic backup interval (set to `0` to disable) |
 | `DOCKPAL_BACKUP_RETENTION` | `168h` | How long to keep automatic backups |
 
+### Configuration Validation
+
+Dockpal performs comprehensive configuration validation at startup to prevent runtime errors. The validation checks:
+
+**Path Validation**
+- All directories are created and writable
+- Minimum 100MB disk space available (with warnings for low space)
+- Absolute path requirements enforced
+
+**System Dependencies**
+- Docker daemon connectivity and accessibility
+- Port availability (detects conflicts with existing services)
+- Database file creation and read/write operations
+
+**Resource Checks**
+- Available system memory (warnings for low memory conditions)
+- TLS configuration validation (when enabled)
+
+**Configuration Logging**
+At startup, Dockpal logs all configuration values **without sensitive data**:
+- Passwords and secrets are shown as `[SET]` or `[WILL BE GENERATED]`
+- Full configuration summary helps with troubleshooting
+
+**Example Validation Output**
+```
+Starting configuration validation...
+Docker daemon connection: OK
+Port 3012 availability: OK
+Database connectivity: OK
+System resources: 512.0 MB memory available
+=== Configuration Summary ===
+Data Directory: /opt/dockpal/data
+Database Path: /opt/dockpal/data/dockpal.db
+Log Path: /opt/dockpal/data/dockpal.log
+Port: 3012
+TLS Enabled: false
+Admin Password: [SET]
+JWT Secret: [WILL BE GENERATED]
+=== End Configuration Summary ===
+Configuration validation completed successfully
+```
+
+If validation fails, Dockpal will display specific error messages and exit with a non-zero status code, preventing partial startup states.
+
 ### Reset Admin Password
 
 ```bash

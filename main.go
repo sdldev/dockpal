@@ -20,6 +20,7 @@ import (
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	backupPkg "github.com/sdldev/dockpal/internal/backup"
+	"github.com/sdldev/dockpal/internal/config"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/logging"
@@ -142,7 +143,55 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 	secretPath = mustAbs("DOCKPAL_SECRET_PATH", secretPath)
 
-	jwtSecret, err := auth.LoadOrGenerateSecretAt(secretPath)
+	// Get port configuration
+	port := os.Getenv("PORT")
+	if port == "" {
+		if tls {
+			port = "3443"
+		} else {
+			port = "3012"
+		}
+	}
+
+	// Get admin password and JWT secret for validation
+	adminPassword := os.Getenv("DOCKPAL_INITIAL_ADMIN_PASSWORD")
+	jwtSecret := os.Getenv("JWT_SECRET")
+
+	// Perform comprehensive configuration validation
+	cfg := &config.Config{
+		DataDir:       dataDir,
+		DBPath:        dbPath,
+		LogPath:       logPath,
+		SecretPath:    secretPath,
+		Port:          port,
+		TLS:           tls,
+		TLSCert:       tlsCert,
+		TLSKey:        tlsKey,
+		TLSDomain:     tlsDomain,
+		AdminPassword: adminPassword,
+		JWTSecret:     jwtSecret,
+	}
+
+	validator := config.NewValidator(cfg)
+	result := validator.ValidateConfig()
+
+	if !result.IsValid {
+		log.Println("Configuration validation failed:")
+		for _, err := range result.Errors {
+			log.Printf("  ERROR: %s", err)
+		}
+		log.Fatalf("Please fix the configuration errors above and restart Dockpal")
+	}
+
+	if len(result.Warnings) > 0 {
+		log.Println("Configuration validation warnings:")
+		for _, warning := range result.Warnings {
+			log.Printf("  WARNING: %s", warning)
+		}
+	}
+
+	// Load or generate JWT secret after validation
+	jwtSecret, err = auth.LoadOrGenerateSecretAt(secretPath)
 	if err != nil {
 		log.Fatalf("Failed to load or generate JWT secret: %v", err)
 	}
@@ -154,7 +203,6 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	defer database.Close()
 
 	// Ensure default admin user exists
-	adminPassword := os.Getenv("DOCKPAL_INITIAL_ADMIN_PASSWORD")
 	generatedAdminPassword := false
 	if adminPassword == "" {
 		passwordBytes := make([]byte, 18)
