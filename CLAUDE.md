@@ -19,7 +19,7 @@ Development requires Go 1.25+ and a running Docker daemon for app startup and Do
 
 ## Runtime and configuration
 
-The main binary supports `server`, `reset-password`, `version`, and `help` subcommands. The server defaults to HTTP port 3012, or 3443 when TLS is enabled, unless `PORT` is set.
+The main binary supports `server`, `backup`, `restore`, `reset-password`, `version`, and `help` subcommands. The server defaults to HTTP port 3012, or 3443 when TLS is enabled, unless `PORT` is set.
 
 Important environment variables:
 

@@ -33,7 +33,7 @@ func HandleTriggerBackup(database *db.DB, dataDir string) gin.HandlerFunc {
 
 		cleaned := filepath.Clean(backupPath)
 		allowedDir := filepath.Clean(backupDir) + string(filepath.Separator)
-		if !strings.HasPrefix(cleaned, allowedDir) && cleaned != filepath.Clean(backupDir) {
+		if !strings.HasPrefix(cleaned, allowedDir) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "backup path must be within the designated backup directory"})
 			return
 		}
@@ -42,6 +42,8 @@ func HandleTriggerBackup(database *db.DB, dataDir string) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("backup failed: %v", err)})
 			return
 		}
+
+		LogAudit(c, database, "backup.create", backupPath, "success", fmt.Sprintf("Created backup at %s", backupPath))
 
 		info, err := os.Stat(backupPath)
 		if err != nil {
