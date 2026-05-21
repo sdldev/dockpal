@@ -3,6 +3,7 @@ window.Dockpal = window.Dockpal || {};
 
 Dockpal.computed = {
   get currentNavLabel() {
+    if (this.currentPage === 'profile') return 'Profile';
     const item = this.navItems.find(n => n.id === this.currentPage);
     return item ? item.label : 'Dashboard';
   },

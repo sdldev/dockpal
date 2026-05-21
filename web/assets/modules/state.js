@@ -9,6 +9,7 @@ Dockpal.initialState = function() {
     sidebarOpen: false,
     token: '',
     username: '',
+    userRole: '',
     error: '',
     instanceError: '',  // Error message for instance unavailability
     loading: false,
@@ -82,6 +83,15 @@ Dockpal.initialState = function() {
 
     instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' },
     installCommandModal: { show: false, command: '', instanceId: '' },
+
+    // Profile state
+    profileLoading: false,
+    profile: null,
+    changePasswordForm: { current_password: '', new_password: '', confirm_password: '' },
+    changePasswordError: '',
+    changePasswordSuccess: '',
+    users: [],
+    usersLoading: false,
 
     // Update modal state
     updateAvailable: false,

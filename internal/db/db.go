@@ -32,14 +32,14 @@ type AuditLog struct {
 }
 
 type Service struct {
-	ID          string `json:"id"`
-	InstanceID  string `json:"instance_id,omitempty"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Domain      string `json:"domain,omitempty"`
-	Compose     string `json:"compose,omitempty"`
-	Repo        string `json:"repo,omitempty"`
-	CreatedAt   int64  `json:"created_at"`
+	ID         string `json:"id"`
+	InstanceID string `json:"instance_id,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Domain     string `json:"domain,omitempty"`
+	Compose    string `json:"compose,omitempty"`
+	Repo       string `json:"repo,omitempty"`
+	CreatedAt  int64  `json:"created_at"`
 }
 
 type Domain struct {
@@ -62,25 +62,25 @@ type RegistryCredential struct {
 }
 
 type Instance struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	Host                string `json:"host"`
-	Port                int    `json:"port"`
-	Mode                string `json:"mode"`
-	AgentTokenHash      string `json:"agent_token_hash"`
-	AgentTokenEncrypted []byte `json:"agent_token_encrypted"`
-	AgentVersion        string `json:"agent_version"`
-	Status              string `json:"status"`
-	DockerVersion       string `json:"docker_version"`
-	OS                  string `json:"os"`
-	CPUCores            int    `json:"cpu_cores"`
-	TotalMemory         int64  `json:"total_memory"`
-	LastSeen            int64  `json:"last_seen"`
-	CreatedAt           int64  `json:"created_at"`
-	SSHHost             string `json:"ssh_host,omitempty"`
-	SSHPort             int    `json:"ssh_port,omitempty"`
-	SSHUser             string `json:"ssh_user,omitempty"`
-	SSHAuthType         string `json:"ssh_auth_type,omitempty"` // "password" | "key"
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Host                 string `json:"host"`
+	Port                 int    `json:"port"`
+	Mode                 string `json:"mode"`
+	AgentTokenHash       string `json:"agent_token_hash"`
+	AgentTokenEncrypted  []byte `json:"agent_token_encrypted"`
+	AgentVersion         string `json:"agent_version"`
+	Status               string `json:"status"`
+	DockerVersion        string `json:"docker_version"`
+	OS                   string `json:"os"`
+	CPUCores             int    `json:"cpu_cores"`
+	TotalMemory          int64  `json:"total_memory"`
+	LastSeen             int64  `json:"last_seen"`
+	CreatedAt            int64  `json:"created_at"`
+	SSHHost              string `json:"ssh_host,omitempty"`
+	SSHPort              int    `json:"ssh_port,omitempty"`
+	SSHUser              string `json:"ssh_user,omitempty"`
+	SSHAuthType          string `json:"ssh_auth_type,omitempty"` // "password" | "key"
 	SSHPasswordEncrypted []byte `json:"ssh_password_encrypted,omitempty"`
 	SSHKeyEncrypted      []byte `json:"ssh_key_encrypted,omitempty"`
 }
@@ -100,11 +100,11 @@ var (
 )
 
 var (
-	ErrUserNotFound     = errors.New("user not found")
-	ErrServiceNotFound  = errors.New("service not found")
-	ErrInstanceNotFound = errors.New("instance not found")
-	ErrRegistryNotFound = errors.New("registry credential not found")
-	ErrWebhookNotFound  = errors.New("webhook not found")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrServiceNotFound   = errors.New("service not found")
+	ErrInstanceNotFound  = errors.New("instance not found")
+	ErrRegistryNotFound  = errors.New("registry credential not found")
+	ErrWebhookNotFound   = errors.New("webhook not found")
 	ErrCannotDeleteLocal = errors.New("cannot delete the local instance")
 )
 
@@ -213,6 +213,50 @@ func (d *DB) IncrementTokenVersion(username string) error {
 		if err := json.Unmarshal(data, &user); err != nil {
 			return err
 		}
+		user.TokenVersion++
+		updated, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(username), updated)
+	})
+}
+
+func (d *DB) ListUsers() ([]User, error) {
+	var users []User
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketUsers)
+		return b.ForEach(func(k, v []byte) error {
+			var user User
+			if err := json.Unmarshal(v, &user); err != nil {
+				return err
+			}
+			if user.Role == "" {
+				if user.Username == "admin" {
+					user.Role = "admin"
+				} else {
+					user.Role = "viewer"
+				}
+			}
+			users = append(users, user)
+			return nil
+		})
+	})
+	return users, err
+}
+
+func (d *DB) UpdateUserRole(username, role string) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketUsers)
+		data := b.Get([]byte(username))
+		if data == nil {
+			return ErrUserNotFound
+		}
+		var user User
+		if err := json.Unmarshal(data, &user); err != nil {
+			return err
+		}
+		user.Role = role
 		user.TokenVersion++
 		updated, err := json.Marshal(user)
 		if err != nil {
@@ -629,17 +673,17 @@ func (d *DB) ListAuditLogs(limit, offset int) ([]AuditLog, int, error) {
 	err := d.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketAuditLogs)
 		c := b.Cursor()
-		
+
 		// Count total
 		total = 0
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			total++
 		}
-		
+
 		if offset >= total {
 			return nil
 		}
-		
+
 		// Iterate backwards to get newest first
 		skipped := 0
 		var k, v []byte

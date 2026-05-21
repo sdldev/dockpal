@@ -86,6 +86,14 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	protected.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
 	protected.POST("/auth/reset-password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
+	// Profile (all authenticated users)
+	baseProtected.GET("/profile", func(c *gin.Context) { auth.HandleGetProfile(c, database) })
+	baseProtected.PUT("/profile/password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleChangePassword(c, database) })
+
+	// User management (admin only)
+	adminGroup.GET("/users", func(c *gin.Context) { auth.HandleListUsers(c, database) })
+	adminGroup.PUT("/users/:username/role", func(c *gin.Context) { auth.HandleUpdateUserRole(c, database) })
+
 	// Webhooks management
 	protected.GET("/webhooks", HandleListWebhooks(database))
 	protected.POST("/webhooks", HandleCreateWebhook(database))

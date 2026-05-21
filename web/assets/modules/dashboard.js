@@ -60,5 +60,6 @@ Dockpal.dashboard = {
     else if (page === 'deploy') { await this.loadServices(); this.loadGithubRepos(); }
     else if (page === 'domains') await this.loadDomains();
     else if (page === 'registry') await this.loadRegistries();
+    else if (page === 'profile') await this.loadProfile();
   },
 };

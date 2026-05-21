@@ -81,3 +81,117 @@ func HandleResetPassword(c *gin.Context, database *db.DB) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "password updated"})
 }
+
+func HandleListUsers(c *gin.Context, database *db.DB) {
+	users, err := database.ListUsers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
+		return
+	}
+
+	type userResponse struct {
+		Username  string `json:"username"`
+		Role      string `json:"role"`
+		CreatedAt int64  `json:"created_at"`
+	}
+
+	var resp []userResponse
+	for _, u := range users {
+		resp = append(resp, userResponse{
+			Username:  u.Username,
+			Role:      u.Role,
+			CreatedAt: u.CreatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+type UpdateRoleRequest struct {
+	Role string `json:"role" binding:"required"`
+}
+
+func HandleUpdateUserRole(c *gin.Context, database *db.DB) {
+	targetUsername := c.Param("username")
+	callerUsername := c.GetString("username")
+
+	if targetUsername == callerUsername {
+		c.JSON(http.StatusForbidden, gin.H{"error": "cannot change your own role"})
+		return
+	}
+
+	var req UpdateRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if req.Role != RoleAdmin && req.Role != RoleOperator && req.Role != RoleViewer {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role: must be admin, operator, or viewer"})
+		return
+	}
+
+	if _, err := database.GetUser(targetUsername); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	if err := database.UpdateUserRole(targetUsername, req.Role); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "role updated"})
+}
+
+func HandleGetProfile(c *gin.Context, database *db.DB) {
+	username := c.GetString("username")
+	user, err := database.GetUser(username)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"username":   user.Username,
+		"role":       user.Role,
+		"created_at": user.CreatedAt,
+	})
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required,min=8"`
+}
+
+func HandleChangePassword(c *gin.Context, database *db.DB) {
+	var req ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	username := c.GetString("username")
+	user, err := database.GetUser(username)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user"})
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "current password is incorrect"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	if err := database.UpdatePasswordWithVersion(username, string(hash)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "password updated"})
+}

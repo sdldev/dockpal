@@ -46,6 +46,7 @@ Dockpal.auth = {
       if (!resp.ok) { this.error = data.error || 'Login failed'; return; }
       this.token = data.token;
       this.username = data.username;
+      this.userRole = data.role || '';
       localStorage.setItem('dockpal_token', this.token);
       this.view = 'app';
       this.currentPage = 'dashboard';
