@@ -60,6 +60,8 @@ make clean            # Remove build artifacts
 | `DOCKPAL_TLS_DOMAIN` | | ACME Let's Encrypt domain |
 | `DOCKPAL_TLS_CERT` | | Custom TLS certificate path |
 | `DOCKPAL_TLS_KEY` | | Custom TLS key path |
+| `DOCKPAL_BACKUP_INTERVAL` | `24h` | Automatic backup interval (set to `0` to disable) |
+| `DOCKPAL_BACKUP_RETENTION` | `168h` | How long to keep automatic backups |
 
 ### Reset Admin Password
 
@@ -98,6 +100,24 @@ curl -X POST https://localhost:3012/api/backup \
 
 Backups include a sidecar `.sha256` checksum file. The restore command validates
 the backup integrity and checksum before replacing the live database.
+
+### Automated Backup Scheduling
+
+The server includes a built-in background scheduler that automatically backs up
+the database at regular intervals. It is enabled by default with a `24h` interval.
+
+**Configuration:**
+
+```bash
+# Disable automatic backups
+DOCKPAL_BACKUP_INTERVAL=0 ./dockpal server
+
+# Backup every 6 hours, keep for 3 days
+DOCKPAL_BACKUP_INTERVAL=6h DOCKPAL_BACKUP_RETENTION=72h ./dockpal server
+```
+
+The scheduler logs every backup success/failure and automatically removes backups
+older than the retention period.
 
 ## Multi-Instance Architecture
 

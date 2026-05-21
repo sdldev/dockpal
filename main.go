@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
+	backupPkg "github.com/sdldev/dockpal/internal/backup"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/logging"
@@ -220,6 +221,12 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	ctx, cancelScheduler := context.WithCancel(context.Background())
 	scheduler.Start(ctx, 6*time.Hour)
 
+	// Initialize and start background backup scheduler
+	backupInterval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
+	backupRetention := parseDurationEnv("DOCKPAL_BACKUP_RETENTION", 168*time.Hour)
+	backupScheduler := backupPkg.NewScheduler(database, dataDir, backupInterval, backupRetention)
+	backupScheduler.Start(ctx)
+
 	// Serve embedded frontend
 	assetsFS, _ := fs.Sub(web.Assets, "assets")
 	srv.Router().StaticFS("/assets", http.FS(assetsFS))
@@ -249,9 +256,10 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	<-quit
 
 	log.Println("Shutting down...")
-	// Stop the scheduler first for graceful shutdown
+	// Stop the schedulers first for graceful shutdown
 	cancelScheduler()
 	scheduler.Stop()
+	backupScheduler.Stop()
 	srv.Shutdown(context.Background())
 }
 
@@ -377,6 +385,21 @@ func resetPassword() {
 	}
 
 	fmt.Println("Dockpal: password reset successfully")
+}
+
+// parseDurationEnv reads a duration from an environment variable.
+// If the variable is unset or empty, it returns the default.
+// If the variable is set but invalid, it logs a fatal error.
+func parseDurationEnv(name string, defaultVal time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Fatalf("Invalid %s value %q: %v", name, raw, err)
+	}
+	return d
 }
 
 // mustAbs validates that the given value is an absolute path.
