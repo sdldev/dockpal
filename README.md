@@ -67,6 +67,38 @@ make clean            # Remove build artifacts
 ./dockpal reset-password
 ```
 
+### Backup & Restore
+
+**CLI Backup** (requires server to be stopped because BoltDB uses file locking):
+
+```bash
+# Default backup path: <data_dir>/backups/dockpal-<timestamp>.db
+./dockpal backup
+
+# Custom output path
+./dockpal backup --output /opt/dockpal/backups/my-backup.db
+```
+
+**Hot Backup** (while server is running) via the admin API:
+
+```bash
+curl -X POST https://localhost:3012/api/backup \
+  -H "Authorization: Bearer <admin-jwt>"
+```
+
+**Restore** (requires server to be stopped):
+
+```bash
+# Interactive confirmation
+./dockpal restore --from /opt/dockpal/backups/dockpal-20260521-120000.db
+
+# Skip confirmation
+./dockpal restore --from /path/to/backup.db --force
+```
+
+Backups include a sidecar `.sha256` checksum file. The restore command validates
+the backup integrity and checksum before replacing the live database.
+
 ## Multi-Instance Architecture
 
 DockPal supports managing multiple Docker hosts from a single dashboard.

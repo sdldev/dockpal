@@ -47,6 +47,8 @@ func main() {
 		fmt.Println()
 		fmt.Println("Usage:")
 		fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
+		fmt.Println("  dockpal backup          Create a database backup")
+		fmt.Println("  dockpal restore         Restore database from a backup")
 		fmt.Println("  dockpal reset-password  Reset admin password")
 		fmt.Println("  dockpal version         Show version")
 		fmt.Println("  dockpal help            Show this help")
@@ -69,6 +71,17 @@ func main() {
 
 		serverCmd.Parse(os.Args[2:])
 		runServer(*tls, *tlsCert, *tlsKey, *tlsDomain)
+	case "backup":
+		backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
+		output := backupCmd.String("output", "", "Backup output path (default: <data_dir>/backups/dockpal-<timestamp>.db)")
+		backupCmd.Parse(os.Args[2:])
+		backup(*output)
+	case "restore":
+		restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
+		from := restoreCmd.String("from", "", "Path to backup file to restore from (required)")
+		force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
+		restoreCmd.Parse(os.Args[2:])
+		restore(*from, *force)
 	case "reset-password":
 		resetPassword()
 	case "version":
@@ -79,6 +92,8 @@ func main() {
 		fmt.Println()
 		fmt.Println("Commands:")
 		fmt.Println("  server          Start the HTTP/HTTPS server")
+		fmt.Println("  backup          Create a database backup")
+		fmt.Println("  restore         Restore database from a backup")
 		fmt.Println("  reset-password  Reset admin password")
 		fmt.Println("  version         Show version")
 		fmt.Println("  help            Show this help")
@@ -198,7 +213,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 		log.Fatalf("Failed to create agent manager: %v", err)
 	}
 
-	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr)
+	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir)
 
 	// Initialize and start background version check scheduler (6-hour interval)
 	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)
@@ -238,6 +253,93 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	cancelScheduler()
 	scheduler.Stop()
 	srv.Shutdown(context.Background())
+}
+
+func backup(outputPath string) {
+	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
+	dataDir = mustAbs("DOCKPAL_DATA_DIR", dataDir)
+
+	if outputPath == "" {
+		backupDir := filepath.Join(dataDir, "backups")
+		timestamp := time.Now().Format("20060102-150405")
+		outputPath = filepath.Join(backupDir, fmt.Sprintf("dockpal-%s.db", timestamp))
+	}
+	outputPath = mustAbs("output", outputPath)
+
+	dbPath := os.Getenv("DOCKPAL_DB_PATH")
+	if dbPath == "" {
+		dbPath = filepath.Join(dataDir, "dockpal.db")
+	}
+	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
+
+	database, err := db.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	if err := database.BackupTo(outputPath); err != nil {
+		log.Fatalf("Backup failed: %v", err)
+	}
+
+	checksumPath := outputPath + ".sha256"
+	checksum, _ := os.ReadFile(checksumPath)
+	fmt.Printf("Backup created: %s\n", outputPath)
+	fmt.Printf("Checksum: %s\n", strings.TrimSpace(string(checksum)))
+}
+
+func restore(fromPath string, force bool) {
+	if fromPath == "" {
+		fmt.Println("Usage: dockpal restore --from <backup-file> [--force]")
+		os.Exit(1)
+	}
+	fromPath = mustAbs("from", fromPath)
+
+	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
+	dataDir = mustAbs("DOCKPAL_DATA_DIR", dataDir)
+
+	dbPath := os.Getenv("DOCKPAL_DB_PATH")
+	if dbPath == "" {
+		dbPath = filepath.Join(dataDir, "dockpal.db")
+	}
+	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
+
+	if err := db.ValidateBackup(fromPath); err != nil {
+		log.Fatalf("Backup validation failed: %v", err)
+	}
+
+	if !force {
+		fmt.Printf("This will replace the current database at %s with %s. Continue? [y/N]: ", dbPath, fromPath)
+		var answer string
+		fmt.Scanln(&answer)
+		if strings.ToLower(answer) != "y" {
+			fmt.Println("Restore cancelled.")
+			os.Exit(0)
+		}
+	}
+
+	input, err := os.ReadFile(fromPath)
+	if err != nil {
+		log.Fatalf("Failed to read backup file: %v", err)
+	}
+
+	tmpPath := dbPath + ".restore.tmp"
+	if err := os.WriteFile(tmpPath, input, 0600); err != nil {
+		log.Fatalf("Failed to write restored database: %v", err)
+	}
+
+	if err := os.Rename(tmpPath, dbPath); err != nil {
+		_ = os.Remove(tmpPath)
+		log.Fatalf("Failed to replace database: %v", err)
+	}
+
+	fmt.Println("Database restored successfully")
 }
 
 func resetPassword() {

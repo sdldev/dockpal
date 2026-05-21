@@ -28,7 +28,7 @@ import (
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
-func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager) {
+func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager, dataDir string) {
 	api := r.Group("/api")
 
 	// API Docs (Redoc + OpenAPI spec)
@@ -93,6 +93,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// User management (admin only)
 	adminGroup.GET("/users", func(c *gin.Context) { auth.HandleListUsers(c, database) })
 	adminGroup.PUT("/users/:username/role", func(c *gin.Context) { auth.HandleUpdateUserRole(c, database) })
+
+	// Backup (admin only)
+	adminGroup.POST("/backup", HandleTriggerBackup(database, dataDir))
 
 	// Webhooks management
 	protected.GET("/webhooks", HandleListWebhooks(database))
