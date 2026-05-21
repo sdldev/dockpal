@@ -18,6 +18,7 @@ Manage containers, deploy stacks, monitor resources, and orchestrate remote Dock
 - Self-update mechanism
 - Embedded UI — works offline, no CDN dependencies
 - Prometheus metrics export for external monitoring
+- Comprehensive health check endpoints for monitoring
 
 ## Quick Start (Development)
 
@@ -329,6 +330,31 @@ Optional variables:
 | `DOCKPAL_UPDATE_TEMPLATES` | `1` | Refresh templates from the release archive |
 | `DOCKPAL_FORCE` | `0` | Reinstall even when already on the target version |
 | `DOCKPAL_BACKUP_DIR` | `/opt/dockpal/backups` | Backup directory for binary/templates |
+
+## Health Checks
+
+Dockpal provides comprehensive health check endpoints for monitoring and container orchestration:
+
+### Endpoints
+
+- `/health` or `/healthz` - Comprehensive health status
+- `/health/live` or `/livez` - Liveness probe (process running)
+- `/health/ready` or `/readyz` - Readiness probe (dependencies ready)
+
+### Usage
+
+```bash
+# Check overall health
+curl http://localhost:3012/health
+
+# Kubernetes liveness probe
+curl http://localhost:3012/health/live
+
+# Kubernetes readiness probe  
+curl http://localhost:3012/health/ready
+```
+
+Health checks include database connectivity, Docker daemon status, disk space, and memory availability. See [docs/HEALTH_CHECK.md](docs/HEALTH_CHECK.md) for detailed configuration and monitoring integration.
 
 ## License
 

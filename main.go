@@ -274,7 +274,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	// Add HTTP metrics middleware
 	srv.Router().Use(metrics.MetricsMiddleware())
 
-	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir)
+	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir, version)
 
 	// Initialize and start background version check scheduler (6-hour interval)
 	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)

@@ -21,6 +21,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/git"
+	"github.com/sdldev/dockpal/internal/health"
 	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
@@ -29,7 +30,12 @@ import (
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
-func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager, dataDir string) {
+func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager, dataDir string, version string) {
+	// Health check endpoints (public, no authentication required)
+	dbPath := filepath.Join(dataDir, "dockpal.db")
+	healthHandlers := health.NewHandlers(dbPath, dockerClient.RawClient(), "v"+version)
+	healthHandlers.RegisterHealthRoutes(r)
+
 	api := r.Group("/api")
 
 	// API Docs (Redoc + OpenAPI spec)
