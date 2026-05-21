@@ -19,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
+	backupPkg "github.com/sdldev/dockpal/internal/backup"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/logging"
@@ -49,6 +50,7 @@ func main() {
 		fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
 		fmt.Println("  dockpal backup          Create a database backup")
 		fmt.Println("  dockpal restore         Restore database from a backup")
+		fmt.Println("  dockpal backup-scheduler  Run scheduled background backups")
 		fmt.Println("  dockpal reset-password  Reset admin password")
 		fmt.Println("  dockpal version         Show version")
 		fmt.Println("  dockpal help            Show this help")
@@ -82,6 +84,8 @@ func main() {
 		force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
 		restoreCmd.Parse(os.Args[2:])
 		restore(*from, *force)
+	case "backup-scheduler":
+		backupSchedulerCmd()
 	case "reset-password":
 		resetPassword()
 	case "version":
@@ -94,6 +98,7 @@ func main() {
 		fmt.Println("  server          Start the HTTP/HTTPS server")
 		fmt.Println("  backup          Create a database backup")
 		fmt.Println("  restore         Restore database from a backup")
+		fmt.Println("  backup-scheduler  Run scheduled background backups")
 		fmt.Println("  reset-password  Reset admin password")
 		fmt.Println("  version         Show version")
 		fmt.Println("  help            Show this help")
@@ -220,6 +225,12 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	ctx, cancelScheduler := context.WithCancel(context.Background())
 	scheduler.Start(ctx, 6*time.Hour)
 
+	// Initialize and start background backup scheduler
+	backupInterval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
+	backupRetention := parseDurationEnv("DOCKPAL_BACKUP_RETENTION", 168*time.Hour)
+	backupScheduler := backupPkg.NewScheduler(database, dataDir, backupInterval, backupRetention)
+	backupScheduler.Start(ctx)
+
 	// Serve embedded frontend
 	assetsFS, _ := fs.Sub(web.Assets, "assets")
 	srv.Router().StaticFS("/assets", http.FS(assetsFS))
@@ -249,9 +260,10 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	<-quit
 
 	log.Println("Shutting down...")
-	// Stop the scheduler first for graceful shutdown
+	// Stop the schedulers first for graceful shutdown
 	cancelScheduler()
 	scheduler.Stop()
+	backupScheduler.Stop()
 	srv.Shutdown(context.Background())
 }
 
@@ -373,6 +385,58 @@ func resetPassword() {
 	}
 
 	fmt.Println("Dockpal: password reset successfully")
+}
+
+func backupSchedulerCmd() {
+	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
+	dataDir = mustAbs("DOCKPAL_DATA_DIR", dataDir)
+
+	dbPath := os.Getenv("DOCKPAL_DB_PATH")
+	if dbPath == "" {
+		dbPath = filepath.Join(dataDir, "dockpal.db")
+	}
+	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
+
+	database, err := db.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	interval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
+	retention := parseDurationEnv("DOCKPAL_BACKUP_RETENTION", 168*time.Hour)
+
+	scheduler := backupPkg.NewScheduler(database, dataDir, interval, retention)
+	ctx, cancel := context.WithCancel(context.Background())
+	scheduler.Start(ctx)
+
+	log.Printf("Dockpal backup scheduler started (interval=%s, retention=%s)", interval, retention)
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down backup scheduler...")
+	cancel()
+	scheduler.Stop()
+}
+
+// parseDurationEnv reads a duration from an environment variable.
+// If the variable is unset or empty, it returns the default.
+// If the variable is set but invalid, it logs a fatal error.
+func parseDurationEnv(name string, defaultVal time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Fatalf("Invalid %s value %q: %v", name, raw, err)
+	}
+	return d
 }
 
 // mustAbs validates that the given value is an absolute path.
