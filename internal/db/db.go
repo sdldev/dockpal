@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -98,6 +99,15 @@ var (
 	bucketWebhooks   = []byte("webhooks")
 )
 
+var (
+	ErrUserNotFound     = errors.New("user not found")
+	ErrServiceNotFound  = errors.New("service not found")
+	ErrInstanceNotFound = errors.New("instance not found")
+	ErrRegistryNotFound = errors.New("registry credential not found")
+	ErrWebhookNotFound  = errors.New("webhook not found")
+	ErrCannotDeleteLocal = errors.New("cannot delete the local instance")
+)
+
 func New(path string) (*DB, error) {
 	bdb, err := bbolt.Open(path, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
@@ -140,7 +150,7 @@ func (d *DB) GetUser(username string) (*User, error) {
 		b := tx.Bucket(bucketUsers)
 		data := b.Get([]byte(username))
 		if data == nil {
-			return fmt.Errorf("user not found")
+			return ErrUserNotFound
 		}
 		return json.Unmarshal(data, &user)
 	})
@@ -174,7 +184,7 @@ func (d *DB) UpdatePasswordWithVersion(username, hash string) error {
 		b := tx.Bucket(bucketUsers)
 		data := b.Get([]byte(username))
 		if data == nil {
-			return fmt.Errorf("user not found")
+			return ErrUserNotFound
 		}
 		var user User
 		if err := json.Unmarshal(data, &user); err != nil {
@@ -197,7 +207,7 @@ func (d *DB) IncrementTokenVersion(username string) error {
 		b := tx.Bucket(bucketUsers)
 		data := b.Get([]byte(username))
 		if data == nil {
-			return fmt.Errorf("user not found")
+			return ErrUserNotFound
 		}
 		var user User
 		if err := json.Unmarshal(data, &user); err != nil {
@@ -260,7 +270,7 @@ func (d *DB) GetService(id string) (*Service, error) {
 		b := tx.Bucket(bucketServices)
 		data := b.Get([]byte(id))
 		if data == nil {
-			return fmt.Errorf("service not found")
+			return ErrServiceNotFound
 		}
 		return json.Unmarshal(data, &svc)
 	})
@@ -383,7 +393,7 @@ func (d *DB) GetRegistryCredential(id string) (*RegistryCredential, error) {
 		b := tx.Bucket(bucketRegistries)
 		data := b.Get([]byte(id))
 		if data == nil {
-			return fmt.Errorf("registry credential not found")
+			return ErrRegistryNotFound
 		}
 		return json.Unmarshal(data, &cred)
 	})
@@ -505,7 +515,7 @@ func (d *DB) GetInstance(id string) (*Instance, error) {
 		b := tx.Bucket(bucketInstances)
 		data := b.Get([]byte(id))
 		if data == nil {
-			return fmt.Errorf("instance not found")
+			return ErrInstanceNotFound
 		}
 		return json.Unmarshal(data, &instance)
 	})
@@ -536,13 +546,13 @@ func (d *DB) ListInstances() ([]Instance, error) {
 func (d *DB) DeleteInstance(id string) error {
 	// Reject deletion of the "local" instance
 	if id == "local" {
-		return fmt.Errorf("cannot delete the local instance")
+		return ErrCannotDeleteLocal
 	}
 	return d.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketInstances)
 		data := b.Get([]byte(id))
 		if data == nil {
-			return fmt.Errorf("instance not found")
+			return ErrInstanceNotFound
 		}
 		return b.Delete([]byte(id))
 	})
@@ -585,7 +595,7 @@ func (d *DB) UpdateInstanceInfo(id string, info Instance) error {
 func (d *DB) EnsureLocalInstance() error {
 	_, err := d.GetInstance("local")
 	if err != nil {
-		if err.Error() == "instance not found" {
+		if errors.Is(err, ErrInstanceNotFound) {
 			return d.SaveInstance(Instance{
 				ID:        "local",
 				Name:      "This Server",

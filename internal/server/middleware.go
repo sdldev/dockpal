@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -150,13 +151,13 @@ func InstanceMiddleware(agentMgr *agent.Manager, database *db.DB, jwtSecret stri
 		client, err := agentMgr.GetClient(instanceID)
 		if err != nil {
 			// Check if instance not found (404) takes priority
-			if strings.Contains(err.Error(), "instance not found") {
+			if errors.Is(err, agent.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				c.Abort()
 				return
 			}
 			// Check if instance is offline (503)
-			if strings.Contains(err.Error(), "instance offline") || strings.Contains(err.Error(), "no edge connection") {
+			if errors.Is(err, agent.ErrInstanceOffline) {
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "instance offline"})
 				c.Abort()
 				return

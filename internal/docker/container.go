@@ -13,6 +13,9 @@ import (
 	"github.com/moby/moby/client"
 )
 
+// DefaultStopTimeout is the number of seconds to wait before forcibly killing a container.
+const DefaultStopTimeout = 10
+
 type Client struct {
 	cli *client.Client
 }
@@ -46,6 +49,10 @@ type ContainerInfo struct {
 	ProtectionReason string                  `json:"protection_reason,omitempty"`
 }
 
+func trimContainerName(name string) string {
+	return strings.TrimPrefix(name, "/")
+}
+
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo, error) {
 	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: all})
 	if err != nil {
@@ -56,10 +63,7 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 	for i, ctr := range result.Items {
 		name := ""
 		if len(ctr.Names) > 0 {
-			name = ctr.Names[0]
-			if len(name) > 0 && name[0] == '/' {
-				name = name[1:]
-			}
+			name = trimContainerName(ctr.Names[0])
 		}
 		containers[i] = ContainerInfo{
 			ID:      ctr.ID[:12],
@@ -94,10 +98,7 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDet
 
 	ctr := result.Container
 
-	name := ctr.Name
-	if len(name) > 0 && name[0] == '/' {
-		name = name[1:]
-	}
+	name := trimContainerName(ctr.Name)
 
 	networks := make(map[string]string)
 	if ctr.NetworkSettings != nil {
@@ -151,13 +152,13 @@ func (c *Client) StartContainer(ctx context.Context, id string) error {
 }
 
 func (c *Client) StopContainer(ctx context.Context, id string) error {
-	timeout := 10
+	timeout := DefaultStopTimeout
 	_, err := c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
 	return err
 }
 
 func (c *Client) RestartContainer(ctx context.Context, id string) error {
-	timeout := 10
+	timeout := DefaultStopTimeout
 	_, err := c.cli.ContainerRestart(ctx, id, client.ContainerRestartOptions{Timeout: &timeout})
 	return err
 }
@@ -171,7 +172,7 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 		return err
 	}
 	// Graceful: try to stop first, then remove
-	timeout := 10
+	timeout := DefaultStopTimeout
 	c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
 	_, err := c.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{})
 	return err
@@ -303,10 +304,7 @@ func (c *Client) EditContainer(ctx context.Context, id string, req ContainerEdit
 	}
 	// Use the full container ID for all subsequent operations
 	fullID := preInspect.Container.ID
-	containerName := preInspect.Container.Name
-	if len(containerName) > 0 && containerName[0] == '/' {
-		containerName = containerName[1:]
-	}
+	containerName := trimContainerName(preInspect.Container.Name)
 
 	needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
 
@@ -370,10 +368,7 @@ func (c *Client) recreateContainer(ctx context.Context, id string, req Container
 	}
 
 	// Determine the container name
-	name := ctr.Name
-	if len(name) > 0 && name[0] == '/' {
-		name = name[1:]
-	}
+	name := trimContainerName(ctr.Name)
 	if req.Name != nil {
 		name = *req.Name
 	}
@@ -492,7 +487,7 @@ func (c *Client) recreateContainer(ctx context.Context, id string, req Container
 
 	// Stop and remove the old container
 	if wasRunning {
-		timeout := 10
+		timeout := DefaultStopTimeout
 		c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
 	}
 	removeOpts := client.ContainerRemoveOptions{

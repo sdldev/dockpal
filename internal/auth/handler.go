@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -48,7 +49,9 @@ func HandleLogout(c *gin.Context, database *db.DB) {
 	username := c.GetString("username")
 	if username != "" {
 		// Increment token version to invalidate all existing tokens
-		database.IncrementTokenVersion(username)
+		if err := database.IncrementTokenVersion(username); err != nil {
+			log.Printf("failed to increment token version for %s: %v", username, err)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "logged out"})
 }

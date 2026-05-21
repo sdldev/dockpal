@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -209,7 +210,7 @@ func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 
 		inst, err := database.GetInstance(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, db.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}
@@ -257,7 +258,7 @@ func handleUpdateInstance(database *db.DB) gin.HandlerFunc {
 		// Check if instance exists
 		inst, err := database.GetInstance(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, db.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}
@@ -331,7 +332,7 @@ func handleDeleteInstance(database *db.DB, agentMgr *agent.Manager) gin.HandlerF
 		// Get instance to check mode and disconnect agent if needed
 		inst, err := database.GetInstance(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, db.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}
@@ -346,11 +347,11 @@ func handleDeleteInstance(database *db.DB, agentMgr *agent.Manager) gin.HandlerF
 
 		// Delete from database
 		if err := database.DeleteInstance(id); err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, db.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}
-			if strings.Contains(err.Error(), "cannot delete") {
+			if errors.Is(err, db.ErrCannotDeleteLocal) {
 				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 				return
 			}
@@ -375,11 +376,11 @@ func handleTestInstance(agentMgr *agent.Manager, database *db.DB) gin.HandlerFun
 		// Get client for the instance
 		client, err := agentMgr.GetClient(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, agent.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}
-			if strings.Contains(err.Error(), "offline") {
+			if errors.Is(err, agent.ErrInstanceOffline) {
 				c.JSON(http.StatusOK, TestResult{Status: "error", Message: "instance is offline"})
 				return
 			}
@@ -409,7 +410,7 @@ func handleRotateToken(database *db.DB, jwtSecret string) gin.HandlerFunc {
 		// Get existing instance
 		inst, err := database.GetInstance(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, db.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}
@@ -559,7 +560,7 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 
 		inst, err := database.GetInstance(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, db.ErrInstanceNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
 				return
 			}

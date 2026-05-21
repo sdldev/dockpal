@@ -152,15 +152,13 @@ func (c *LocalClient) GetHostInfo(ctx context.Context) (*HostInfo, error) {
 // GetHostStats returns real-time resource usage statistics for the local host.
 func (c *LocalClient) GetHostStats(ctx context.Context) (*HostStats, error) {
 	cpuPercent := getCPUPercent()
-	_, usedRAM := getMemoryInfo()
+	totalRAM, usedRAM := getMemoryInfo()
 
 	var stat syscall.Statfs_t
 	syscall.Statfs("/", &stat)
 
 	totalDisk := stat.Blocks * uint64(stat.Bsize)
 	usedDisk := (stat.Blocks - stat.Bfree) * uint64(stat.Bsize)
-
-	totalRAM, _ := getMemoryInfo()
 
 	return &HostStats{
 		CPUPercent: cpuPercent,

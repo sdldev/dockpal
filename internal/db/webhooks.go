@@ -2,7 +2,6 @@ package db
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"go.etcd.io/bbolt"
 )
@@ -37,7 +36,7 @@ func (d *DB) GetWebhook(id string) (*Webhook, error) {
 		b := tx.Bucket(bucketWebhooks)
 		data := b.Get([]byte(id))
 		if data == nil {
-			return fmt.Errorf("webhook not found")
+			return ErrWebhookNotFound
 		}
 		return json.Unmarshal(data, &wh)
 	})

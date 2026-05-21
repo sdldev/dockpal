@@ -445,7 +445,7 @@ func (c *Client) StopCompose(ctx context.Context, projectName string) error {
 		return err
 	}
 
-	timeout := 10
+	timeout := DefaultStopTimeout
 	for _, ctr := range result.Items {
 		c.cli.ContainerStop(ctx, ctr.ID, client.ContainerStopOptions{Timeout: &timeout})
 	}

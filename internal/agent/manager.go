@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +11,11 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/registry"
+)
+
+var (
+	ErrInstanceNotFound = errors.New("instance not found")
+	ErrInstanceOffline  = errors.New("instance offline")
 )
 
 // Manager maintains connections to all registered agents.
@@ -58,7 +64,7 @@ func (m *Manager) GetClient(instanceID string) (AgentClient, error) {
 	// Look up instance in database
 	inst, err := m.db.GetInstance(instanceID)
 	if err != nil {
-		return nil, fmt.Errorf("instance not found: %s", instanceID)
+		return nil, fmt.Errorf("%w: %s", ErrInstanceNotFound, instanceID)
 	}
 
 	switch inst.Mode {
@@ -78,7 +84,7 @@ func (m *Manager) GetClient(instanceID string) (AgentClient, error) {
 		_, connected := m.edge[instanceID]
 		m.mu.RUnlock()
 		if !connected {
-			return nil, fmt.Errorf("instance offline: %s", instanceID)
+			return nil, fmt.Errorf("%w: %s", ErrInstanceOffline, instanceID)
 		}
 		return NewEdgeClient(instanceID, m), nil
 

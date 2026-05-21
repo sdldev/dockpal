@@ -7,6 +7,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+	"github.com/sdldev/dockpal/internal/docker"
 )
 
 const (
@@ -80,7 +81,7 @@ func (ct *CloudflareTunnel) Deploy(ctx context.Context, token string) error {
 
 // Remove stops and removes the cloudflared container.
 func (ct *CloudflareTunnel) Remove(ctx context.Context) error {
-	timeout := 10
+	timeout := docker.DefaultStopTimeout
 	ct.docker.ContainerStop(ctx, CloudflaredContainer, client.ContainerStopOptions{Timeout: &timeout})
 
 	_, err := ct.docker.ContainerRemove(ctx, CloudflaredContainer, client.ContainerRemoveOptions{Force: true})
