@@ -15,6 +15,23 @@ Dockpal.containers = {
     return out;
   },
 
+  isProtectedContainer(c) {
+    if (!c) return false;
+    if (c.protected === true) return true;
+
+    const name = (c.name || '').replace(/^\//, '').toLowerCase();
+    const image = (c.image || '').toLowerCase();
+    const env = Array.isArray(c.env) ? c.env : [];
+    const hasAgentEnv = env.some(e =>
+      e.startsWith('DOCKPAL_MODE=') ||
+      e.startsWith('DOCKPAL_TOKEN=') ||
+      e.startsWith('DOCKPAL_SERVER=') ||
+      e.startsWith('DOCKPAL_EDGE_SERVER=')
+    );
+
+    return name === 'dockpal-agent' && (image.includes('sdldev/dockpal-agent') || hasAgentEnv);
+  },
+
   async selectContainer(c) {
     // Use instanceApi for container operations
     const resp = await this.instanceApi('GET', '/containers/' + c.id);
@@ -82,6 +99,11 @@ Dockpal.containers = {
   async containerAction(id, action) {
     const labels = { start: 'started', stop: 'stopped', restart: 'restarted', remove: 'removed' };
     if (action === 'remove') {
+      const container = this.selectedContainer?.id === id ? this.selectedContainer : this.containers.find(c => c.id === id || c.name === id);
+      if (this.isProtectedContainer(container)) {
+        this.toast(container.protection_reason || 'Dockpal agent container cannot be removed from Dockpal', 'warning', 5000);
+        return;
+      }
       this.showConfirm({
         title: 'Remove Container',
         message: 'This will stop and permanently remove the container. Volumes and data may be lost.',

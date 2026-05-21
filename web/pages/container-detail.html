@@ -18,13 +18,19 @@
                 </template>
                 <!-- View mode: static name -->
                 <template x-if="!containerEditMode">
-                  <h2 class="text-xl font-semibold text-white" x-text="selectedContainer?.name || selectedContainer?.id"></h2>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <h2 class="text-xl font-semibold text-white" x-text="selectedContainer?.name || selectedContainer?.id"></h2>
+                    <span x-show="isProtectedContainer(selectedContainer)" class="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">Dockpal agent</span>
+                  </div>
                 </template>
                 <p class="text-xs text-zinc-600 font-mono mt-0.5" x-text="selectedContainer?.id"></p>
               </div>
             </div>
             <!-- Quick actions -->
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap justify-end">
+              <div x-show="isProtectedContainer(selectedContainer)" class="bg-blue-500/10 border border-blue-500/20 rounded-md px-3 py-1.5 text-xs text-blue-400">
+                Removing this agent would disconnect the instance, so Dockpal blocks deletion.
+              </div>
               <!-- Edit mode: Save / Cancel -->
               <template x-if="containerEditMode">
                 <div class="flex items-center gap-2.5">
@@ -75,7 +81,8 @@
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                     Edit
                   </button>
-                  <button @click="containerAction(selectedContainer.id,'remove')"
+                  <button @click="containerAction(selectedContainer.id,'remove')" :disabled="isProtectedContainer(selectedContainer)"
+                    :class="isProtectedContainer(selectedContainer) ? 'opacity-40 cursor-not-allowed hover:bg-red-500/10 hover:border-red-500/20' : ''"
                     class="px-3 py-1.5 text-xs font-medium rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 transition-all flex items-center gap-1.5">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                     Remove

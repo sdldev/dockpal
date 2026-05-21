@@ -45,7 +45,10 @@
                     <div class="flex items-center gap-3">
                       <span :class="c.state==='running'?'bg-green-500':'bg-red-500'" class="status-dot shrink-0"></span>
                       <div>
-                        <div class="text-sm font-medium text-white" x-text="c.name || c.id"></div>
+                        <div class="flex items-center gap-2">
+                          <span class="text-sm font-medium text-white" x-text="c.name || c.id"></span>
+                          <span x-show="isProtectedContainer(c)" class="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">Dockpal agent</span>
+                        </div>
                         <div class="text-xs text-zinc-500 sm:hidden" x-text="c.state + ' — ' + c.image.split(':')[0]"></div>
                       </div>
                     </div>
@@ -81,7 +84,7 @@
                       <button @click="containerAction(c.id,'restart')" class="btn-action btn-info" data-tip="Restart">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                       </button>
-                      <button @click="containerAction(c.id,'remove')" class="btn-action btn-danger" data-tip="Remove">
+                      <button @click="containerAction(c.id,'remove')" :disabled="isProtectedContainer(c)" :class="isProtectedContainer(c) ? 'opacity-40 cursor-not-allowed' : ''" class="btn-action btn-danger" :data-tip="isProtectedContainer(c) ? 'Protected' : 'Remove'">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                       </button>
                     </div>

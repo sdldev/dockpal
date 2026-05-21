@@ -35,13 +35,15 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 type ContainerInfo struct {
-	ID      string                  `json:"id"`
-	Name    string                  `json:"name"`
-	Image   string                  `json:"image"`
-	Status  string                  `json:"status"`
-	State   string                  `json:"state"`
-	Ports   []container.PortSummary `json:"ports"`
-	Created int64                   `json:"created"`
+	ID               string                  `json:"id"`
+	Name             string                  `json:"name"`
+	Image            string                  `json:"image"`
+	Status           string                  `json:"status"`
+	State            string                  `json:"state"`
+	Ports            []container.PortSummary `json:"ports"`
+	Created          int64                   `json:"created"`
+	Protected        bool                    `json:"protected,omitempty"`
+	ProtectionReason string                  `json:"protection_reason,omitempty"`
 }
 
 func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo, error) {
@@ -74,14 +76,14 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 
 type ContainerDetail struct {
 	ContainerInfo
-	Platform      string                            `json:"platform"`
-	Env           []string                          `json:"env"`
-	Mounts        []container.MountPoint            `json:"mounts"`
-	NetworkMode   string                            `json:"network_mode"`
-	RestartPolicy string                            `json:"restart_policy"`
-	Networks      map[string]string                 `json:"networks"`
-	MemoryLimit   int64                             `json:"memory_limit"`
-	NanoCPUs      int64                             `json:"nano_cpus"`
+	Platform      string                 `json:"platform"`
+	Env           []string               `json:"env"`
+	Mounts        []container.MountPoint `json:"mounts"`
+	NetworkMode   string                 `json:"network_mode"`
+	RestartPolicy string                 `json:"restart_policy"`
+	Networks      map[string]string      `json:"networks"`
+	MemoryLimit   int64                  `json:"memory_limit"`
+	NanoCPUs      int64                  `json:"nano_cpus"`
 }
 
 func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDetail, error) {
@@ -264,16 +266,16 @@ func (c *Client) UpdateContainer(ctx context.Context, id string, opts client.Con
 // stopping and recreating the container.
 type ContainerEditRequest struct {
 	// In-place fields
-	Name          *string `json:"name,omitempty"`
-	RestartPolicy *string `json:"restart_policy,omitempty"`
-	MemoryLimit   *int64  `json:"memory_limit,omitempty"`   // bytes, 0 = unlimited
-	CPULimit      *float64 `json:"cpu_limit,omitempty"`     // fractional CPUs, e.g. 1.5
+	Name          *string  `json:"name,omitempty"`
+	RestartPolicy *string  `json:"restart_policy,omitempty"`
+	MemoryLimit   *int64   `json:"memory_limit,omitempty"` // bytes, 0 = unlimited
+	CPULimit      *float64 `json:"cpu_limit,omitempty"`    // fractional CPUs, e.g. 1.5
 
 	// Recreate fields
-	Image   *string             `json:"image,omitempty"`
-	Env     *[]string           `json:"env,omitempty"`
-	Ports   *[]PortMapping      `json:"ports,omitempty"`
-	Volumes *[]VolumeMapping    `json:"volumes,omitempty"`
+	Image   *string          `json:"image,omitempty"`
+	Env     *[]string        `json:"env,omitempty"`
+	Ports   *[]PortMapping   `json:"ports,omitempty"`
+	Volumes *[]VolumeMapping `json:"volumes,omitempty"`
 }
 
 // PortMapping represents a host:container port mapping.
@@ -495,7 +497,7 @@ func (c *Client) recreateContainer(ctx context.Context, id string, req Container
 	}
 	removeOpts := client.ContainerRemoveOptions{
 		RemoveVolumes: false, // preserve volumes
-		Force:        true,
+		Force:         true,
 	}
 	if _, err := c.cli.ContainerRemove(ctx, id, removeOpts); err != nil {
 		return fmt.Errorf("failed to remove old container: %w", err)

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -80,6 +81,7 @@ func handleInstanceListContainers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list containers on instance %s: %v", instanceID, err)})
 		return
 	}
+	markProtectedContainerInfos(containers)
 
 	c.JSON(http.StatusOK, containers)
 }
@@ -95,6 +97,7 @@ func handleInstanceInspectContainer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
 		return
 	}
+	markProtectedContainerDetail(detail)
 
 	c.JSON(http.StatusOK, detail)
 }
@@ -147,6 +150,15 @@ func handleInstanceRemoveContainer(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 	containerID := c.Param("id")
 	force := c.Query("force") == "true"
+
+	if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
+		if errors.Is(err, errProtectedDockpalAgentContainer) {
+			c.JSON(http.StatusForbidden, gin.H{"error": dockpalAgentProtectionReason, "protected": true})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+		return
+	}
 
 	if err := client.RemoveContainer(c.Request.Context(), containerID, force); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to remove container %s on instance %s: %v", containerID, instanceID, err)})
@@ -241,6 +253,16 @@ func handleInstanceEditContainer(c *gin.Context) {
 
 	// Determine if recreate is needed
 	needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
+	if needsRecreate {
+		if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
+			if errors.Is(err, errProtectedDockpalAgentContainer) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be recreated from Dockpal", "protected": true})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+			return
+		}
+	}
 
 	detail, err := client.EditContainer(c.Request.Context(), containerID, req)
 	if err != nil {

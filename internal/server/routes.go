@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -374,6 +375,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			internalError(c, err)
 			return
 		}
+		markProtectedContainerInfos(containers)
 		c.JSON(http.StatusOK, containers)
 	})
 
@@ -388,6 +390,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			internalError(c, err)
 			return
 		}
+		markProtectedContainerDetail(detail)
 		c.JSON(http.StatusOK, detail)
 	})
 
@@ -436,8 +439,17 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			internalError(c, err)
 			return
 		}
+		containerID := c.Param("id")
 		force := c.Query("force") == "true"
-		if err := client.RemoveContainer(c.Request.Context(), c.Param("id"), force); err != nil {
+		if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
+			if errors.Is(err, errProtectedDockpalAgentContainer) {
+				c.JSON(http.StatusForbidden, gin.H{"error": dockpalAgentProtectionReason, "protected": true})
+				return
+			}
+			internalError(c, err)
+			return
+		}
+		if err := client.RemoveContainer(c.Request.Context(), containerID, force); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -533,6 +545,16 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		// Warn if recreate is needed
 		needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
+		if needsRecreate {
+			if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
+				if errors.Is(err, errProtectedDockpalAgentContainer) {
+					c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be recreated from Dockpal", "protected": true})
+					return
+				}
+				internalError(c, err)
+				return
+			}
+		}
 
 		detail, err := client.EditContainer(c.Request.Context(), containerID, req)
 		if err != nil {
