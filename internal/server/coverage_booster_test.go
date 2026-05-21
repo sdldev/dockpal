@@ -124,7 +124,7 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 
 	router := gin.New()
 	router.Use(CORSMiddleware())
-	RegisterRoutes(router, dockerClient, jwtSecret, database, versionService, updateService, agentMgr)
+	RegisterRoutes(router, dockerClient, jwtSecret, database, versionService, updateService, agentMgr, tmpDir)
 
 	// Generate tokens
 	adminToken, _ := auth.GenerateJWT("u-admin", "admin", jwtSecret, auth.RoleAdmin, 0)
@@ -505,7 +505,7 @@ func TestVerifyMockEndpoints_RuteRelay(t *testing.T) {
 	}
 
 	router := gin.New()
-	RegisterRoutes(router, dockerClient, jwtSecret, database, versionService, updateService, agentMgr)
+	RegisterRoutes(router, dockerClient, jwtSecret, database, versionService, updateService, agentMgr, tmpDir)
 
 	adminToken, _ := auth.GenerateJWT("admin", "admin", jwtSecret, auth.RoleAdmin, 0)
 
