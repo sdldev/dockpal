@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -124,7 +125,12 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 	logPath = mustAbs("DOCKPAL_LOG_PATH", logPath)
 
-	logRotator, err := logging.NewLogRotator(logPath, logging.DefaultMaxSize, logging.DefaultMaxFiles)
+	logRotator, err := logging.NewLogRotatorWithAge(
+		logPath,
+		parseSizeEnv("DOCKPAL_LOG_MAX_SIZE", logging.DefaultMaxSize),
+		parseIntEnv("DOCKPAL_LOG_MAX_FILES", logging.DefaultMaxFiles),
+		parseDurationEnv("DOCKPAL_LOG_MAX_AGE", logging.DefaultMaxAge),
+	)
 	if err != nil {
 		log.Fatalf("Failed to initialize log rotator: %v", err)
 	}
@@ -318,7 +324,11 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	cancelScheduler()
 	scheduler.Stop()
 	backupScheduler.Stop()
-	srv.Shutdown(context.Background())
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), srv.ShutdownTimeout())
+	defer cancelShutdown()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
 }
 
 func backup(outputPath string) {
@@ -458,6 +468,54 @@ func parseDurationEnv(name string, defaultVal time.Duration) time.Duration {
 		log.Fatalf("Invalid %s value %q: %v", name, raw, err)
 	}
 	return d
+}
+
+// parseIntEnv reads a positive integer from an environment variable.
+// If the variable is unset or empty, it returns the default.
+// If the variable is set but invalid or non-positive, it logs a fatal error.
+func parseIntEnv(name string, defaultVal int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		log.Fatalf("Invalid %s value %q: must be a positive integer", name, raw)
+	}
+	return n
+}
+
+// parseSizeEnv reads a byte-size value from an environment variable.
+// Accepts plain integers (bytes) or units: B, KB, MB, GB (case-insensitive,
+// 1024-based). Returns defaultVal if the variable is unset.
+// Logs a fatal error if the value is invalid.
+func parseSizeEnv(name string, defaultVal int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultVal
+	}
+	upper := strings.ToUpper(raw)
+	multiplier := int64(1)
+	numeric := upper
+	switch {
+	case strings.HasSuffix(upper, "GB"):
+		multiplier = 1024 * 1024 * 1024
+		numeric = strings.TrimSuffix(upper, "GB")
+	case strings.HasSuffix(upper, "MB"):
+		multiplier = 1024 * 1024
+		numeric = strings.TrimSuffix(upper, "MB")
+	case strings.HasSuffix(upper, "KB"):
+		multiplier = 1024
+		numeric = strings.TrimSuffix(upper, "KB")
+	case strings.HasSuffix(upper, "B"):
+		numeric = strings.TrimSuffix(upper, "B")
+	}
+	numeric = strings.TrimSpace(numeric)
+	n, err := strconv.ParseInt(numeric, 10, 64)
+	if err != nil || n <= 0 {
+		log.Fatalf("Invalid %s value %q: must be a positive size (e.g. 2MB, 512KB)", name, raw)
+	}
+	return n * multiplier
 }
 
 // mustAbs validates that the given value is an absolute path.

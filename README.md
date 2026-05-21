@@ -356,6 +356,33 @@ curl http://localhost:3012/health/ready
 
 Health checks include database connectivity, Docker daemon status, disk space, and memory availability. See [docs/HEALTH_CHECK.md](docs/HEALTH_CHECK.md) for detailed configuration and monitoring integration.
 
+## Operational Configuration
+
+Tune logging and shutdown behavior with environment variables.
+
+### Log Retention
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCKPAL_LOG_PATH` | `<DATA_DIR>/dockpal.log` | Active log file path (must be absolute) |
+| `DOCKPAL_LOG_MAX_SIZE` | `2MB` | Max active log file size before rotation. Accepts plain bytes or units `B`, `KB`, `MB`, `GB` |
+| `DOCKPAL_LOG_MAX_FILES` | `5` | Number of rotated files to retain (`dockpal.log.1` through `.N`) |
+| `DOCKPAL_LOG_MAX_AGE` | unlimited | Delete rotated files older than this duration (e.g. `168h`, `7d` is not accepted, use `168h`). Empty disables age pruning |
+
+Rotated files are pruned by age on startup and after every rotation.
+
+### Graceful Shutdown
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCKPAL_SHUTDOWN_TIMEOUT` | `30s` | Timeout for graceful HTTP shutdown. Also drives `ReadTimeout` (1x), `WriteTimeout` (2x), and `IdleTimeout` (4x) |
+
+Set a longer timeout for production deployments with long-running operations:
+
+```bash
+DOCKPAL_SHUTDOWN_TIMEOUT=2m dockpal server
+```
+
 ## License
 
 MIT

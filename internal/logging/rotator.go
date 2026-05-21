@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const (
@@ -12,34 +13,49 @@ const (
 	DefaultMaxSize = 2 * 1024 * 1024
 	// DefaultMaxFiles is the default maximum number of rotated log files to retain.
 	DefaultMaxFiles = 5
+	// DefaultMaxAge is the default maximum age for retained log files (0 = unlimited).
+	DefaultMaxAge time.Duration = 0
 )
 
 // LogRotator implements io.Writer with automatic log file rotation.
 // It rotates the active log file when size reaches MaxSize and retains
-// at most MaxFiles rotated files.
+// at most MaxFiles rotated files. Optionally deletes files older than MaxAge.
 type LogRotator struct {
 	mu       sync.Mutex
 	file     *os.File
 	path     string
 	maxSize  int64
 	maxFiles int
+	maxAge   time.Duration
 	size     int64
 }
 
 // NewLogRotator creates a new LogRotator for the given file path.
 // It creates the directory structure if needed and opens the log file for appending.
+//
+// Deprecated: prefer NewLogRotatorWithAge to also configure max age retention.
 func NewLogRotator(path string, maxSize int64, maxFiles int) (*LogRotator, error) {
+	return NewLogRotatorWithAge(path, maxSize, maxFiles, DefaultMaxAge)
+}
+
+// NewLogRotatorWithAge creates a new LogRotator with size, count, and age based retention.
+// maxAge of 0 disables age-based pruning.
+func NewLogRotatorWithAge(path string, maxSize int64, maxFiles int, maxAge time.Duration) (*LogRotator, error) {
 	if maxSize <= 0 {
 		maxSize = int64(DefaultMaxSize)
 	}
 	if maxFiles <= 0 {
 		maxFiles = DefaultMaxFiles
 	}
+	if maxAge < 0 {
+		maxAge = 0
+	}
 
 	lr := &LogRotator{
 		path:     path,
 		maxSize:  maxSize,
 		maxFiles: maxFiles,
+		maxAge:   maxAge,
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -59,6 +75,10 @@ func NewLogRotator(path string, maxSize int64, maxFiles int) (*LogRotator, error
 
 	lr.file = f
 	lr.size = info.Size()
+
+	// Best-effort prune at startup so stale files from previous runs are removed.
+	lr.pruneByAge()
+
 	return lr, nil
 }
 
@@ -109,7 +129,29 @@ func (lr *LogRotator) rotate() error {
 
 	lr.file = f
 	lr.size = 0
+
+	// Prune any rotated file older than maxAge.
+	lr.pruneByAge()
 	return nil
+}
+
+// pruneByAge removes rotated log files (path.1 .. path.maxFiles) whose mtime
+// is older than maxAge. Has no effect when maxAge <= 0.
+func (lr *LogRotator) pruneByAge() {
+	if lr.maxAge <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-lr.maxAge)
+	for i := 1; i <= lr.maxFiles; i++ {
+		rotated := fmt.Sprintf("%s.%d", lr.path, i)
+		info, err := os.Stat(rotated)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(rotated)
+		}
+	}
 }
 
 // Close closes the underlying log file.

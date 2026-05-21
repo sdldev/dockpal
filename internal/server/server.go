@@ -13,15 +13,20 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+// DefaultShutdownTimeout is used for ReadTimeout, WriteTimeout, IdleTimeout
+// and graceful Shutdown when DOCKPAL_SHUTDOWN_TIMEOUT is not set.
+const DefaultShutdownTimeout = 30 * time.Second
+
 type Server struct {
-	router    *gin.Engine
-	port      string
-	srv       *http.Server
-	tls       bool
-	tlsCert   string
-	tlsKey    string
-	tlsDomain string
-	dataDir   string
+	router          *gin.Engine
+	port            string
+	srv             *http.Server
+	tls             bool
+	tlsCert         string
+	tlsKey          string
+	tlsDomain       string
+	dataDir         string
+	shutdownTimeout time.Duration
 }
 
 func New(tls bool, tlsCert, tlsKey, tlsDomain, dataDir string) *Server {
@@ -39,14 +44,35 @@ func New(tls bool, tlsCert, tlsKey, tlsDomain, dataDir string) *Server {
 	router.Use(gin.Recovery())
 
 	return &Server{
-		router:    router,
-		port:      port,
-		tls:       tls,
-		tlsCert:   tlsCert,
-		tlsKey:    tlsKey,
-		tlsDomain: tlsDomain,
-		dataDir:   dataDir,
+		router:          router,
+		port:            port,
+		tls:             tls,
+		tlsCert:         tlsCert,
+		tlsKey:          tlsKey,
+		tlsDomain:       tlsDomain,
+		dataDir:         dataDir,
+		shutdownTimeout: resolveShutdownTimeout(),
 	}
+}
+
+// resolveShutdownTimeout reads DOCKPAL_SHUTDOWN_TIMEOUT (e.g. "30s", "2m") and
+// falls back to DefaultShutdownTimeout when unset or invalid.
+func resolveShutdownTimeout() time.Duration {
+	raw := os.Getenv("DOCKPAL_SHUTDOWN_TIMEOUT")
+	if raw == "" {
+		return DefaultShutdownTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		log.Printf("Invalid DOCKPAL_SHUTDOWN_TIMEOUT %q, falling back to %s", raw, DefaultShutdownTimeout)
+		return DefaultShutdownTimeout
+	}
+	return d
+}
+
+// ShutdownTimeout returns the configured shutdown timeout.
+func (s *Server) ShutdownTimeout() time.Duration {
+	return s.shutdownTimeout
 }
 
 func (s *Server) Router() *gin.Engine {
@@ -54,13 +80,17 @@ func (s *Server) Router() *gin.Engine {
 }
 
 func (s *Server) newHTTPServer() *http.Server {
+	// Use the configured shutdown timeout for read/write/idle to keep behavior
+	// consistent during long-running production operations.
+	rwTimeout := s.shutdownTimeout
+	idleTimeout := s.shutdownTimeout * 4
 	return &http.Server{
 		Addr:              fmt.Sprintf(":%s", s.port),
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadTimeout:       rwTimeout,
+		WriteTimeout:      rwTimeout * 2,
+		IdleTimeout:       idleTimeout,
 	}
 }
 
