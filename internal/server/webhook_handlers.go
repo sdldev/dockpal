@@ -162,7 +162,7 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 			projectName = filepath.Base(info.Path)
 		}
 
-		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
 			return
 		}

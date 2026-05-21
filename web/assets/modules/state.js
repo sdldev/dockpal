@@ -57,6 +57,9 @@ Dockpal.initialState = function() {
     images: [],
     imageCount: 0,
     imagePullName: '',
+    imageUpdates: [],
+    imageUpdateChecking: false,
+    imageUpdateLastCheck: null,
 
     domains: [],
     domainForm: { name: '', service: '', port: 80 },

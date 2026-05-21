@@ -91,7 +91,8 @@ func (s *DeploySession) Emit(step, message, status string) {
 
 // DeployComposeStreamed deploys services with progress streaming.
 // If getAuthHeader is non-nil, it will be called per image to get registry credentials.
-func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, composeYAML string, session *DeploySession, getAuthHeader AuthHeaderFunc) error {
+// If forcePull is true, images are always pulled even if they already exist locally.
+func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, composeYAML string, session *DeploySession, getAuthHeader AuthHeaderFunc, forcePull bool) error {
 	defer close(session.Done)
 
 	session.Emit("parse", "Parsing compose file...", "running")
@@ -138,7 +139,7 @@ func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, compose
 			}
 		}
 
-		if err := c.pullImageIfNeeded(ctx, svc.Image, registryAuth); err != nil {
+		if err := c.pullImageIfNeeded(ctx, svc.Image, registryAuth, forcePull); err != nil {
 			suggestion := diagnoseDeployError(err.Error())
 			session.Emit("pull", fmt.Sprintf("Failed to pull %s: %s", svc.Image, err), "error")
 			if suggestion != "" {

@@ -243,12 +243,14 @@ func parseLabels(labels interface{}) map[string]string {
 	return result
 }
 
-// pullImageIfNeeded pulls the image if it's not available locally.
+// pullImageIfNeeded pulls the image if it's not available locally, or always if force is true.
 // If registryAuth is non-empty, it uses authenticated pull.
-func (c *Client) pullImageIfNeeded(ctx context.Context, image string, registryAuth string) error {
-	_, err := c.cli.ImageInspect(ctx, image)
-	if err == nil {
-		return nil // image exists locally
+func (c *Client) pullImageIfNeeded(ctx context.Context, image string, registryAuth string, force bool) error {
+	if !force {
+		_, err := c.cli.ImageInspect(ctx, image)
+		if err == nil {
+			return nil // image exists locally
+		}
 	}
 	if registryAuth != "" {
 		return c.PullImageWithAuth(ctx, image, registryAuth)
@@ -398,7 +400,8 @@ type AuthHeaderFunc func(imageRef string) (string, error)
 
 // DeployCompose deploys services defined in a docker-compose YAML string.
 // If getAuthHeader is non-nil, it will be called per image to get registry credentials.
-func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML string, getAuthHeader AuthHeaderFunc) error {
+// If forcePull is true, images are always pulled even if they already exist locally.
+func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML string, getAuthHeader AuthHeaderFunc, forcePull bool) error {
 	if err := writeComposeFile(projectName, composeYAML); err != nil {
 		return err
 	}
@@ -422,7 +425,7 @@ func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML str
 				registryAuth = auth
 			}
 		}
-		if err := c.pullImageIfNeeded(ctx, svc.Image, registryAuth); err != nil {
+		if err := c.pullImageIfNeeded(ctx, svc.Image, registryAuth, forcePull); err != nil {
 			return fmt.Errorf("failed to pull image for %s: %w", svcName, err)
 		}
 		if err := c.createAndStartService(ctx, projectName, svcName, svc, cf); err != nil {

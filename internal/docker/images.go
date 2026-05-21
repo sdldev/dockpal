@@ -5,16 +5,29 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/client"
 )
 
+// ImageUpdateResult holds the outcome of comparing a local image against the registry.
+type ImageUpdateResult struct {
+	HasUpdate    bool   `json:"has_update"`
+	LocalDigest  string `json:"local_digest,omitempty"`
+	RemoteDigest string `json:"remote_digest,omitempty"`
+	Error        string `json:"error,omitempty"`
+	CheckedAt    int64  `json:"checked_at"`
+}
+
 type ImageInfo struct {
-	ID      string `json:"id"`
-	Repo    string `json:"repo"`
-	Tag     string `json:"tag"`
-	Size    string `json:"size"`
-	Created string `json:"created"`
+	ID           string `json:"id"`
+	Repo         string `json:"repo"`
+	Tag          string `json:"tag"`
+	Size         string `json:"size"`
+	Created      string `json:"created"`
+	RepoDigest   string `json:"repo_digest,omitempty"`
+	HasUpdate    bool   `json:"has_update,omitempty"`
+	RemoteDigest string `json:"remote_digest,omitempty"`
 }
 
 func (c *Client) ListImages(ctx context.Context) ([]ImageInfo, error) {
@@ -72,6 +85,77 @@ func (c *Client) PullImageWithAuth(ctx context.Context, image string, registryAu
 			return fmt.Errorf("authentication failed for %s — credentials may be expired: %w", domain, err)
 		}
 		return fmt.Errorf("failed to pull image: %w", err)
+	}
+	defer reader.Close()
+	io.Copy(io.Discard, reader)
+	return nil
+}
+
+// CheckImageUpdate queries the registry manifest digest for an image and
+// compares it with the locally cached image's RepoDigest.
+// registryAuth is the base64-encoded Docker auth config (empty for public images).
+func (c *Client) CheckImageUpdate(ctx context.Context, image string, registryAuth string) (*ImageUpdateResult, error) {
+	now := time.Now().Unix()
+
+	// 1. Inspect local image to get its digest
+	localInspect, err := c.cli.ImageInspect(ctx, image)
+	if err != nil {
+		return &ImageUpdateResult{
+			Error:     fmt.Sprintf("local image not found: %v", err),
+			CheckedAt: now,
+		}, nil
+	}
+
+	localDigest := ""
+	if len(localInspect.RepoDigests) > 0 {
+		parts := strings.SplitN(localInspect.RepoDigests[0], "@", 2)
+		if len(parts) == 2 {
+			localDigest = parts[1]
+		}
+	}
+
+	// 2. Query registry for remote digest
+	opts := client.DistributionInspectOptions{}
+	if registryAuth != "" {
+		opts.EncodedRegistryAuth = registryAuth
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	distResult, err := c.cli.DistributionInspect(ctx, image, opts)
+	if err != nil {
+		return &ImageUpdateResult{
+			LocalDigest: localDigest,
+			Error:       fmt.Sprintf("registry query failed: %v", err),
+			CheckedAt:   now,
+		}, nil
+	}
+
+	remoteDigest := string(distResult.Descriptor.Digest)
+	hasUpdate := false
+	if localDigest != "" && remoteDigest != "" && localDigest != remoteDigest {
+		hasUpdate = true
+	}
+
+	return &ImageUpdateResult{
+		HasUpdate:    hasUpdate,
+		LocalDigest:  localDigest,
+		RemoteDigest: remoteDigest,
+		CheckedAt:    now,
+	}, nil
+}
+
+// ForcePullImage unconditionally pulls an image, ignoring any locally cached version.
+// registryAuth is the base64-encoded Docker auth config (empty for public images).
+func (c *Client) ForcePullImage(ctx context.Context, image string, registryAuth string) error {
+	opts := client.ImagePullOptions{}
+	if registryAuth != "" {
+		opts.RegistryAuth = registryAuth
+	}
+	reader, err := c.cli.ImagePull(ctx, image, opts)
+	if err != nil {
+		return fmt.Errorf("failed to force pull image: %w", err)
 	}
 	defer reader.Close()
 	io.Copy(io.Discard, reader)

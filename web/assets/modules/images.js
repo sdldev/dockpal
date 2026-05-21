@@ -9,6 +9,8 @@ Dockpal.images = {
       this.images = await resp.json();
       this.imageCount = this.images.length;
     }
+    // Also load cached update status
+    await this.loadUpdateStatus();
   },
 
   async pullImage() {

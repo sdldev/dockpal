@@ -93,20 +93,20 @@ func extractImageDomain(image string) string {
 	return "docker.io"
 }
 
-func (c *LocalClient) DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string) error {
+func (c *LocalClient) DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string, forcePull bool) error {
 	var authFn docker.AuthHeaderFunc
 	if len(registryAuths) > 0 {
 		authFn = getAuthHeader(registryAuths)
 	}
-	return c.dockerClient.DeployCompose(ctx, name, composeYAML, authFn)
+	return c.dockerClient.DeployCompose(ctx, name, composeYAML, authFn, forcePull)
 }
 
-func (c *LocalClient) DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string) error {
+func (c *LocalClient) DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string, forcePull bool) error {
 	var authFn docker.AuthHeaderFunc
 	if len(registryAuths) > 0 {
 		authFn = getAuthHeader(registryAuths)
 	}
-	return c.dockerClient.DeployComposeStreamed(ctx, name, composeYAML, session, authFn)
+	return c.dockerClient.DeployComposeStreamed(ctx, name, composeYAML, session, authFn, forcePull)
 }
 
 // Image operations
@@ -125,6 +125,14 @@ func (c *LocalClient) PullImageWithAuth(ctx context.Context, image, registryAuth
 
 func (c *LocalClient) RemoveImage(ctx context.Context, id string) error {
 	return c.dockerClient.RemoveImage(ctx, id)
+}
+
+func (c *LocalClient) CheckImageUpdate(ctx context.Context, image string) (*docker.ImageUpdateResult, error) {
+	return c.dockerClient.CheckImageUpdate(ctx, image, "")
+}
+
+func (c *LocalClient) ForcePullImage(ctx context.Context, image, registryAuth string) error {
+	return c.dockerClient.ForcePullImage(ctx, image, registryAuth)
 }
 
 // Host operations

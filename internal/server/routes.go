@@ -114,6 +114,12 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)
 
+	// Image update monitor
+	imageUpdateMonitor := docker.NewImageUpdateMonitor(dockerClient, func(imageRef string) (string, error) {
+		return registryManager.GetAuthHeader(imageRef)
+	})
+	imageUpdateMonitor.Start()
+
 	protected.GET("/registries", func(c *gin.Context) {
 		list, err := registryManager.List()
 		if err != nil {
@@ -475,7 +481,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 
 		// Run deploy in background goroutine
 		go func() {
-			err := client.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryAuths)
+			err := client.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryAuths, false)
 			if err == nil {
 				database.SaveService(db.Service{
 					ID:        generateID("svc"),
@@ -535,7 +541,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
-		if err := client.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryAuths); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryAuths, false); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -654,7 +660,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 
-		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
 			return
 		}
@@ -861,7 +867,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
-		if err := client.DeployCompose(c.Request.Context(), name, compose, registryAuths); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), name, compose, registryAuths, false); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -957,7 +963,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		session := deployManager.CreateSession()
 
 		go func() {
-			err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
+			err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths, false)
 			if err == nil {
 				database.SaveService(db.Service{
 					ID:        generateID("svc"),
@@ -1037,6 +1043,58 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
+	})
+
+	// Image Update Mechanism
+	protected.GET("/images/updates", func(c *gin.Context) {
+		if imageUpdateMonitor == nil {
+			c.JSON(http.StatusOK, gin.H{"updates": []docker.ImageUpdateStatus{}})
+			return
+		}
+		updates := imageUpdateMonitor.GetAllStatuses()
+		c.JSON(http.StatusOK, gin.H{"updates": updates})
+	})
+
+	protected.POST("/images/check", func(c *gin.Context) {
+		var req struct {
+			Image string `json:"image" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		result, err := client.CheckImageUpdate(c.Request.Context(), req.Image)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	})
+
+	protected.POST("/images/pull-force", func(c *gin.Context) {
+		var req struct {
+			Image string `json:"image" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		authHeader, _ := registryManager.GetAuthHeader(req.Image)
+		if err := client.ForcePullImage(c.Request.Context(), req.Image, authHeader); err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "pulled"})
 	})
 
 	// File Manager

@@ -180,14 +180,16 @@ type deployComposeRequest struct {
 	Name          string            `json:"name"`
 	ComposeYAML   string            `json:"compose_yaml"`
 	RegistryAuths map[string]string `json:"registry_auths"`
+	ForcePull     bool              `json:"force_pull"`
 }
 
 // DeployCompose deploys a compose file to the remote agent.
-func (e *EdgeClient) DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string) error {
+func (e *EdgeClient) DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string, forcePull bool) error {
 	reqBody := deployComposeRequest{
 		Name:          name,
 		ComposeYAML:   composeYAML,
 		RegistryAuths: registryAuths,
+		ForcePull:     forcePull,
 	}
 
 	_, err := e.sendRequest(ctx, "POST", "/docker/deploy/compose", nil, reqBody)
@@ -199,6 +201,7 @@ type deployStreamRequest struct {
 	Name          string            `json:"name"`
 	ComposeYAML   string            `json:"compose_yaml"`
 	RegistryAuths map[string]string `json:"registry_auths"`
+	ForcePull     bool              `json:"force_pull"`
 }
 
 // deployStreamResponse is the response from initiating a streamed deploy.
@@ -208,12 +211,13 @@ type deployStreamResponse struct {
 
 // DeployComposeStreamed deploys a compose file with streaming progress events.
 // It initiates the deploy and then handles streaming responses by forwarding events to the session.
-func (e *EdgeClient) DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string) error {
+func (e *EdgeClient) DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string, forcePull bool) error {
 	// Step 1: Initiate the deploy and get a deploy_id
 	reqBody := deployStreamRequest{
 		Name:          name,
 		ComposeYAML:   composeYAML,
 		RegistryAuths: registryAuths,
+		ForcePull:     forcePull,
 	}
 
 	initResp, err := e.sendRequest(ctx, "POST", "/docker/deploy/stream", nil, reqBody)
@@ -308,6 +312,30 @@ func (e *EdgeClient) PullImageWithAuth(ctx context.Context, image, registryAuth 
 // RemoveImage removes an image from the remote agent.
 func (e *EdgeClient) RemoveImage(ctx context.Context, id string) error {
 	_, err := e.sendRequestRaw(ctx, "DELETE", "/docker/images/"+id, nil)
+	return err
+}
+
+// CheckImageUpdate queries the remote agent for an image update check.
+func (e *EdgeClient) CheckImageUpdate(ctx context.Context, image string) (*docker.ImageUpdateResult, error) {
+	query := map[string]string{"image": image}
+	resp, err := e.sendRequest(ctx, "GET", "/docker/images/check", query, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status >= 400 {
+		return nil, fmt.Errorf("check failed with status %d", resp.Status)
+	}
+	var result docker.ImageUpdateResult
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse check result: %w", err)
+	}
+	return &result, nil
+}
+
+// ForcePullImage force-pulls an image on the remote agent.
+func (e *EdgeClient) ForcePullImage(ctx context.Context, image, registryAuth string) error {
+	query := map[string]string{"image": image, "auth": registryAuth}
+	_, err := e.sendRequestRaw(ctx, "POST", "/docker/images/pull-force", query)
 	return err
 }
 

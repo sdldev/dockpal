@@ -41,14 +41,16 @@ type AgentClient interface {
 	ContainerLogs(ctx context.Context, id string, tail string) (io.ReadCloser, error)
 
 	// Compose operations
-	DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string) error
-	DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string) error
+	DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string, forcePull bool) error
+	DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string, forcePull bool) error
 
 	// Image operations
 	ListImages(ctx context.Context) ([]docker.ImageInfo, error)
 	PullImage(ctx context.Context, image string) error
 	PullImageWithAuth(ctx context.Context, image, registryAuth string) error
 	RemoveImage(ctx context.Context, id string) error
+	CheckImageUpdate(ctx context.Context, image string) (*docker.ImageUpdateResult, error)
+	ForcePullImage(ctx context.Context, image, registryAuth string) error
 
 	// Host operations
 	GetHostInfo(ctx context.Context) (*HostInfo, error)

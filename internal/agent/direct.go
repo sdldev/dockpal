@@ -247,14 +247,16 @@ type DeployComposeRequest struct {
 	Name          string            `json:"name"`
 	ComposeYAML   string            `json:"compose"`
 	RegistryAuths map[string]string `json:"registry_auths"`
+	ForcePull     bool              `json:"force_pull"`
 }
 
 // DeployCompose deploys a compose file to the remote agent.
-func (c *DirectClient) DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string) error {
+func (c *DirectClient) DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string, forcePull bool) error {
 	reqBody := DeployComposeRequest{
 		Name:          name,
 		ComposeYAML:   composeYAML,
 		RegistryAuths: registryAuths,
+		ForcePull:     forcePull,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -276,6 +278,7 @@ type DeployStreamRequest struct {
 	Name          string            `json:"name"`
 	ComposeYAML   string            `json:"compose"`
 	RegistryAuths map[string]string `json:"registry_auths"`
+	ForcePull     bool              `json:"force_pull"`
 }
 
 // DeployStreamResponse is the response from initiating a streamed deploy.
@@ -284,12 +287,13 @@ type DeployStreamResponse struct {
 }
 
 // DeployComposeStreamed deploys a compose file with streaming progress events.
-func (c *DirectClient) DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string) error {
+func (c *DirectClient) DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string, forcePull bool) error {
 	// Step 1: Initiate the deploy and get a deploy_id
 	reqBody := DeployStreamRequest{
 		Name:          name,
 		ComposeYAML:   composeYAML,
 		RegistryAuths: registryAuths,
+		ForcePull:     forcePull,
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -402,6 +406,36 @@ func (c *DirectClient) PullImageWithAuth(ctx context.Context, image, registryAut
 // RemoveImage removes an image from the remote agent.
 func (c *DirectClient) RemoveImage(ctx context.Context, id string) error {
 	req, err := c.makeRequest(ctx, "DELETE", "/agent/docker/images/"+id, nil, nil)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.doRequest(req)
+	return err
+}
+
+// CheckImageUpdate queries the remote agent for an image update check.
+func (c *DirectClient) CheckImageUpdate(ctx context.Context, image string) (*docker.ImageUpdateResult, error) {
+	req, err := c.makeRequest(ctx, "GET", "/agent/docker/images/check", map[string]string{"image": image}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var result docker.ImageUpdateResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// ForcePullImage force-pulls an image on the remote agent.
+func (c *DirectClient) ForcePullImage(ctx context.Context, image, registryAuth string) error {
+	req, err := c.makeRequest(ctx, "POST", "/agent/docker/images/pull-force", map[string]string{"image": image, "auth": registryAuth}, nil)
 	if err != nil {
 		return err
 	}

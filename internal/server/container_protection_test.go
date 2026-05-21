@@ -51,10 +51,10 @@ func (f *protectionFakeAgentClient) GetContainerStats(context.Context, string) (
 func (f *protectionFakeAgentClient) ContainerLogs(context.Context, string, string) (io.ReadCloser, error) {
 	return nil, nil
 }
-func (f *protectionFakeAgentClient) DeployCompose(context.Context, string, string, map[string]string) error {
+func (f *protectionFakeAgentClient) DeployCompose(context.Context, string, string, map[string]string, bool) error {
 	return nil
 }
-func (f *protectionFakeAgentClient) DeployComposeStreamed(context.Context, string, string, *docker.DeploySession, map[string]string) error {
+func (f *protectionFakeAgentClient) DeployComposeStreamed(context.Context, string, string, *docker.DeploySession, map[string]string, bool) error {
 	return nil
 }
 func (f *protectionFakeAgentClient) ListImages(context.Context) ([]docker.ImageInfo, error) {
@@ -65,6 +65,10 @@ func (f *protectionFakeAgentClient) PullImageWithAuth(context.Context, string, s
 	return nil
 }
 func (f *protectionFakeAgentClient) RemoveImage(context.Context, string) error { return nil }
+func (f *protectionFakeAgentClient) CheckImageUpdate(context.Context, string) (*docker.ImageUpdateResult, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) ForcePullImage(context.Context, string, string) error { return nil }
 func (f *protectionFakeAgentClient) GetHostInfo(context.Context) (*agent.HostInfo, error) {
 	return nil, nil
 }

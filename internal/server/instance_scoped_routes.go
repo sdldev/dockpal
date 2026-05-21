@@ -46,6 +46,8 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	// Image routes
 	g.GET("/images", RequireRole(auth.RoleViewer), handleInstanceListImages)
 	g.POST("/images/pull", RequireRole(auth.RoleOperator), handleInstancePullImage)
+	g.POST("/images/check", RequireRole(auth.RoleViewer), handleInstanceCheckImage)
+	g.POST("/images/pull-force", RequireRole(auth.RoleOperator), handleInstanceForcePullImage)
 	g.DELETE("/images/:id", RequireRole(auth.RoleOperator), handleInstanceRemoveImage)
 
 	// Host routes
@@ -394,7 +396,7 @@ func handleInstanceDeployStream(c *gin.Context) {
 
 	// Run deploy in background goroutine
 	go func() {
-		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
+		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths, false)
 		if err == nil && database != nil {
 			database.SaveService(db.Service{
 				ID:         generateID("svc"),
@@ -498,7 +500,7 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 	session := globalDeployManager.CreateSession()
 
 	go func() {
-		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths)
+		err := client.DeployComposeStreamed(context.Background(), name, compose, session, registryAuths, false)
 		if err == nil && database != nil {
 			database.SaveService(db.Service{
 				ID:         generateID("svc"),
@@ -546,7 +548,7 @@ func handleInstanceDeployCompose(c *gin.Context) {
 	registryAuths := resolveRegistryAuths(c, req.Compose)
 
 	// Deploy compose via agent client
-	if err := client.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryAuths); err != nil {
+	if err := client.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryAuths, false); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %v", err)})
 		return
 	}
@@ -672,7 +674,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 	registryAuths := resolveRegistryAuths(c, string(composeData))
 
 	// Deploy compose via agent client
-	if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths); err != nil {
+	if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
 		return
 	}
@@ -906,6 +908,54 @@ func handleInstanceRemoveImage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "removed", "instance_id": instanceID, "image_id": imageID})
+}
+
+// handleInstanceCheckImage checks if an image has an update available on the instance.
+func handleInstanceCheckImage(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	instanceID := c.MustGet("instance_id").(string)
+
+	var req struct {
+		Image string `json:"image" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: image is required"})
+		return
+	}
+
+	result, err := client.CheckImageUpdate(c.Request.Context(), req.Image)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to check image update on instance %s: %v", instanceID, err)})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// handleInstanceForcePullImage force-pulls an image on the instance.
+func handleInstanceForcePullImage(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	instanceID := c.MustGet("instance_id").(string)
+
+	var req struct {
+		Image string `json:"image" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: image is required"})
+		return
+	}
+
+	registryMgr := getRegistryManager(c)
+	authHeader := ""
+	if registryMgr != nil {
+		authHeader, _ = registryMgr.GetAuthHeader(req.Image)
+	}
+
+	if err := client.ForcePullImage(c.Request.Context(), req.Image, authHeader); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to force pull image on instance %s: %v", instanceID, err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "pulled"})
 }
 
 // =============================================================================

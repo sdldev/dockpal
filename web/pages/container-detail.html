@@ -282,7 +282,11 @@
               <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3.5 text-sm">
                 <div>
                   <dt class="text-zinc-600 text-xs mb-0.5">Image</dt>
-                  <dd class="text-zinc-200 font-mono text-xs truncate" x-text="selectedContainer?.image"></dd>
+                  <dd class="text-zinc-200 font-mono text-xs truncate flex items-center gap-2">
+                    <span x-text="selectedContainer?.image"></span>
+                    <span x-show="getImageUpdateStatus(selectedContainer?.image)?.result?.has_update"
+                      class="bg-amber-500/20 text-amber-400 text-[10px] font-medium px-1.5 py-0.5 rounded-sm">Update available</span>
+                  </dd>
                 </div>
                 <div>
                   <dt class="text-zinc-600 text-xs mb-0.5">Status</dt>
