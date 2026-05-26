@@ -92,6 +92,39 @@ func streamContainerLogs(conn *websocket.Conn, reader io.ReadCloser) {
 // the legacy routes and instance-scoped routes + WebSocket handlers.
 var globalDeployManager = docker.NewDeployManager()
 
+// globalAppUpdateFeed is the shared App_Update_Feed broadcaster wired by
+// RegisterRoutes (task 5.2). Handler tasks 5.3 (SSE stream) and the agent
+// client local impl (task 6.2) read this reference to subscribe.
+//
+// It is reassigned on every RegisterRoutes call so test setups that build
+// fresh routers each iteration always see a fresh feed; the previous feed
+// becomes garbage once nothing references it. A nil value means
+// RegisterRoutes has not run yet — callers should treat that as a fatal
+// configuration error rather than a transient state.
+var globalAppUpdateFeed *AppUpdateFeed
+
+// globalAutoUpdateWorker is the shared AutoUpdateWorker wired by
+// RegisterRoutes (task 5.2). Handler tasks 5.3 (POST /apps/:name/update,
+// PATCH /apps/:name/auto-update) and the agent client local impl (task
+// 6.2) call into the worker via this reference.
+//
+// As with globalAppUpdateFeed it is reassigned on every RegisterRoutes
+// call. nil means the worker is not configured for the current process
+// (for example because the env-var DOCKPAL_AUTO_UPDATE_ENABLED is false);
+// callers should fall back gracefully in that case.
+var globalAutoUpdateWorker *docker.AutoUpdateWorker
+
+// globalDockerClient and globalImageUpdateMonitor are shared references
+// wired by RegisterRoutes so the instance-scoped handlers (task 5.4) can
+// reuse the in-process docker layer when the request targets the "local"
+// instance. They are reassigned on every RegisterRoutes call to keep test
+// setups isolated.
+var (
+	globalDockerClient        *docker.Client
+	globalImageUpdateMonitor  *docker.ImageUpdateMonitor
+	globalRegistryManager     *registry.Manager
+)
+
 // SystemInfo contains host hardware metrics and Docker version information.
 type SystemInfo struct {
 	Hostname      string  `json:"hostname"`

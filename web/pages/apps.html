@@ -1,0 +1,421 @@
+      <!-- ===== APPS ===== -->
+      <div x-show="currentPage === 'apps'">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-lg font-semibold text-white">Apps</h2>
+            <p class="text-sm text-zinc-500">Compose projects with image-update visibility and opt-in auto-update</p>
+          </div>
+          <button @click="loadApps && loadApps()" :disabled="appsLoading"
+            class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white rounded-sm text-sm font-medium transition-all active:scale-[0.98] flex items-center gap-2">
+            <svg :class="appsLoading && 'animate-spin'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Refresh
+          </button>
+        </div>
+
+        <!-- Server-disabled banner (task 8.2). Shown when /api/config
+             reports auto_update_enabled=false. Per-instance overrides are
+             out of scope; this is a global hint that auto-update is off
+             at the edge process and the toggle / "Update now" controls
+             are hidden below. -->
+        <div x-show="!featureAutoUpdate" x-cloak
+          class="mb-4 flex items-start gap-3 px-4 py-3 bg-amber-500/10 border border-amber-500/20 rounded-sm">
+          <svg class="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+          <div class="text-sm text-amber-200">
+            <div class="font-medium">Auto-update is disabled by the server admin</div>
+            <div class="text-xs text-amber-300/80 mt-0.5">Image-update visibility is still available, but per-app auto-update toggles and manual update triggers are hidden.</div>
+          </div>
+        </div>
+
+        <!-- Search & filter bar -->
+        <div class="flex flex-col sm:flex-row gap-3 mb-4">
+          <div class="relative flex-1">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <input type="text" x-model="filters.apps.search" placeholder="Search apps by name..."
+              class="w-full pl-9 pr-3 py-2 bg-zinc-900 border border-zinc-800 rounded-sm text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent">
+          </div>
+        </div>
+
+        <div class="bg-zinc-900/80 backdrop-blur border border-zinc-800/60 rounded-sm overflow-hidden">
+          <table class="w-full">
+            <thead>
+              <tr class="border-b border-zinc-800">
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Name</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden sm:table-cell">Services</th>
+                <th x-show="featureAutoUpdate" class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">Auto-update</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Status</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden lg:table-cell">Last attempt</th>
+                <th class="text-right px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <template x-for="app in (filteredApps || apps || [])" :key="app.name">
+              <tbody class="border-b border-zinc-800/50">
+                <tr class="hover:bg-zinc-800/50 transition-colors">
+                  <!-- Name -->
+                  <td class="px-4 py-3">
+                    <div class="flex items-center gap-3">
+                      <span class="status-dot shrink-0"
+                        :class="app.has_update ? 'bg-amber-500' : 'bg-green-500'"></span>
+                      <div class="min-w-0">
+                        <div class="text-sm font-medium text-white truncate" x-text="app.name"></div>
+                        <div class="text-xs text-zinc-500 sm:hidden">
+                          <span x-text="(app.services?.length || 0) + ' service' + ((app.services?.length || 0) === 1 ? '' : 's')"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+
+                  <!-- Services count -->
+                  <td class="px-4 py-3 hidden sm:table-cell">
+                    <span class="text-sm text-zinc-300 font-mono" x-text="app.services?.length || 0"></span>
+                  </td>
+
+                  <!-- Auto-update toggle -->
+                  <td x-show="featureAutoUpdate" class="px-4 py-3 hidden md:table-cell">
+                    <label class="inline-flex items-center gap-2 cursor-pointer select-none"
+                      :class="app._autoUpdateBusy && 'opacity-60 cursor-wait'">
+                      <span class="relative">
+                        <input type="checkbox" class="sr-only"
+                          :checked="app.auto_update"
+                          :disabled="app._autoUpdateBusy"
+                          @change="toggleAutoUpdate && toggleAutoUpdate(app, $event.target.checked)">
+                        <span class="block w-9 h-5 rounded-full transition-colors"
+                          :class="app.auto_update ? 'bg-blue-600' : 'bg-zinc-700'"></span>
+                        <span class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                          :class="app.auto_update && 'translate-x-4'"></span>
+                      </span>
+                      <span class="text-xs text-zinc-400" x-text="app.auto_update ? 'On' : 'Off'"></span>
+                    </label>
+                  </td>
+
+                  <!-- Status badge (5 colors) -->
+                  <td class="px-4 py-3">
+                    <!-- Updating (animated) — pulling | recreating | verifying -->
+                    <template x-if="['pulling','recreating','verifying'].includes(app.update?.stage)">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        <svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                        Updating…
+                      </span>
+                    </template>
+                    <!-- Failed -->
+                    <template x-if="app.update?.stage === 'failed'">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                        Failed
+                      </span>
+                    </template>
+                    <!-- Rolled back -->
+                    <template x-if="app.update?.stage === 'rolled_back'">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
+                        Rolled back
+                      </span>
+                    </template>
+                    <!-- Update available — has_update && idle/completed -->
+                    <template x-if="app.has_update && !['pulling','recreating','verifying','failed','rolled_back'].includes(app.update?.stage)">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                        Update available
+                      </span>
+                    </template>
+                    <!-- Up to date — no update available && not in transient/error state -->
+                    <template x-if="!app.has_update && !['pulling','recreating','verifying','failed','rolled_back'].includes(app.update?.stage)">
+                      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-green-500/10 text-green-400 border border-green-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                        Up to date
+                      </span>
+                    </template>
+                  </td>
+
+                  <!-- Last attempt -->
+                  <td class="px-4 py-3 hidden lg:table-cell">
+                    <span class="text-xs text-zinc-500"
+                      x-text="app.last_update?.started_at ? formatRelativeTime(app.last_update.started_at) : '—'"></span>
+                  </td>
+
+                  <!-- Actions -->
+                  <td class="px-4 py-3 text-right">
+                    <div class="flex items-center justify-end gap-0.5">
+                      <button x-show="featureAutoUpdate" @click="triggerUpdate && triggerUpdate(app)"
+                        :disabled="['pulling','recreating','verifying'].includes(app.update?.stage)"
+                        class="btn-action btn-info" data-tip="Update now">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                      </button>
+                      <button @click="selectedApp = (selectedApp === app.name ? null : app.name); if (selectedApp === app.name && loadAppHistory) loadAppHistory(app.name)"
+                        class="btn-action" :data-tip="selectedApp === app.name ? 'Collapse' : 'Expand'">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                          :class="selectedApp === app.name && 'rotate-180'"
+                          class="transition-transform">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Detail panel (expand-row) — Requirements R4.2, R5.2, R5.3 -->
+                <tr x-show="selectedApp === app.name" x-cloak class="bg-zinc-950/60">
+                  <td :colspan="featureAutoUpdate ? 6 : 5" class="p-0 border-t border-zinc-800/60">
+                    <div class="px-4 py-4" x-data="{ tab: 'overview' }">
+                      <!-- Tabs nav -->
+                      <div class="flex items-center gap-1 border-b border-zinc-800 mb-4">
+                        <template x-for="t in [
+                          {id:'overview', label:'Overview'},
+                          {id:'history',  label:'History'},
+                          {id:'logs',     label:'Logs (live)'}
+                        ]" :key="t.id">
+                          <button @click="tab = t.id"
+                            :class="tab === t.id ? 'border-blue-500 text-white' : 'border-transparent text-zinc-500 hover:text-zinc-300'"
+                            class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
+                            x-text="t.label"></button>
+                        </template>
+                      </div>
+
+                      <!-- Overview tab -->
+                      <div x-show="tab === 'overview'" class="space-y-4">
+                        <!-- Last attempt summary + Update now -->
+                        <div class="flex flex-wrap items-start justify-between gap-3 p-3 bg-zinc-900/60 border border-zinc-800/60 rounded-sm">
+                          <div class="space-y-0.5 min-w-0">
+                            <div class="text-xs text-zinc-500 uppercase tracking-wider">Last attempt</div>
+                            <div class="text-sm text-zinc-200">
+                              <template x-if="app.last_update">
+                                <span>
+                                  <span x-text="(app.last_update.stage || 'unknown')"></span>
+                                  <span class="text-zinc-500"> — </span>
+                                  <span x-text="app.last_update.started_at ? formatRelativeTime(app.last_update.started_at) : '—'"></span>
+                                  <template x-if="app.last_update.error_code">
+                                    <span class="ml-2 text-red-400 font-mono text-xs" x-text="app.last_update.error_code"></span>
+                                  </template>
+                                </span>
+                              </template>
+                              <template x-if="!app.last_update">
+                                <span class="text-zinc-500">No attempts yet</span>
+                              </template>
+                            </div>
+                          </div>
+                          <button x-show="featureAutoUpdate" @click="triggerUpdate && triggerUpdate(app)"
+                            :disabled="['pulling','recreating','verifying'].includes(app.update?.stage)"
+                            class="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-sm text-sm font-medium transition-all active:scale-[0.98] flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Update now
+                          </button>
+                        </div>
+
+                        <!-- Services list — image, current digest (8 chars), latest digest (8 chars), state -->
+                        <div class="bg-zinc-900/40 border border-zinc-800/60 rounded-sm overflow-hidden">
+                          <table class="w-full">
+                            <thead>
+                              <tr class="border-b border-zinc-800">
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Service</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Image</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Current digest</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Latest digest</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">State</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="svc in (app.services || [])" :key="svc.name">
+                                <tr class="border-b border-zinc-800/40 last:border-0">
+                                  <td class="px-3 py-2 text-sm text-white font-medium" x-text="svc.name"></td>
+                                  <td class="px-3 py-2 text-xs text-zinc-300 font-mono break-all" x-text="svc.image || '—'"></td>
+                                  <td class="px-3 py-2">
+                                    <span class="text-xs text-zinc-300 font-mono"
+                                      x-text="svc.local_digest ? svc.local_digest.replace(/^sha256:/, '').slice(0, 8) : '—'"></span>
+                                  </td>
+                                  <td class="px-3 py-2">
+                                    <span class="text-xs font-mono"
+                                      :class="svc.has_update ? 'text-amber-400' : 'text-zinc-300'"
+                                      x-text="svc.remote_digest ? svc.remote_digest.replace(/^sha256:/, '').slice(0, 8) : '—'"></span>
+                                  </td>
+                                  <td class="px-3 py-2">
+                                    <span class="px-2 py-0.5 rounded-md text-xs font-medium border"
+                                      :class="svc.state === 'running' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-zinc-700/30 text-zinc-400 border-zinc-700'"
+                                      x-text="svc.state || 'unknown'"></span>
+                                  </td>
+                                </tr>
+                              </template>
+                              <tr x-show="!(app.services && app.services.length)">
+                                <td colspan="5" class="px-3 py-6 text-center text-xs text-zinc-600">No services</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <!-- History tab — table from loadAppHistory -->
+                      <div x-show="tab === 'history'" class="space-y-2">
+                        <div class="bg-zinc-900/40 border border-zinc-800/60 rounded-sm overflow-hidden">
+                          <table class="w-full">
+                            <thead>
+                              <tr class="border-b border-zinc-800">
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Timestamp</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Service</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Old digest</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">New digest</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Stage</th>
+                                <th class="text-left px-3 py-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Error</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="entry in (
+                                (typeof appHistory !== 'undefined' && appHistory && appHistory[app.name])
+                                  ? appHistory[app.name]
+                                  : []
+                              ).flatMap(rec => {
+                                const services = rec.services && Object.keys(rec.services).length
+                                  ? Object.entries(rec.services).map(([name, info]) => ({ name, info }))
+                                  : [{ name: '—', info: {} }];
+                                return services.map(s => ({
+                                  attempt_id: rec.attempt_id,
+                                  started_at: rec.started_at,
+                                  stage:      rec.stage,
+                                  error_code: rec.error_code,
+                                  service:    s.name,
+                                  prev:       s.info.previous_digest || '',
+                                  next:       s.info.new_digest || ''
+                                }));
+                              }).slice(0, 50)" :key="entry.attempt_id + ':' + entry.service">
+                                <tr class="border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                                  @click="historyDetail = { app: app.name, attempt_id: entry.attempt_id }; if (loadAttemptDetail) loadAttemptDetail(app.name, entry.attempt_id)">
+                                  <td class="px-3 py-2 text-xs text-zinc-300"
+                                    x-text="entry.started_at ? formatRelativeTime(Math.floor(entry.started_at / 1000000)) : '—'"></td>
+                                  <td class="px-3 py-2 text-xs text-zinc-300" x-text="entry.service"></td>
+                                  <td class="px-3 py-2 text-xs text-zinc-400 font-mono"
+                                    x-text="entry.prev ? entry.prev.replace(/^sha256:/, '').slice(0, 8) : '—'"></td>
+                                  <td class="px-3 py-2 text-xs text-zinc-400 font-mono"
+                                    x-text="entry.next ? entry.next.replace(/^sha256:/, '').slice(0, 8) : '—'"></td>
+                                  <td class="px-3 py-2">
+                                    <span class="px-2 py-0.5 rounded-md text-xs font-medium border"
+                                      :class="{
+                                        'bg-green-500/10 text-green-400 border-green-500/20':  entry.stage === 'completed',
+                                        'bg-red-500/10 text-red-400 border-red-500/20':        entry.stage === 'failed',
+                                        'bg-orange-500/10 text-orange-400 border-orange-500/20': entry.stage === 'rolled_back',
+                                        'bg-blue-500/10 text-blue-400 border-blue-500/20':     ['pulling','recreating','verifying','pending'].includes(entry.stage)
+                                      }"
+                                      x-text="entry.stage || '—'"></span>
+                                  </td>
+                                  <td class="px-3 py-2">
+                                    <span class="text-xs font-mono text-red-400" x-text="entry.error_code || ''"></span>
+                                  </td>
+                                </tr>
+                              </template>
+                              <tr x-show="!((typeof appHistory !== 'undefined' && appHistory && appHistory[app.name] && appHistory[app.name].length))">
+                                <td colspan="6" class="px-3 py-6 text-center text-xs text-zinc-600">No history yet</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <!-- Logs (live) tab — populated from eventsByAttempt[currentAttemptId] -->
+                      <div x-show="tab === 'logs'" class="space-y-2">
+                        <div class="flex items-center justify-between text-xs text-zinc-500">
+                          <span>
+                            Streaming events
+                            <template x-if="app.update?.attempt_id">
+                              <span>
+                                for attempt
+                                <span class="font-mono text-zinc-300" x-text="(app.update.attempt_id || '').slice(0, 8)"></span>
+                              </span>
+                            </template>
+                          </span>
+                          <span class="inline-flex items-center gap-1.5">
+                            <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                            live
+                          </span>
+                        </div>
+                        <div class="bg-black border border-zinc-800 rounded-sm p-3 font-mono text-xs text-zinc-300 max-h-[300px] overflow-auto">
+                          <template x-for="(ev, idx) in (
+                            (typeof eventsByAttempt !== 'undefined' && eventsByAttempt && app.update?.attempt_id)
+                              ? (eventsByAttempt[app.update.attempt_id] || [])
+                              : []
+                          )" :key="idx">
+                            <div class="leading-relaxed">
+                              <span class="text-zinc-500"
+                                x-text="ev.at ? new Date(ev.at * 1000).toLocaleTimeString() : ''"></span>
+                              <span class="ml-2"
+                                :class="{
+                                  'text-green-400':  ev.stage === 'completed',
+                                  'text-red-400':    ev.stage === 'failed',
+                                  'text-orange-400': ev.stage === 'rolled_back',
+                                  'text-blue-400':   ['pulling','recreating','verifying','pending'].includes(ev.stage)
+                                }"
+                                x-text="ev.stage || ''"></span>
+                              <template x-if="ev.error_code">
+                                <span class="ml-2 text-red-400" x-text="ev.error_code"></span>
+                              </template>
+                              <template x-if="ev.message">
+                                <span class="ml-2 text-zinc-400" x-text="ev.message"></span>
+                              </template>
+                            </div>
+                          </template>
+                          <div x-show="!(app.update?.attempt_id && typeof eventsByAttempt !== 'undefined' && eventsByAttempt && eventsByAttempt[app.update.attempt_id] && eventsByAttempt[app.update.attempt_id].length)"
+                            class="text-zinc-600 text-center py-6">
+                            No live events. Start an update to see stage transitions here.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </template>
+          </table>
+          <div x-show="(filteredApps || apps || []).length === 0" class="text-center py-12 text-zinc-600">
+            <div class="text-4xl mb-3">🚀</div>
+            <p class="text-sm" x-show="(apps || []).length === 0">No apps deployed yet</p>
+            <p class="text-sm" x-show="(apps || []).length > 0">No apps match your filter</p>
+          </div>
+        </div>
+
+        <!-- History entry modal — full event log for one attempt (Requirement R5.3) -->
+        <div x-show="historyDetail && historyDetail.attempt_id" x-cloak
+          class="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div @click="historyDetail = null" class="absolute inset-0 bg-black/70"></div>
+          <div class="relative bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+              <div>
+                <h3 class="text-base font-semibold text-white">Attempt event log</h3>
+                <p class="text-xs text-zinc-500 font-mono mt-0.5"
+                  x-text="(historyDetail?.attempt_id || '').slice(0, 16)"></p>
+              </div>
+              <button @click="historyDetail = null" class="text-zinc-500 hover:text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+            <div class="p-6 overflow-auto">
+              <div class="bg-black border border-zinc-800 rounded-sm p-3 font-mono text-xs text-zinc-300 space-y-1">
+                <template x-for="(ev, idx) in ((typeof attemptDetail !== 'undefined' && attemptDetail && attemptDetail[historyDetail?.attempt_id]?.events) || [])" :key="idx">
+                  <div class="leading-relaxed">
+                    <span class="text-zinc-500"
+                      x-text="ev.at ? new Date(ev.at * 1000).toLocaleString() : ''"></span>
+                    <span class="ml-2"
+                      :class="{
+                        'text-green-400':  ev.stage === 'completed',
+                        'text-red-400':    ev.stage === 'failed',
+                        'text-orange-400': ev.stage === 'rolled_back',
+                        'text-blue-400':   ['pulling','recreating','verifying','pending'].includes(ev.stage)
+                      }"
+                      x-text="ev.stage || ''"></span>
+                    <template x-if="ev.message">
+                      <span class="ml-2 text-zinc-400" x-text="ev.message"></span>
+                    </template>
+                  </div>
+                </template>
+                <div x-show="!((typeof attemptDetail !== 'undefined' && attemptDetail && attemptDetail[historyDetail?.attempt_id]?.events) || []).length"
+                  class="text-zinc-600 text-center py-6">
+                  Loading event log…
+                </div>
+              </div>
+            </div>
+            <div class="flex justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+              <button @click="historyDetail = null" class="px-4 py-2 text-sm text-zinc-400 hover:text-white">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+

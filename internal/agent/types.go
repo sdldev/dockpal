@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 
+	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 )
 
@@ -37,6 +38,7 @@ type AgentClient interface {
 	RestartContainer(ctx context.Context, id string) error
 	RemoveContainer(ctx context.Context, id string, force bool) error
 	EditContainer(ctx context.Context, id string, req docker.ContainerEditRequest) (*docker.ContainerDetail, error)
+	UpdateContainerImage(ctx context.Context, id string, registryAuth string) (*docker.ContainerDetail, error)
 	GetContainerStats(ctx context.Context, id string) (*docker.ContainerStats, error)
 	ContainerLogs(ctx context.Context, id string, tail string) (io.ReadCloser, error)
 
@@ -55,6 +57,26 @@ type AgentClient interface {
 	// Host operations
 	GetHostInfo(ctx context.Context) (*HostInfo, error)
 	GetHostStats(ctx context.Context) (*HostStats, error)
+
+	// App auto-update operations (auto-image-update spec).
+	// ListApps returns one summary per compose project on the instance,
+	// folding in update-availability and the most recent update record.
+	ListApps(ctx context.Context) ([]docker.AppSummary, error)
+	// ListAppUpdates returns up to limit App_Update_Records for a given
+	// project ordered newest-first by StartedAt. A non-positive limit
+	// means "no limit"; concrete implementations may cap it.
+	ListAppUpdates(ctx context.Context, app string, limit int) ([]db.AppUpdateRecord, error)
+	// GetAppUpdate fetches a single App_Update_Record by attempt id and
+	// returns (nil, nil) when the record does not exist.
+	GetAppUpdate(ctx context.Context, attemptID string) (*db.AppUpdateRecord, error)
+	// TriggerAppUpdate runs the manual auto-update pipeline for one app
+	// and returns the new attempt id once the worker has persisted the
+	// first stage event.
+	TriggerAppUpdate(ctx context.Context, app string) (string, error)
+	// SetAppAutoUpdate enables or disables the dockpal.auto-update label on
+	// the running containers of the project by rewriting its compose YAML
+	// and redeploying with forcePull=false.
+	SetAppAutoUpdate(ctx context.Context, app string, enabled bool) error
 
 	// Connection
 	Ping(ctx context.Context) error

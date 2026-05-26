@@ -45,6 +45,7 @@ type ContainerInfo struct {
 	State            string                  `json:"state"`
 	Ports            []container.PortSummary `json:"ports"`
 	Created          int64                   `json:"created"`
+	Labels           map[string]string       `json:"labels,omitempty"`
 	Protected        bool                    `json:"protected,omitempty"`
 	ProtectionReason string                  `json:"protection_reason,omitempty"`
 }
@@ -73,6 +74,7 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 			State:   string(ctr.State),
 			Ports:   ctr.Ports,
 			Created: ctr.Created,
+			Labels:  ctr.Labels,
 		}
 	}
 	return containers, nil
@@ -352,6 +354,37 @@ func (c *Client) EditContainer(ctx context.Context, id string, req ContainerEdit
 	// Return updated detail — after recreate the ID has changed,
 	// so look up by container name which is stable across recreations.
 	return c.InspectContainer(ctx, containerName)
+}
+
+// UpdateContainerImage force-pulls the container's current image using the
+// optional Docker registry auth header, then recreates the container with its
+// existing configuration so the new image is used. The container name is
+// preserved and the returned detail is looked up by that stable name because
+// Docker assigns a new ID during recreation.
+func (c *Client) UpdateContainerImage(ctx context.Context, id string, registryAuth string) (*ContainerDetail, error) {
+	result, err := c.cli.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container: %w", err)
+	}
+	ctr := result.Container
+	if ctr.Config == nil {
+		return nil, fmt.Errorf("container inspect returned incomplete data")
+	}
+	image := ctr.Config.Image
+	if strings.TrimSpace(image) == "" {
+		return nil, fmt.Errorf("container has no image reference")
+	}
+	name := trimContainerName(ctr.Name)
+
+	if err := c.ForcePullImage(ctx, image, registryAuth); err != nil {
+		return nil, err
+	}
+
+	if err := c.recreateContainer(ctx, ctr.ID, ContainerEditRequest{}); err != nil {
+		return nil, fmt.Errorf("failed to recreate container: %w", err)
+	}
+
+	return c.InspectContainer(ctx, name)
 }
 
 // recreateContainer stops, removes, and recreates a container with merged config.

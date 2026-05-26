@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 
+	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 )
 
@@ -141,6 +143,15 @@ func (e *EdgeClient) RemoveContainer(ctx context.Context, id string, force bool)
 // EditContainer updates a container's configuration.
 func (e *EdgeClient) EditContainer(ctx context.Context, id string, req docker.ContainerEditRequest) (*docker.ContainerDetail, error) {
 	resp, err := e.sendRequest(ctx, "PUT", "/docker/containers/"+id, nil, req)
+	if err != nil {
+		return nil, err
+	}
+	return parseResponse[docker.ContainerDetail](resp)
+}
+
+// UpdateContainerImage force-pulls the container's current image and recreates it.
+func (e *EdgeClient) UpdateContainerImage(ctx context.Context, id string, registryAuth string) (*docker.ContainerDetail, error) {
+	resp, err := e.sendRequest(ctx, "POST", "/docker/containers/"+id+"/update-image", map[string]string{"auth": registryAuth}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -336,6 +347,88 @@ func (e *EdgeClient) CheckImageUpdate(ctx context.Context, image string) (*docke
 func (e *EdgeClient) ForcePullImage(ctx context.Context, image, registryAuth string) error {
 	query := map[string]string{"image": image, "auth": registryAuth}
 	_, err := e.sendRequestRaw(ctx, "POST", "/docker/images/pull-force", query)
+	return err
+}
+
+// App auto-update operations
+//
+// Stubs added in task 5.4. The remote agent gains matching endpoints in
+// task 6.4; until then these methods return a sentinel error so callers
+// can detect the unimplemented state without crashing.
+
+// ListApps returns app summaries from the remote agent.
+func (e *EdgeClient) ListApps(ctx context.Context) ([]docker.AppSummary, error) {
+	body, err := e.sendRequestRaw(ctx, "GET", "/docker/apps", nil)
+	if err != nil {
+		return nil, err
+	}
+	var apps []docker.AppSummary
+	if err := json.Unmarshal(body, &apps); err != nil {
+		return nil, fmt.Errorf("failed to parse apps: %w", err)
+	}
+	return apps, nil
+}
+
+// ListAppUpdates returns App_Update_Records for one app on the remote agent.
+func (e *EdgeClient) ListAppUpdates(ctx context.Context, app string, limit int) ([]db.AppUpdateRecord, error) {
+	query := map[string]string{}
+	if limit > 0 {
+		query["limit"] = strconv.Itoa(limit)
+	}
+	body, err := e.sendRequestRaw(ctx, "GET", "/docker/apps/"+app+"/updates", query)
+	if err != nil {
+		return nil, err
+	}
+	var recs []db.AppUpdateRecord
+	if err := json.Unmarshal(body, &recs); err != nil {
+		return nil, fmt.Errorf("failed to parse app updates: %w", err)
+	}
+	return recs, nil
+}
+
+// GetAppUpdate fetches one App_Update_Record by attempt id from the remote agent.
+func (e *EdgeClient) GetAppUpdate(ctx context.Context, attemptID string) (*db.AppUpdateRecord, error) {
+	resp, err := e.sendRequest(ctx, "GET", "/docker/apps/updates/"+attemptID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status == http.StatusNotFound {
+		return nil, nil
+	}
+	return parseResponse[db.AppUpdateRecord](resp)
+}
+
+// triggerAppEdgeRequest is the request body for triggering a manual app update via the edge.
+type triggerAppEdgeRequest struct {
+	App string `json:"app"`
+}
+
+// triggerAppEdgeResponse is the response from triggering a manual app update via the edge.
+type triggerAppEdgeResponse struct {
+	AttemptID string `json:"attempt_id"`
+}
+
+// TriggerAppUpdate runs the manual auto-update pipeline on the remote agent.
+func (e *EdgeClient) TriggerAppUpdate(ctx context.Context, app string) (string, error) {
+	resp, err := e.sendRequest(ctx, "POST", "/docker/apps/"+app+"/update", nil, triggerAppEdgeRequest{App: app})
+	if err != nil {
+		return "", err
+	}
+	parsed, err := parseResponse[triggerAppEdgeResponse](resp)
+	if err != nil {
+		return "", err
+	}
+	return parsed.AttemptID, nil
+}
+
+// setAutoUpdateEdgeRequest is the request body for toggling the auto-update label via the edge.
+type setAutoUpdateEdgeRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetAppAutoUpdate toggles the dockpal.auto-update label on a remote app.
+func (e *EdgeClient) SetAppAutoUpdate(ctx context.Context, app string, enabled bool) error {
+	_, err := e.sendRequest(ctx, "PATCH", "/docker/apps/"+app+"/auto-update", nil, setAutoUpdateEdgeRequest{Enabled: enabled})
 	return err
 }
 

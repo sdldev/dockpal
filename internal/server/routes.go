@@ -66,6 +66,22 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		metrics.Handler().ServeHTTP(c.Writer, c.Request)
 	})
 
+	// Public client-facing configuration (task 8.2). The UI reads this on
+	// boot — before the user logs in — to decide whether to render the
+	// auto-update toggle and "Update now" affordances. The endpoint is
+	// intentionally unauthenticated and exposes only feature flags, never
+	// any secret or operator-scoped value.
+	//
+	// `auto_update_enabled` reflects the worker's state for the local edge
+	// process (DOCKPAL_AUTO_UPDATE_ENABLED). Remote agents have their own
+	// worker; the UI banner is a global hint and per-instance overrides
+	// are out of scope (see design.md "Components and Interfaces").
+	api.GET("/config", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"auto_update_enabled": globalAutoUpdateWorker.Enabled(),
+		})
+	})
+
 	// Rate limiters
 	loginRateLimiter := NewRateLimiter()
 	mutationRateLimiter := NewRateLimiter()
@@ -134,6 +150,468 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		return registryManager.GetAuthHeader(imageRef)
 	})
 	imageUpdateMonitor.Start()
+
+	// Auto-update wiring (task 5.2):
+	//   - AppUpdateFeed broadcasts stage events to SSE subscribers.
+	//   - AutoUpdateWorker consumes ImageUpdateMonitor cycle events and
+	//     drives the per-app pull → recreate → verify → rollback pipeline.
+	//
+	// The worker uses docker.AppUpdateFeedPayload (not server.AppUpdateFeedEvent
+	// directly) to avoid a server → docker import cycle. We provide a small
+	// adapter that translates the worker payload into the server event type
+	// before calling feed.Publish.
+	//
+	// The compose YAML for an app is resolved by name from the local-instance
+	// services bucket. Apps that have not been deployed via Dockpal (or that
+	// have no compose body persisted) cause TriggerApp to return an error,
+	// matching the design for "compose not configured for app".
+	//
+	// instanceID is "local" because this worker runs in the local edge
+	// process. Remote agents wire their own AutoUpdateWorker inside the
+	// agent process (task 6.4).
+	feed := NewAppUpdateFeed()
+
+	// getCompose resolves the compose YAML for a project (dockpal.project
+	// label). The project name corresponds to db.Service.Name on the local
+	// instance, which is the only instance the worker manages today.
+	// We search all services because some may have been deployed via the
+	// instance-scoped route (InstanceID="local") while others via the
+	// legacy route (InstanceID="").
+	getCompose := func(project string) (string, error) {
+		services, err := database.ListServices()
+		if err != nil {
+			return "", err
+		}
+		for _, s := range services {
+			if s.Name == project && (s.InstanceID == "" || s.InstanceID == "local") {
+				return s.Compose, nil
+			}
+		}
+		return "", fmt.Errorf("compose not found for project %q", project)
+	}
+
+	// feedAdapter translates the worker's internal payload into the
+	// server-side feed event. The payload struct mirrors the event shape
+	// field-for-field so this is a one-to-one copy; the indirection exists
+	// only to avoid a server → docker import cycle.
+	feedAdapter := func(p docker.AppUpdateFeedPayload) {
+		feed.Publish(AppUpdateFeedEvent{
+			AttemptID:  p.AttemptID,
+			InstanceID: p.InstanceID,
+			App:        p.App,
+			Stage:      p.Stage,
+			ErrorCode:  p.ErrorCode,
+			Message:    p.Message,
+			At:         p.At,
+		})
+	}
+
+	worker := docker.NewAutoUpdateWorker(
+		dockerClient,
+		imageUpdateMonitor,
+		database,
+		feedAdapter,
+		registryManager.GetAuthHeader,
+		getCompose,
+		"local", // instanceID="local" — this worker drives the local edge process
+	)
+	// Install Prometheus instrumentation hooks (task 9.1, R10.1-R10.3).
+	// The worker stays decoupled from internal/metrics through this
+	// indirection, which keeps the metrics package importable from
+	// internal/server (where the registrar lives) without forcing a
+	// docker → metrics → agent → docker import cycle.
+	worker.SetMetricsHooks(docker.AutoUpdateMetricsHooks{
+		Attempt:       metrics.AutoUpdateAttempt,
+		Duration:      metrics.AutoUpdateDuration,
+		PendingUpdate: metrics.SetAppsPendingUpdate,
+	})
+	// Install webhook lister so the worker can send best-effort notifications
+	// on rolled_back or failed (rollback_failed) outcomes (task 10.1, R3.5).
+	worker.SetWebhookLister(database.ListNotificationWebhooks)
+	// TODO: thread a real lifecycle context through RegisterRoutes so the
+	// worker can be stopped on graceful shutdown. context.Background() is
+	// safe today because (*AutoUpdateWorker).Stop cancels via the worker's
+	// own cancel func.
+	worker.Start(context.Background())
+
+	// Expose the feed and worker to handler tasks (5.3, 5.4) and the
+	// agent client local impl (6.2) via package-level references. They
+	// are reassigned per RegisterRoutes call so tests stay isolated.
+	globalAppUpdateFeed = feed
+	globalAutoUpdateWorker = worker
+	// globalDockerClient and globalImageUpdateMonitor let the
+	// instance-scoped handlers (task 5.4) reuse the local docker layer
+	// when instance_id == "local". globalRegistryManager exposes the
+	// in-process registry manager for the same path so the local SetApp
+	// AutoUpdate handler can resolve registry auths during the redeploy.
+	globalDockerClient = dockerClient
+	globalImageUpdateMonitor = imageUpdateMonitor
+	globalRegistryManager = registryManager
+
+	// Wire the agent.LocalClient app-ops dependencies (task 6.2). The
+	// LocalClient methods ListApps / ListAppUpdates / GetAppUpdate /
+	// TriggerAppUpdate / SetAppAutoUpdate previously returned
+	// errAppOpsNotWired stubs; with the worker, monitor, store, and a
+	// SetAutoUpdate closure they delegate properly. The closure mirrors
+	// PATCH /apps/:name/auto-update: rewrite the compose YAML via
+	// docker.SetServiceLabel, persist db.Service, and redeploy with
+	// forcePull=false. Threading this work through a closure keeps the
+	// agent package free of *db.DB and *registry.Manager imports.
+	localSetAutoUpdate := func(ctx context.Context, app string, enabled bool) error {
+		if app == "" {
+			return fmt.Errorf("set auto-update: empty app")
+		}
+		services, err := database.ListServices()
+		if err != nil {
+			return err
+		}
+		var svc *db.Service
+		for i := range services {
+			if services[i].Name == app && (services[i].InstanceID == "" || services[i].InstanceID == "local") {
+				svc = &services[i]
+				break
+			}
+		}
+		if svc == nil {
+			return fmt.Errorf("app %q not found", app)
+		}
+		if svc.Compose == "" {
+			return fmt.Errorf("app %q has no compose YAML to patch", app)
+		}
+		labelValue := "true"
+		if !enabled {
+			labelValue = "" // empty string removes the label
+		}
+		newCompose, err := docker.SetServiceLabel(svc.Compose, "dockpal.auto-update", labelValue)
+		if err != nil {
+			return err
+		}
+		// Persist the updated compose body before redeploying so a redeploy
+		// failure does not leave the DB out of sync with the actual
+		// containers.
+		updated := *svc
+		updated.Compose = newCompose
+		if err := database.SaveService(updated); err != nil {
+			return err
+		}
+		registryAuths := getRegistryAuths(registryManager, newCompose)
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			return err
+		}
+		return client.DeployCompose(ctx, app, newCompose, registryAuths, false)
+	}
+	agentMgr.WireLocalAppOps(agent.LocalAppOps{
+		Worker:        worker,
+		Monitor:       imageUpdateMonitor,
+		Store:         database,
+		SetAutoUpdate: localSetAutoUpdate,
+	})
+
+	// =============================================================================
+	// App auto-update HTTP endpoints (task 5.3).
+	//
+	// Routes:
+	//   GET   /apps                           viewer+   list apps with update state
+	//   GET   /apps/:name/updates             viewer+   list update history (limit=50)
+	//   GET   /apps/:name/updates/:attemptID  viewer+   single record + events
+	//   POST  /apps/:name/update              operator+ trigger manual update
+	//   PATCH /apps/:name/auto-update         operator+ toggle auto-update label
+	//   GET   /apps/updates/stream            viewer+   SSE stream of feed events
+	//
+	// Role enforcement comes from the roleRouterWrapper (GET → viewer,
+	// POST/PATCH → operator). The endpoints below close over `worker`,
+	// `feed`, `imageUpdateMonitor`, `database`, `registryManager`, and
+	// `agentMgr` from the surrounding RegisterRoutes scope.
+
+	protected.GET("/apps", func(c *gin.Context) {
+		// The handler here lists local apps; the docker.Client.ListApps method
+		// requires a *docker.Client (not the agent.AgentClient interface) so
+		// we use dockerClient directly. The optional `instance_id` query is a
+		// filter passthrough — when set to anything other than "local" or
+		// empty the response is an empty slice, matching R9.3 (instance-scoped
+		// requests use the /instances/:instance_id/apps route added in 5.4).
+		instanceFilter := c.Query("instance_id")
+		if instanceFilter != "" && instanceFilter != "local" {
+			c.JSON(http.StatusOK, []docker.AppSummary{})
+			return
+		}
+		apps, err := dockerClient.ListApps(c.Request.Context(), imageUpdateMonitor, database)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		// Stamp instance_id on each summary so the UI can route per-instance
+		// without a second lookup.
+		for i := range apps {
+			apps[i].InstanceID = "local"
+		}
+		c.JSON(http.StatusOK, apps)
+	})
+
+	protected.GET("/apps/:name/updates", func(c *gin.Context) {
+		name := c.Param("name")
+		limit := 50
+		if v := c.Query("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+				limit = n
+			}
+		}
+		recs, err := database.ListAppUpdates(name, limit)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		// Always return a non-nil slice so the JSON encoder emits `[]`.
+		if recs == nil {
+			recs = []db.AppUpdateRecord{}
+		}
+		c.JSON(http.StatusOK, recs)
+	})
+
+	protected.GET("/apps/:name/updates/:attemptID", func(c *gin.Context) {
+		attemptID := c.Param("attemptID")
+		rec, err := database.GetAppUpdate(attemptID)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if rec == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+			return
+		}
+		// Defensive cross-check: the attempt's App must match the URL :name
+		// so the endpoint cannot be used to enumerate other apps' attempts.
+		if name := c.Param("name"); name != "" && rec.App != name {
+			c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+			return
+		}
+		c.JSON(http.StatusOK, rec)
+	})
+
+	protected.POST("/apps/:name/update", func(c *gin.Context) {
+		if globalAutoUpdateWorker == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "auto-update worker not configured"})
+			return
+		}
+		name := c.Param("name")
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing app name"})
+			return
+		}
+
+		// Resolve the actor for the App_Update_Record's `triggered_by` field.
+		username := "user"
+		if v, ok := c.Get("username"); ok {
+			if s, ok := v.(string); ok && s != "" {
+				username = s
+			}
+		}
+		triggeredBy := "user:" + username
+
+		// Audit logging (R8.4): every user-triggered TriggerApp call
+		// records one `app_update_attempted` entry once the response code
+		// is known. The defer reads c.Writer.Status() after the handler
+		// has called c.JSON(...) so the audit `result` reflects the same
+		// outcome the operator saw on the wire. The wrapping closure is
+		// load-bearing: argument expressions to a deferred call are
+		// evaluated at defer-registration time, but the status code is
+		// only set later by c.JSON, so the read must happen inside the
+		// deferred function body.
+		defer func() {
+			LogAppUpdateAttempt(c, database, dockerClient, name, auditAppUpdateResultFor(c.Writer.Status()))
+		}()
+
+		// Snapshot the latest attempt id so we can detect the new record once
+		// the worker has persisted its first stage event. A nil/empty result
+		// here just means this app has no prior attempts — that is normal.
+		var prevAttempt string
+		if recs, err := database.ListAppUpdates(name, 1); err == nil && len(recs) > 0 {
+			prevAttempt = recs[0].AttemptID
+		}
+
+		// Run the pipeline asynchronously so the HTTP request returns
+		// quickly. The TriggerApp call holds a per-app mutex; if another
+		// trigger is already in flight, it returns an error containing
+		// docker.ErrUpdateAlreadyRunning (mapped to HTTP 409 below).
+		errCh := make(chan error, 1)
+		go func() {
+			// Use context.Background() so the pipeline can outlive the HTTP
+			// request. Cancellation comes from the worker's own Stop() path.
+			errCh <- globalAutoUpdateWorker.TriggerApp(context.Background(), name, true, true, triggeredBy)
+		}()
+
+		timeout := time.NewTimer(5 * time.Second)
+		defer timeout.Stop()
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case err := <-errCh:
+				if err != nil && strings.Contains(err.Error(), docker.ErrUpdateAlreadyRunning) {
+					c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
+					return
+				}
+				if err != nil {
+					internalError(c, err)
+					return
+				}
+				// TriggerApp finished without error before the poll picked up
+				// a new record. Look up the most recent attempt to return its
+				// id (the pipeline always saves at least one record on the
+				// happy path).
+				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
+					return
+				}
+				// No new record (cooldown/window skipped despite bypass=true,
+				// or the trigger short-circuited before the first save).
+				c.JSON(http.StatusAccepted, gin.H{"status": "ok"})
+				return
+			case <-ticker.C:
+				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
+					return
+				}
+			case <-timeout.C:
+				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "trigger did not produce a record in time"})
+				return
+			}
+		}
+	})
+
+	protected.PATCH("/apps/:name/auto-update", func(c *gin.Context) {
+		name := c.Param("name")
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing app name"})
+			return
+		}
+
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: enabled is required"})
+			return
+		}
+
+		// Locate the db.Service for this app on the local instance. The
+		// project name on running containers (dockpal.project label) matches
+		// db.Service.Name, so we look it up by name. Services may have been
+		// deployed via the instance-scoped route (InstanceID="local") or the
+		// legacy route (InstanceID="").
+		services, err := database.ListServices()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		var svc *db.Service
+		for i := range services {
+			if services[i].Name == name && (services[i].InstanceID == "" || services[i].InstanceID == "local") {
+				svc = &services[i]
+				break
+			}
+		}
+		if svc == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "app not found"})
+			return
+		}
+		if svc.Compose == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "app has no compose YAML to patch"})
+			return
+		}
+
+		// Rewrite the compose YAML: set or remove the dockpal.auto-update
+		// label on every service. SetServiceLabel preserves comments and
+		// sibling labels.
+		labelValue := "true"
+		if !req.Enabled {
+			labelValue = "" // empty string removes the label
+		}
+		newCompose, err := docker.SetServiceLabel(svc.Compose, "dockpal.auto-update", labelValue)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		// Persist the updated compose body before redeploying so a redeploy
+		// failure does not leave the DB out of sync with the actual containers.
+		updated := *svc
+		updated.Compose = newCompose
+		if err := database.SaveService(updated); err != nil {
+			internalError(c, err)
+			return
+		}
+
+		// Recreate containers with the new label. forcePull=false means the
+		// existing local image is reused; the only change is the container's
+		// label set.
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		registryAuths := getRegistryAuths(registryManager, newCompose)
+		if err := client.DeployCompose(c.Request.Context(), name, newCompose, registryAuths, false); err != nil {
+			internalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	protected.GET("/apps/updates/stream", func(c *gin.Context) {
+		if globalAppUpdateFeed == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "feed not configured"})
+			return
+		}
+
+		// SSE headers. X-Accel-Buffering=no disables buffering on
+		// nginx/reverse proxies so events arrive at the client promptly.
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+
+		ch, unsubscribe := globalAppUpdateFeed.Subscribe()
+		defer unsubscribe()
+
+		// Flush headers immediately so the client transitions out of "loading"
+		// state even before the first event arrives.
+		c.Writer.Flush()
+
+		ctx := c.Request.Context()
+		for {
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				data, err := json.Marshal(ev)
+				if err != nil {
+					// Skip malformed events rather than tearing down the stream.
+					continue
+				}
+				if _, err := c.Writer.Write([]byte("data: ")); err != nil {
+					return
+				}
+				if _, err := c.Writer.Write(data); err != nil {
+					return
+				}
+				if _, err := c.Writer.Write([]byte("\n\n")); err != nil {
+					return
+				}
+				c.Writer.Flush()
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
 
 	protected.GET("/registries", func(c *gin.Context) {
 		list, err := registryManager.List()

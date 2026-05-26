@@ -477,3 +477,266 @@ func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {
 
 	return nil
 }
+
+// SetServiceLabel returns the compose YAML with the label `key` set to
+// `value` on every service. When `value == ""` the label is removed.
+// Other service fields and other labels are preserved.
+//
+// The function performs a yaml.v3 round-trip through *yaml.Node so
+// comments and field ordering are kept where the encoder allows. Both
+// the mapping form (`labels: {a: b}`) and the sequence form
+// (`labels: ["a=b"]`) are supported. In sequence form, the entry is
+// written as `<key>=<value>` and a matching prefix `<key>=` is removed
+// when value is empty.
+//
+// Returns an error when the input is not valid YAML or has no
+// top-level `services:` mapping.
+func SetServiceLabel(composeYAML, key, value string) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("label key must not be empty")
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(composeYAML), &root); err != nil {
+		return "", fmt.Errorf("invalid compose YAML: %w", err)
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return "", fmt.Errorf("empty compose YAML")
+	}
+	rootMap := root.Content[0]
+	if rootMap.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("compose root is not a mapping")
+	}
+	servicesNode := findYAMLMapValue(rootMap, "services")
+	if servicesNode == nil {
+		return "", fmt.Errorf("no services defined in compose file")
+	}
+	if servicesNode.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("services is not a mapping")
+	}
+	if len(servicesNode.Content) == 0 {
+		return "", fmt.Errorf("no services defined in compose file")
+	}
+
+	for i := 0; i+1 < len(servicesNode.Content); i += 2 {
+		svc := servicesNode.Content[i+1]
+		if svc.Kind != yaml.MappingNode {
+			continue
+		}
+		if err := setServiceLabelOnNode(svc, key, value); err != nil {
+			return "", err
+		}
+	}
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal compose YAML: %w", err)
+	}
+	return string(out), nil
+}
+
+// setServiceLabelOnNode sets or removes a label on a single service mapping node.
+func setServiceLabelOnNode(svc *yaml.Node, key, value string) error {
+	labelsVal := findYAMLMapValue(svc, "labels")
+	if labelsVal == nil {
+		if value == "" {
+			return nil
+		}
+		svc.Content = append(svc.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "labels"},
+			&yaml.Node{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+				Content: []*yaml.Node{
+					{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+					newLabelStringNode(value),
+				},
+			},
+		)
+		return nil
+	}
+
+	switch labelsVal.Kind {
+	case yaml.MappingNode:
+		idx := -1
+		for i := 0; i+1 < len(labelsVal.Content); i += 2 {
+			if labelsVal.Content[i].Value == key {
+				idx = i
+				break
+			}
+		}
+		if value == "" {
+			if idx >= 0 {
+				labelsVal.Content = append(labelsVal.Content[:idx], labelsVal.Content[idx+2:]...)
+			}
+			if len(labelsVal.Content) == 0 {
+				removeYAMLMapEntry(svc, "labels")
+			}
+			return nil
+		}
+		if idx >= 0 {
+			vn := labelsVal.Content[idx+1]
+			vn.Kind = yaml.ScalarNode
+			vn.Tag = "!!str"
+			vn.Value = value
+			// Force quoted style to keep label values like "true" as strings.
+			vn.Style = yaml.DoubleQuotedStyle
+			return nil
+		}
+		labelsVal.Content = append(labelsVal.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+			newLabelStringNode(value),
+		)
+		return nil
+
+	case yaml.SequenceNode:
+		prefix := key + "="
+		idx := -1
+		for i, item := range labelsVal.Content {
+			if item.Kind != yaml.ScalarNode {
+				continue
+			}
+			if item.Value == key || strings.HasPrefix(item.Value, prefix) {
+				idx = i
+				break
+			}
+		}
+		if value == "" {
+			if idx >= 0 {
+				labelsVal.Content = append(labelsVal.Content[:idx], labelsVal.Content[idx+1:]...)
+			}
+			if len(labelsVal.Content) == 0 {
+				removeYAMLMapEntry(svc, "labels")
+			}
+			return nil
+		}
+		entry := key + "=" + value
+		if idx >= 0 {
+			labelsVal.Content[idx].Tag = "!!str"
+			labelsVal.Content[idx].Value = entry
+			return nil
+		}
+		labelsVal.Content = append(labelsVal.Content, &yaml.Node{
+			Kind: yaml.ScalarNode, Tag: "!!str", Value: entry,
+		})
+		return nil
+
+	case yaml.ScalarNode:
+		// `labels:` with a null/empty scalar - upgrade to mapping if needed.
+		if value == "" {
+			return nil
+		}
+		labelsVal.Kind = yaml.MappingNode
+		labelsVal.Tag = "!!map"
+		labelsVal.Value = ""
+		labelsVal.Style = 0
+		labelsVal.Content = []*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+			newLabelStringNode(value),
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported labels node kind %d", labelsVal.Kind)
+	}
+}
+
+// newLabelStringNode builds a yaml string node, double-quoted so values
+// like "true" are emitted as strings rather than booleans.
+func newLabelStringNode(value string) *yaml.Node {
+	return &yaml.Node{
+		Kind:  yaml.ScalarNode,
+		Tag:   "!!str",
+		Value: value,
+		Style: yaml.DoubleQuotedStyle,
+	}
+}
+
+// findYAMLMapValue returns the value node for `key` in a mapping node, or nil.
+func findYAMLMapValue(m *yaml.Node, key string) *yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// removeYAMLMapEntry deletes the key/value pair for `key` from a mapping node.
+func removeYAMLMapEntry(m *yaml.Node, key string) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			return
+		}
+	}
+}
+
+// RewriteImageDigest returns the compose YAML with `services.<service>.image`
+// replaced by `<repo>@<digest>`, where `<repo>` is the existing image stripped
+// of any `:tag` or `@digest` suffix. Used by the rollback path of
+// AutoUpdateWorker (task 3.7) to pin a single service to a previous digest
+// before a no-pull redeploy. Other services and other fields are preserved.
+//
+// Errors:
+//   - empty digest (caller must filter empty previous digests with
+//     rollback_no_previous_digest before calling this helper)
+//   - service is not present in the compose
+//   - service has no `image:` key
+//   - YAML is not valid or has no top-level `services:` mapping
+func RewriteImageDigest(composeYAML, service, digest string) (string, error) {
+	if service == "" {
+		return "", fmt.Errorf("RewriteImageDigest: empty service name")
+	}
+	if digest == "" {
+		return "", fmt.Errorf("RewriteImageDigest: empty digest for service %q", service)
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(composeYAML), &root); err != nil {
+		return "", fmt.Errorf("invalid compose YAML: %w", err)
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return "", fmt.Errorf("empty compose YAML")
+	}
+	rootMap := root.Content[0]
+	if rootMap.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("compose root is not a mapping")
+	}
+	servicesNode := findYAMLMapValue(rootMap, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("no services defined in compose file")
+	}
+	svcNode := findYAMLMapValue(servicesNode, service)
+	if svcNode == nil {
+		return "", fmt.Errorf("RewriteImageDigest: service %q not found in compose", service)
+	}
+	if svcNode.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("RewriteImageDigest: service %q is not a mapping", service)
+	}
+	imageNode := findYAMLMapValue(svcNode, "image")
+	if imageNode == nil {
+		return "", fmt.Errorf("RewriteImageDigest: service %q has no image", service)
+	}
+	if imageNode.Kind != yaml.ScalarNode {
+		return "", fmt.Errorf("RewriteImageDigest: service %q image is not a scalar", service)
+	}
+	repo := splitImageRepo(imageNode.Value)
+	if repo == "" {
+		return "", fmt.Errorf("RewriteImageDigest: service %q has empty image", service)
+	}
+	imageNode.Tag = "!!str"
+	imageNode.Value = repo + "@" + digest
+	// Force a plain (unquoted) style — image refs never need quoting.
+	imageNode.Style = 0
+
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal compose YAML: %w", err)
+	}
+	return string(out), nil
+}

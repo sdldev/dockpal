@@ -40,6 +40,27 @@
             <span x-show="item.id === 'images' && imagesWithUpdatesCount > 0"
               class="ml-auto bg-amber-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full"
               x-text="imagesWithUpdatesCount"></span>
+            <!-- Apps nav entry: dual-count badge per R4.5
+                 - Blue (animated) shows apps currently in pulling/recreating/verifying.
+                 - Amber shows apps with an available update that are not yet updating.
+                 Either half is hidden when its count is zero. The wrapper handles
+                 ml-auto so spacing is correct even when only one half is visible. -->
+            <span x-show="item.id === 'apps' && (appsUpdating > 0 || appsWithUpdates > 0)"
+              class="ml-auto flex items-center gap-1">
+              <span x-show="appsUpdating > 0"
+                class="inline-flex items-center gap-1 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                :title="appsUpdating + ' app(s) updating'">
+                <svg class="w-2.5 h-2.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" stroke-width="3" class="opacity-25"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M22 12a10 10 0 00-10-10"/>
+                </svg>
+                <span x-text="appsUpdating"></span>
+              </span>
+              <span x-show="appsWithUpdates > 0"
+                class="bg-amber-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                :title="appsWithUpdates + ' app(s) with updates available'"
+                x-text="appsWithUpdates"></span>
+            </span>
           </button>
         </div>
       </template>

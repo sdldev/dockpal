@@ -14,14 +14,19 @@ Dockpal.images = {
   },
 
   async pullImage() {
-    this.toast('Pulling ' + this.imagePullName + '...', 'info', 2500);
+    const imageRef = (this.imagePullName || '').trim();
+    if (!imageRef) {
+      this.toast('Enter an image name to pull', 'warning', 3000);
+      return;
+    }
+    this.toast('Pulling ' + imageRef + '... This only downloads the image; existing containers will not change until recreated.', 'info', 6000);
     // Use instanceApi for image pull
-    const resp = await this.instanceApi('POST', '/images/pull', { image: this.imagePullName });
+    const resp = await this.instanceApi('POST', '/images/pull', { image: imageRef });
     if (resp && resp.ok) {
-      this.toast('Image pulled', 'success');
+      this.toast('Image pulled: ' + imageRef + '. Recreate containers to use the new image.', 'success', 6000);
     } else {
       const data = resp ? await resp.json().catch(() => ({})) : {};
-      this.toast(data.error || 'Pull failed', 'error', 5000);
+      this.toast(data.error || ('Pull failed for ' + imageRef), 'error', 6000);
     }
     this.imagePullName = '';
     await this.loadImages();

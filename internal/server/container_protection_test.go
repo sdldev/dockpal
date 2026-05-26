@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
+	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 )
 
@@ -18,6 +19,7 @@ type protectionFakeAgentClient struct {
 	detail       *docker.ContainerDetail
 	inspectErr   error
 	removeCalled bool
+	updateCalled bool
 	force        bool
 }
 
@@ -44,6 +46,10 @@ func (f *protectionFakeAgentClient) RemoveContainer(_ context.Context, _ string,
 }
 func (f *protectionFakeAgentClient) EditContainer(context.Context, string, docker.ContainerEditRequest) (*docker.ContainerDetail, error) {
 	return nil, nil
+}
+func (f *protectionFakeAgentClient) UpdateContainerImage(context.Context, string, string) (*docker.ContainerDetail, error) {
+	f.updateCalled = true
+	return f.detail, nil
 }
 func (f *protectionFakeAgentClient) GetContainerStats(context.Context, string) (*docker.ContainerStats, error) {
 	return nil, nil
@@ -77,6 +83,24 @@ func (f *protectionFakeAgentClient) GetHostStats(context.Context) (*agent.HostSt
 }
 func (f *protectionFakeAgentClient) Ping(context.Context) error { return nil }
 func (f *protectionFakeAgentClient) Close() error               { return nil }
+
+// App auto-update stubs (added in task 5.4 to satisfy the AgentClient
+// interface). The container-protection tests do not exercise these paths.
+func (f *protectionFakeAgentClient) ListApps(context.Context) ([]docker.AppSummary, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) ListAppUpdates(context.Context, string, int) ([]db.AppUpdateRecord, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) GetAppUpdate(context.Context, string) (*db.AppUpdateRecord, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) TriggerAppUpdate(context.Context, string) (string, error) {
+	return "", nil
+}
+func (f *protectionFakeAgentClient) SetAppAutoUpdate(context.Context, string, bool) error {
+	return nil
+}
 
 func TestIsProtectedDockpalAgentContainer(t *testing.T) {
 	tests := []struct {
@@ -132,6 +156,56 @@ func TestIsProtectedDockpalAgentContainer(t *testing.T) {
 				t.Fatalf("isProtectedDockpalAgentContainer() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUpdateImageProtectedDockpalAgentContainerForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := &protectionFakeAgentClient{detail: &docker.ContainerDetail{ContainerInfo: docker.ContainerInfo{
+		Name:  "dockpal-agent",
+		Image: "ghcr.io/sdldev/dockpal-agent:latest",
+	}}}
+
+	r := gin.New()
+	r.POST("/api/instances/:instance_id/containers/:id/update-image", func(c *gin.Context) {
+		c.Set("agent_client", fake)
+		c.Set("instance_id", c.Param("instance_id"))
+	}, handleInstanceUpdateContainerImage)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/instances/local/containers/dockpal-agent/update-image", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	}
+	if fake.updateCalled {
+		t.Fatal("UpdateContainerImage was called for protected container")
+	}
+}
+
+func TestUpdateImageUserContainerCallsAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := &protectionFakeAgentClient{detail: &docker.ContainerDetail{ContainerInfo: docker.ContainerInfo{
+		Name:  "web",
+		Image: "nginx:latest",
+	}}}
+
+	r := gin.New()
+	r.POST("/api/instances/:instance_id/containers/:id/update-image", func(c *gin.Context) {
+		c.Set("agent_client", fake)
+		c.Set("instance_id", c.Param("instance_id"))
+	}, handleInstanceUpdateContainerImage)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/instances/local/containers/web/update-image", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !fake.updateCalled {
+		t.Fatal("UpdateContainerImage was not called")
 	}
 }
 

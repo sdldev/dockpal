@@ -2,28 +2,90 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 )
+
+// LocalAppOps bundles the dependencies the LocalClient needs to satisfy the
+// auto-image-update pieces of the AgentClient interface (task 6.2).
+//
+// Worker drives the manual TriggerAppUpdate pipeline; Monitor and Store
+// are passed to (*docker.Client).ListApps so the local /apps response
+// includes update-availability and the most recent attempt; SetAutoUpdate
+// is a closure provided by routes.go that knows how to rewrite the compose
+// YAML, persist the db.Service, and redeploy with forcePull=false. Keeping
+// SetAutoUpdate as a callback (rather than threading *db.DB and
+// *registry.Manager into the agent package) keeps imports minimal and lets
+// tests substitute a recorder.
+//
+// Any field may be nil; methods that need a missing dependency surface
+// errAppOpsNotWired so callers can detect a mis-wired process.
+type LocalAppOps struct {
+	Worker        *docker.AutoUpdateWorker
+	Monitor       *docker.ImageUpdateMonitor
+	Store         db.AppUpdateStore
+	SetAutoUpdate func(ctx context.Context, app string, enabled bool) error
+}
 
 // LocalClient wraps the docker.Client to implement the AgentClient interface
 // for the local Docker instance.
 type LocalClient struct {
 	dockerClient *docker.Client
+
+	// appOpsMu guards appOps so WireAppOps can be called concurrently with
+	// in-flight RPCs (e.g. an HTTP test that wires the deps after starting
+	// a background request). Reads in the hot paths (ListApps, etc.) take
+	// the read lock and snapshot the struct; writes in WireAppOps take the
+	// write lock.
+	appOpsMu sync.RWMutex
+	appOps   LocalAppOps
 }
 
 // NewLocalClient creates a new LocalClient wrapping the provided docker.Client.
+//
+// The auto-image-update operations (ListApps, ListAppUpdates, GetAppUpdate,
+// TriggerAppUpdate, SetAppAutoUpdate) return errAppOpsNotWired until
+// WireAppOps is called with the matching dependencies, so the AgentClient
+// interface stays satisfied even before routes.go has constructed the
+// worker, store, and registry plumbing.
 func NewLocalClient(client *docker.Client) *LocalClient {
 	return &LocalClient{
 		dockerClient: client,
 	}
+}
+
+// WireAppOps injects the auto-image-update dependencies into a previously
+// constructed LocalClient. It is called from routes.go after the
+// AutoUpdateWorker, ImageUpdateMonitor, AppUpdateStore, and the registry
+// manager have been wired so the LocalClient.* app methods can delegate to
+// them. Calling WireAppOps multiple times overwrites the previous
+// configuration; passing a zero-value LocalAppOps effectively un-wires the
+// app methods and they revert to errAppOpsNotWired.
+func (c *LocalClient) WireAppOps(ops LocalAppOps) {
+	c.appOpsMu.Lock()
+	defer c.appOpsMu.Unlock()
+	c.appOps = ops
+}
+
+// snapshotAppOps returns a copy of the wired app ops so callers can read
+// fields without holding the lock for the duration of a Docker RPC. The
+// LocalAppOps fields are pointers / interfaces / closures, so the copy is
+// cheap and safe.
+func (c *LocalClient) snapshotAppOps() LocalAppOps {
+	c.appOpsMu.RLock()
+	defer c.appOpsMu.RUnlock()
+	return c.appOps
 }
 
 // Container operations
@@ -54,6 +116,10 @@ func (c *LocalClient) RemoveContainer(ctx context.Context, id string, force bool
 
 func (c *LocalClient) EditContainer(ctx context.Context, id string, req docker.ContainerEditRequest) (*docker.ContainerDetail, error) {
 	return c.dockerClient.EditContainer(ctx, id, req)
+}
+
+func (c *LocalClient) UpdateContainerImage(ctx context.Context, id string, registryAuth string) (*docker.ContainerDetail, error) {
+	return c.dockerClient.UpdateContainerImage(ctx, id, registryAuth)
 }
 
 func (c *LocalClient) GetContainerStats(ctx context.Context, id string) (*docker.ContainerStats, error) {
@@ -133,6 +199,151 @@ func (c *LocalClient) CheckImageUpdate(ctx context.Context, image string) (*dock
 
 func (c *LocalClient) ForcePullImage(ctx context.Context, image, registryAuth string) error {
 	return c.dockerClient.ForcePullImage(ctx, image, registryAuth)
+}
+
+// App auto-update operations
+//
+// The methods below satisfy the AgentClient interface for the local
+// instance. They delegate to the dependencies wired by WireAppOps:
+//
+//   - ListApps    → dockerClient.ListApps(ctx, monitor, store)
+//   - ListAppUpdates / GetAppUpdate → store
+//   - TriggerAppUpdate → worker.TriggerApp (with bypassCooldown=true and
+//     bypassWindow=true, matching the manual-trigger semantics of POST
+//     /apps/:name/update). The implementation kicks the pipeline off in a
+//     goroutine and polls the store for the new attempt id, mirroring the
+//     handler-level pattern so callers (the instance-scoped handler for
+//     remote instances and tests that route through the AgentClient
+//     interface) get a quick response with the attempt id rather than
+//     blocking on the full pull → recreate → verify pipeline.
+//   - SetAppAutoUpdate → SetAutoUpdate callback (a closure provided by
+//     routes.go that performs the compose-rewrite + redeploy).
+//
+// Methods return errAppOpsNotWired when the corresponding dependency is
+// nil, which lets test setups partially wire the LocalClient and lets the
+// production process surface a clear error instead of panicking.
+var errAppOpsNotWired = errors.New("local app auto-update not wired")
+
+func (c *LocalClient) ListApps(ctx context.Context) ([]docker.AppSummary, error) {
+	ops := c.snapshotAppOps()
+	if c.dockerClient == nil {
+		return nil, errAppOpsNotWired
+	}
+	apps, err := c.dockerClient.ListApps(ctx, ops.Monitor, ops.Store)
+	if err != nil {
+		return nil, err
+	}
+	if apps == nil {
+		apps = []docker.AppSummary{}
+	}
+	for i := range apps {
+		apps[i].InstanceID = "local"
+	}
+	return apps, nil
+}
+
+func (c *LocalClient) ListAppUpdates(ctx context.Context, app string, limit int) ([]db.AppUpdateRecord, error) {
+	ops := c.snapshotAppOps()
+	if ops.Store == nil {
+		return nil, errAppOpsNotWired
+	}
+	recs, err := ops.Store.ListAppUpdates(app, limit)
+	if err != nil {
+		return nil, err
+	}
+	if recs == nil {
+		recs = []db.AppUpdateRecord{}
+	}
+	return recs, nil
+}
+
+func (c *LocalClient) GetAppUpdate(ctx context.Context, attemptID string) (*db.AppUpdateRecord, error) {
+	ops := c.snapshotAppOps()
+	if ops.Store == nil {
+		return nil, errAppOpsNotWired
+	}
+	return ops.Store.GetAppUpdate(attemptID)
+}
+
+// TriggerAppUpdate runs the manual auto-update pipeline for one app via the
+// wired AutoUpdateWorker. It mirrors POST /apps/:name/update:
+//
+//  1. Snapshot the latest attempt id so a new record can be detected.
+//  2. Spawn worker.TriggerApp in a goroutine with bypassCooldown=true and
+//     bypassWindow=true, since this is a manual override (R6.1).
+//  3. Poll the store every 25ms for up to 5 seconds for a new attempt id.
+//     The first stage event ("pulling") is persisted near the top of the
+//     pipeline so the new id is normally available within a few ms; the
+//     5-second cap is a safety net for slow disks or contention.
+//  4. Return the new attempt id, or surface the worker error if it
+//     finished before the polling loop saw a new record.
+//
+// The pipeline goroutine uses context.Background() so it outlives the
+// caller's ctx — the worker's own Stop() path is the cancellation source.
+// docker.ErrUpdateAlreadyRunning is bubbled up verbatim so the
+// instance-scoped handler can map it to HTTP 409.
+func (c *LocalClient) TriggerAppUpdate(ctx context.Context, app string) (string, error) {
+	ops := c.snapshotAppOps()
+	if ops.Worker == nil || ops.Store == nil {
+		return "", errAppOpsNotWired
+	}
+	if app == "" {
+		return "", fmt.Errorf("trigger app update: empty app")
+	}
+
+	var prevAttempt string
+	if recs, err := ops.Store.ListAppUpdates(app, 1); err == nil && len(recs) > 0 {
+		prevAttempt = recs[0].AttemptID
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- ops.Worker.TriggerApp(context.Background(), app, true, true, "user:agent")
+	}()
+
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-errCh:
+			if err != nil {
+				// Bubble up the worker error verbatim so callers can match
+				// docker.ErrUpdateAlreadyRunning by substring.
+				return "", err
+			}
+			if recs, lerr := ops.Store.ListAppUpdates(app, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+				return recs[0].AttemptID, nil
+			}
+			// TriggerApp returned without error but produced no new record
+			// (cooldown / window skipped despite bypass=true, or the
+			// pipeline short-circuited before its first save). Treat as
+			// success with an empty attempt id so callers can distinguish
+			// from the "in flight" case.
+			return "", nil
+		case <-ticker.C:
+			if recs, lerr := ops.Store.ListAppUpdates(app, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+				return recs[0].AttemptID, nil
+			}
+		case <-timeout.C:
+			if recs, lerr := ops.Store.ListAppUpdates(app, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+				return recs[0].AttemptID, nil
+			}
+			return "", fmt.Errorf("trigger did not produce a record in time")
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+}
+
+func (c *LocalClient) SetAppAutoUpdate(ctx context.Context, app string, enabled bool) error {
+	ops := c.snapshotAppOps()
+	if ops.SetAutoUpdate == nil {
+		return errAppOpsNotWired
+	}
+	return ops.SetAutoUpdate(ctx, app, enabled)
 }
 
 // Host operations

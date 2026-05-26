@@ -226,6 +226,17 @@ func (m *Manager) ListInstances() ([]db.Instance, error) {
 	return m.db.ListInstances()
 }
 
+// WireLocalAppOps injects the auto-image-update dependencies into the
+// manager's LocalClient. It is a thin pass-through to (*LocalClient).WireAppOps
+// so callers (routes.go) do not need to reach into the manager's internals.
+// Calling this with a zero-value LocalAppOps un-wires the app methods.
+func (m *Manager) WireLocalAppOps(ops LocalAppOps) {
+	if m == nil || m.local == nil {
+		return
+	}
+	m.local.WireAppOps(ops)
+}
+
 // Close shuts down all active edge connections.
 func (m *Manager) Close() {
 	m.mu.Lock()

@@ -116,6 +116,7 @@ func (c *Client) ListContainersWithLabel(ctx context.Context, label string) ([]C
 			State:   string(ctr.State),
 			Ports:   ctr.Ports,
 			Created: ctr.Created,
+			Labels:  ctr.Labels,
 		}
 	}
 	return containers, nil

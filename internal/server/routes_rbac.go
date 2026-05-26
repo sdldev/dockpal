@@ -23,6 +23,10 @@ func (r *roleRouterWrapper) PUT(path string, handlers ...gin.HandlerFunc) gin.IR
 	return r.operatorGroup.PUT(path, handlers...)
 }
 
+func (r *roleRouterWrapper) PATCH(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
+	return r.operatorGroup.PATCH(path, handlers...)
+}
+
 func (r *roleRouterWrapper) DELETE(path string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	return r.operatorGroup.DELETE(path, handlers...)
 }

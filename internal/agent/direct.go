@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"nhooyr.io/websocket"
 )
@@ -196,6 +197,25 @@ func (c *DirectClient) EditContainer(ctx context.Context, id string, req docker.
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
+	return &detail, nil
+}
+
+// UpdateContainerImage force-pulls the container's current image and recreates it.
+func (c *DirectClient) UpdateContainerImage(ctx context.Context, id string, registryAuth string) (*docker.ContainerDetail, error) {
+	req, err := c.makeRequest(ctx, "POST", "/agent/docker/containers/"+id+"/update-image", map[string]string{"auth": registryAuth}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var detail docker.ContainerDetail
+	if err := json.Unmarshal(body, &detail); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
 	return &detail, nil
 }
 
@@ -442,6 +462,152 @@ func (c *DirectClient) ForcePullImage(ctx context.Context, image, registryAuth s
 
 	_, err = c.doRequest(req)
 	return err
+}
+
+// App auto-update operations
+//
+// The remote agent's matching endpoints land in task 6.4. The bodies below
+// follow the same shape as DeployCompose and other JSON endpoints so the
+// agent-side handler can reuse the standard parse-and-route plumbing.
+
+// ListApps returns app summaries from the remote agent.
+func (c *DirectClient) ListApps(ctx context.Context) ([]docker.AppSummary, error) {
+	req, err := c.makeRequest(ctx, "GET", "/agent/docker/apps", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var apps []docker.AppSummary
+	if err := json.Unmarshal(body, &apps); err != nil {
+		return nil, fmt.Errorf("failed to decode apps: %w", err)
+	}
+	return apps, nil
+}
+
+// ListAppUpdates returns App_Update_Records for one app on the remote agent.
+func (c *DirectClient) ListAppUpdates(ctx context.Context, app string, limit int) ([]db.AppUpdateRecord, error) {
+	query := map[string]string{}
+	if limit > 0 {
+		query["limit"] = fmt.Sprintf("%d", limit)
+	}
+	req, err := c.makeRequest(ctx, "GET", "/agent/docker/apps/"+app+"/updates", query, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	var recs []db.AppUpdateRecord
+	if err := json.Unmarshal(body, &recs); err != nil {
+		return nil, fmt.Errorf("failed to decode app updates: %w", err)
+	}
+	return recs, nil
+}
+
+// GetAppUpdate fetches one App_Update_Record by attempt id from the remote agent.
+// Returns (nil, nil) when the record does not exist.
+func (c *DirectClient) GetAppUpdate(ctx context.Context, attemptID string) (*db.AppUpdateRecord, error) {
+	req, err := c.makeRequest(ctx, "GET", "/agent/docker/apps/updates/"+attemptID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var rec db.AppUpdateRecord
+	if err := json.Unmarshal(body, &rec); err != nil {
+		return nil, fmt.Errorf("failed to decode record: %w", err)
+	}
+	return &rec, nil
+}
+
+// triggerAppRequest is the request body for triggering a manual app update.
+type triggerAppRequest struct {
+	App string `json:"app"`
+}
+
+// triggerAppResponse is the response from triggering a manual app update.
+type triggerAppResponse struct {
+	AttemptID string `json:"attempt_id"`
+}
+
+// TriggerAppUpdate runs the manual auto-update pipeline on the remote agent.
+func (c *DirectClient) TriggerAppUpdate(ctx context.Context, app string) (string, error) {
+	bodyBytes, err := json.Marshal(triggerAppRequest{App: app})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := c.makeRequest(ctx, "POST", "/agent/docker/apps/"+app+"/update", nil, strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return "", err
+	}
+
+	respBody, err := c.doRequest(req)
+	if err != nil {
+		return "", err
+	}
+
+	var resp triggerAppResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+	return resp.AttemptID, nil
+}
+
+// setAutoUpdateRequest is the request body for toggling the auto-update label.
+type setAutoUpdateRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetAppAutoUpdate toggles the dockpal.auto-update label on a remote app.
+func (c *DirectClient) SetAppAutoUpdate(ctx context.Context, app string, enabled bool) error {
+	bodyBytes, err := json.Marshal(setAutoUpdateRequest{Enabled: enabled})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := c.makeRequest(ctx, "PATCH", "/agent/docker/apps/"+app+"/auto-update", nil, strings.NewReader(string(bodyBytes)))
+	if err != nil {
+		return err
+	}
+
+	_, err = c.doRequest(req)
+	return err
+}
+
+// StreamAppUpdatesURL builds the SSE proxy URL for the remote agent's
+// /apps/updates/stream endpoint and returns the URL plus the bearer token
+// the caller must add to the request. The handler in the edge process uses
+// this to set up an http.Client GET and copy the response body to its own
+// SSE response writer.
+func (c *DirectClient) StreamAppUpdatesURL() (string, string) {
+	return c.baseURL + "/agent/docker/apps/updates/stream", c.authToken
 }
 
 // Host operations

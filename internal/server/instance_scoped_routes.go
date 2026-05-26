@@ -3,11 +3,16 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +39,7 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.POST("/containers/:id/restart", RequireRole(auth.RoleOperator), handleInstanceRestartContainer)
 	g.DELETE("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceRemoveContainer)
 	g.PUT("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceEditContainer)
+	g.POST("/containers/:id/update-image", RequireRole(auth.RoleOperator), handleInstanceUpdateContainerImage)
 	g.GET("/containers/:id/stats", RequireRole(auth.RoleViewer), handleInstanceContainerStats)
 	g.GET("/containers/:id/logs", RequireRole(auth.RoleViewer), handleInstanceContainerLogs)
 
@@ -71,6 +77,18 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.PUT("/registries/:id", RequireRole(auth.RoleOperator), handleInstanceUpdateRegistry)
 	g.DELETE("/registries/:id", RequireRole(auth.RoleOperator), handleInstanceDeleteRegistry)
 	g.POST("/registries/:id/test", RequireRole(auth.RoleOperator), handleInstanceTestRegistry)
+
+	// App auto-update routes (auto-image-update spec, task 5.4).
+	// Mirror the local /apps/* endpoints: viewers can list and inspect,
+	// operators can trigger updates and toggle the auto-update label.
+	// The SSE stream is viewer-level and proxies the agent's stream
+	// endpoint when running against a remote instance.
+	g.GET("/apps", RequireRole(auth.RoleViewer), handleInstanceListApps)
+	g.GET("/apps/:name/updates", RequireRole(auth.RoleViewer), handleInstanceListAppUpdates)
+	g.GET("/apps/:name/updates/:attemptID", RequireRole(auth.RoleViewer), handleInstanceGetAppUpdate)
+	g.POST("/apps/:name/update", RequireRole(auth.RoleOperator), handleInstanceTriggerAppUpdate)
+	g.PATCH("/apps/:name/auto-update", RequireRole(auth.RoleOperator), handleInstanceSetAppAutoUpdate)
+	g.GET("/apps/updates/stream", RequireRole(auth.RoleViewer), handleInstanceAppUpdatesStream)
 }
 
 // handleInstanceListContainers lists all containers for the instance.
@@ -282,6 +300,49 @@ func handleInstanceEditContainer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// handleInstanceUpdateContainerImage force-pulls the container's current image
+// and recreates the container with its existing config.
+func handleInstanceUpdateContainerImage(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	instanceID := c.MustGet("instance_id").(string)
+	containerID := c.Param("id")
+
+	detail, err := client.InspectContainer(c.Request.Context(), containerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+		return
+	}
+	if isProtectedDockpalAgentContainer(detail) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be recreated from Dockpal", "protected": true})
+		return
+	}
+	if strings.TrimSpace(detail.Image) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "container has no image reference"})
+		return
+	}
+
+	registryMgr := getRegistryManager(c)
+	authHeader := ""
+	if registryMgr != nil {
+		authHeader, _ = registryMgr.GetAuthHeader(detail.Image)
+	}
+
+	updated, err := client.UpdateContainerImage(c.Request.Context(), containerID, authHeader)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update container image for %s on instance %s: %v", containerID, instanceID, err)})
+		return
+	}
+	markProtectedContainerDetail(updated)
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":       "updated",
+		"instance":     instanceID,
+		"container":    updated,
+		"recreated":    true,
+		"image_pulled": detail.Image,
+	})
 }
 
 // handleInstanceContainerStats returns container statistics.
@@ -1498,3 +1559,509 @@ func handleInstanceTestRegistry(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+// =============================================================================
+// App auto-update handlers (auto-image-update spec, task 5.4).
+// =============================================================================
+//
+// These mirror the local /apps endpoints in routes.go but route through the
+// instance prefix /instances/:instance_id/apps/... When the instance is
+// "local" the handlers reuse the in-process docker layer, database, worker,
+// and feed via the package-level globals wired by RegisterRoutes; for other
+// instances they delegate to the AgentClient.
+
+// handleInstanceListApps returns the AppSummary slice for one instance.
+//
+// For "local" the docker.Client.ListApps fast path is used so the response
+// includes ImageUpdateMonitor data and the latest update record per app —
+// matching GET /apps. For remote instances the agent's matching endpoint
+// (added in task 6.4) is called and the per-summary InstanceID is stamped
+// here so the UI can route subsequent requests without an extra lookup.
+func handleInstanceListApps(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+
+	if instanceID == "local" {
+		if globalDockerClient == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "docker client not configured"})
+			return
+		}
+		database := getDatabase(c)
+		apps, err := globalDockerClient.ListApps(c.Request.Context(), globalImageUpdateMonitor, database)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		for i := range apps {
+			apps[i].InstanceID = "local"
+		}
+		c.JSON(http.StatusOK, apps)
+		return
+	}
+
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	apps, err := client.ListApps(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list apps on instance %s: %v", instanceID, err)})
+		return
+	}
+	if apps == nil {
+		apps = []docker.AppSummary{}
+	}
+	for i := range apps {
+		apps[i].InstanceID = instanceID
+	}
+	c.JSON(http.StatusOK, apps)
+}
+
+// handleInstanceListAppUpdates returns the App_Update_Records for one app
+// on one instance. For "local" the in-process database is queried directly;
+// for remote instances the agent client method is used. The optional `limit`
+// query param is parsed and clamped (1..1000) before delegation.
+func handleInstanceListAppUpdates(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing app name"})
+		return
+	}
+
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			limit = n
+		}
+	}
+
+	if instanceID == "local" {
+		database := getDatabase(c)
+		if database == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not available"})
+			return
+		}
+		recs, err := database.ListAppUpdates(name, limit)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		if recs == nil {
+			recs = []db.AppUpdateRecord{}
+		}
+		c.JSON(http.StatusOK, recs)
+		return
+	}
+
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	recs, err := client.ListAppUpdates(c.Request.Context(), name, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list app updates on instance %s: %v", instanceID, err)})
+		return
+	}
+	if recs == nil {
+		recs = []db.AppUpdateRecord{}
+	}
+	c.JSON(http.StatusOK, recs)
+}
+
+// handleInstanceGetAppUpdate returns one App_Update_Record by attempt id.
+// The handler defensively cross-checks the URL :name against the record's
+// App field so the endpoint cannot be used to enumerate other apps' attempts.
+func handleInstanceGetAppUpdate(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+	attemptID := c.Param("attemptID")
+	name := c.Param("name")
+
+	var rec *db.AppUpdateRecord
+	if instanceID == "local" {
+		database := getDatabase(c)
+		if database == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not available"})
+			return
+		}
+		r, err := database.GetAppUpdate(attemptID)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		rec = r
+	} else {
+		client := c.MustGet("agent_client").(agent.AgentClient)
+		r, err := client.GetAppUpdate(c.Request.Context(), attemptID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get app update on instance %s: %v", instanceID, err)})
+			return
+		}
+		rec = r
+	}
+
+	if rec == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+		return
+	}
+	if name != "" && rec.App != name {
+		c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
+		return
+	}
+	c.JSON(http.StatusOK, rec)
+}
+
+// handleInstanceTriggerAppUpdate runs the manual auto-update pipeline for
+// one app on one instance.
+//
+// For "local" the same async/poll pattern as the /apps/:name/update handler
+// is reused: the worker's TriggerApp runs in a goroutine while the request
+// thread polls the database for a new attempt id. A worker error containing
+// docker.ErrUpdateAlreadyRunning maps to HTTP 409.
+//
+// For remote instances the AgentClient call is synchronous in this layer and
+// returns the attempt id directly; the agent-side handler is responsible for
+// the same async behavior.
+func handleInstanceTriggerAppUpdate(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing app name"})
+		return
+	}
+
+	if instanceID == "local" {
+		if globalAutoUpdateWorker == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "auto-update worker not configured"})
+			return
+		}
+		database := getDatabase(c)
+		if database == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not available"})
+			return
+		}
+
+		// Resolve the actor for the App_Update_Record's `triggered_by` field.
+		username := "user"
+		if v, ok := c.Get("username"); ok {
+			if s, ok := v.(string); ok && s != "" {
+				username = s
+			}
+		}
+		triggeredBy := "user:" + username
+
+		// Audit logging (R8.4): every user-triggered TriggerApp call
+		// records one `app_update_attempted` entry once the response code
+		// is known. The defer reads c.Writer.Status() after the handler
+		// has called c.JSON(...) so the audit `result` reflects the same
+		// outcome the operator saw on the wire. Auto-update cycles do
+		// not pass through this handler and therefore do not emit an
+		// audit entry, matching the user-only scope of R8.4. The wrapping
+		// closure is load-bearing: argument expressions to a deferred
+		// call are evaluated at defer-registration time, but the status
+		// code is only set later by c.JSON, so the read must happen
+		// inside the deferred function body.
+		defer func() {
+			LogAppUpdateAttempt(c, database, globalDockerClient, name, auditAppUpdateResultFor(c.Writer.Status()))
+		}()
+
+		// Snapshot the latest attempt id so we can detect the new record
+		// once the worker has persisted its first stage event.
+		var prevAttempt string
+		if recs, err := database.ListAppUpdates(name, 1); err == nil && len(recs) > 0 {
+			prevAttempt = recs[0].AttemptID
+		}
+
+		// Run the pipeline asynchronously so the HTTP request returns
+		// quickly. Use context.Background() so the pipeline outlives the
+		// request; cancellation comes from the worker's Stop() path.
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- globalAutoUpdateWorker.TriggerApp(context.Background(), name, true, true, triggeredBy)
+		}()
+
+		timeout := time.NewTimer(5 * time.Second)
+		defer timeout.Stop()
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case err := <-errCh:
+				if err != nil && strings.Contains(err.Error(), docker.ErrUpdateAlreadyRunning) {
+					c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
+					return
+				}
+				if err != nil {
+					internalError(c, err)
+					return
+				}
+				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
+					return
+				}
+				c.JSON(http.StatusAccepted, gin.H{"status": "ok"})
+				return
+			case <-ticker.C:
+				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
+					return
+				}
+			case <-timeout.C:
+				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
+					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "trigger did not produce a record in time"})
+				return
+			}
+		}
+	}
+
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	attemptID, err := client.TriggerAppUpdate(c.Request.Context(), name)
+	if err != nil {
+		// The agent layer surfaces "update_already_running" as a regular
+		// error. Map it back to HTTP 409 so the frontend semantics match
+		// the local case.
+		if strings.Contains(err.Error(), docker.ErrUpdateAlreadyRunning) || strings.Contains(err.Error(), "update_already_running") {
+			c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to trigger app update on instance %s: %v", instanceID, err)})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"attempt_id": attemptID})
+}
+
+// handleInstanceSetAppAutoUpdate toggles the dockpal.auto-update label on
+// every service of the project and recreates the containers.
+//
+// For "local" the same logic as PATCH /apps/:name/auto-update is reused:
+// load db.Service, rewrite the compose YAML via docker.SetServiceLabel,
+// persist, then call DeployCompose with forcePull=false. For remote
+// instances the AgentClient method is delegated to.
+func handleInstanceSetAppAutoUpdate(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+	name := c.Param("name")
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing app name"})
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: enabled is required"})
+		return
+	}
+
+	if instanceID == "local" {
+		database := getDatabase(c)
+		if database == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not available"})
+			return
+		}
+		// Locate the db.Service for this app on the local instance. The
+		// project name on running containers (dockpal.project label) matches
+		// db.Service.Name. Services may have been deployed via the
+		// instance-scoped route (InstanceID="local") or the legacy route
+		// (InstanceID="").
+		services, err := database.ListServices()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		var svc *db.Service
+		for i := range services {
+			if services[i].Name == name && (services[i].InstanceID == "" || services[i].InstanceID == "local") {
+				svc = &services[i]
+				break
+			}
+		}
+		if svc == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "app not found"})
+			return
+		}
+		if svc.Compose == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "app has no compose YAML to patch"})
+			return
+		}
+
+		labelValue := "true"
+		if !req.Enabled {
+			labelValue = "" // empty string removes the label
+		}
+		newCompose, err := docker.SetServiceLabel(svc.Compose, "dockpal.auto-update", labelValue)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+
+		// Persist the updated compose body before redeploying so a redeploy
+		// failure does not leave the DB out of sync with the actual
+		// containers.
+		updated := *svc
+		updated.Compose = newCompose
+		if err := database.SaveService(updated); err != nil {
+			internalError(c, err)
+			return
+		}
+
+		client := c.MustGet("agent_client").(agent.AgentClient)
+		registryAuths := getRegistryAuths(globalRegistryManager, newCompose)
+		if err := client.DeployCompose(c.Request.Context(), name, newCompose, registryAuths, false); err != nil {
+			internalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	if err := client.SetAppAutoUpdate(c.Request.Context(), name, req.Enabled); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to set auto-update on instance %s: %v", instanceID, err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// handleInstanceAppUpdatesStream serves the SSE App_Update_Feed for one
+// instance.
+//
+// For "local" we subscribe to globalAppUpdateFeed and write each event as
+// a `data: <json>\n\n` SSE frame, matching GET /apps/updates/stream. For
+// remote DirectClient instances we proxy the agent's stream endpoint via an
+// http.Client with a long timeout, copying the response body to the client
+// in chunks while flushing periodically. EdgeClient instances do not yet
+// support SSE proxying (task 6.4) so we return 501 with a clear message.
+//
+// The handler listens for client disconnect via r.Context().Done() so a
+// browser that closes the EventSource does not leak a goroutine.
+func handleInstanceAppUpdatesStream(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+
+	// Common SSE response headers. X-Accel-Buffering=no disables buffering on
+	// nginx so events arrive at the client promptly.
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	if instanceID == "local" {
+		if globalAppUpdateFeed == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "feed not configured"})
+			return
+		}
+
+		ch, unsubscribe := globalAppUpdateFeed.Subscribe()
+		defer unsubscribe()
+
+		// Flush headers immediately so the client transitions out of
+		// "loading" state even before the first event arrives.
+		c.Writer.Flush()
+
+		ctx := c.Request.Context()
+		for {
+			select {
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				data, err := json.Marshal(ev)
+				if err != nil {
+					continue
+				}
+				if _, err := c.Writer.Write([]byte("data: ")); err != nil {
+					return
+				}
+				if _, err := c.Writer.Write(data); err != nil {
+					return
+				}
+				if _, err := c.Writer.Write([]byte("\n\n")); err != nil {
+					return
+				}
+				c.Writer.Flush()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+
+	// Remote instance: only DirectClient currently exposes the SSE proxy
+	// URL. EdgeClient routes everything through a single WebSocket and would
+	// need a dedicated streaming RPC (task 6.4) — return 501 in that case
+	// so the UI can fall back to polling.
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	direct, ok := client.(*agent.DirectClient)
+	if !ok {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "SSE stream not supported for this instance mode"})
+		return
+	}
+
+	streamURL, token := direct.StreamAppUpdatesURL()
+
+	// Build an http.Client with no timeout — SSE connections must stay open
+	// for the lifetime of the client subscription. The caller's context is
+	// used for cancellation so a browser disconnect aborts the upstream
+	// request promptly.
+	proxyClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: insecureTLSConfig,
+			// No response header timeout — SSE responses take indeterminate
+			// time to send their first byte if no events are queued.
+		},
+	}
+
+	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", streamURL, nil)
+	if err != nil {
+		log.Printf("[ERROR] app updates stream: build request: %v", err)
+		// Headers are already written, so we can only end the response.
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := proxyClient.Do(req)
+	if err != nil {
+		log.Printf("[ERROR] app updates stream: proxy request to %s: %v", instanceID, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("[ERROR] app updates stream: agent %s returned %d", instanceID, resp.StatusCode)
+		return
+	}
+
+	c.Writer.Flush()
+
+	// Copy the upstream body to the client in small chunks, flushing after
+	// each successful read so events are forwarded promptly. We deliberately
+	// avoid io.Copy here because it does not flush, which would buffer
+	// events until the OS write buffer fills.
+	buf := make([]byte, 4096)
+	for {
+		// Bail out as soon as the client disconnects.
+		select {
+		case <-c.Request.Context().Done():
+			return
+		default:
+		}
+
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			if _, werr := c.Writer.Write(buf[:n]); werr != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return
+			}
+			// Network error or context cancellation — just stop forwarding.
+			return
+		}
+	}
+}
+
+// insecureTLSConfig matches the DirectClient's TLS config (self-signed certs
+// are common for self-hosted agents). The proxy reuses it so SSE proxying
+// behaves the same as other DirectClient calls.
+var insecureTLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // matches DirectClient policy

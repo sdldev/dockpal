@@ -17,3 +17,4 @@ dockpal-agent/
 # Binary builds
 dockpal
 dockpal-linux-amd64
+.aider*

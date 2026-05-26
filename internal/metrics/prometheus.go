@@ -159,6 +159,11 @@ func RegisterMetrics(version string) error {
 		buildInfo,
 	)
 
+	// Register auto-update worker metrics (R10.1-R10.3). Kept in their own
+	// file (auto_update.go) to keep this prometheus.go close to the original
+	// container/host/HTTP metric set.
+	registerAutoUpdateMetrics()
+
 	return nil
 }
 

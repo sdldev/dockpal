@@ -16,19 +16,27 @@ type ImageUpdateStatus struct {
 	CheckedAt int64              `json:"checked_at"`
 }
 
+// cycleListener is invoked at the end of every ImageUpdateMonitor.checkAll()
+// cycle with a snapshot of the current cache. Listeners are expected to return
+// quickly; long-running work should be dispatched to a separate goroutine.
+type cycleListener func(updates []ImageUpdateStatus)
+
 // AuthHeaderFunc is reused from compose.go (same signature).
 // Defined here as well to avoid circular dependency issues if compose.go changes.
 
 // ImageUpdateMonitor periodically checks all locally cached Docker images against
 // their respective registries to detect available updates.
 type ImageUpdateMonitor struct {
-	client       *Client
-	getAuth      func(imageRef string) (string, error)
-	ticker       *time.Ticker
-	stop         chan struct{}
-	cache        map[string]*ImageUpdateStatus // key: imageRef
-	cacheMu      sync.RWMutex
+	client        *Client
+	getAuth       func(imageRef string) (string, error)
+	ticker        *time.Ticker
+	stop          chan struct{}
+	cache         map[string]*ImageUpdateStatus // key: imageRef
+	cacheMu       sync.RWMutex
 	checkInterval time.Duration
+
+	listenersMu sync.RWMutex
+	listeners   []cycleListener
 }
 
 // defaultCheckInterval is the default time between background image update checks.
@@ -124,6 +132,52 @@ func (m *ImageUpdateMonitor) checkAll() {
 		}
 		m.cacheMu.Unlock()
 	}
+
+	// Snapshot the cache once and notify all listeners. The cache lock is
+	// released before invoking listeners so a slow listener cannot block
+	// concurrent reads/writes on the cache. Listeners themselves are
+	// iterated under a read lock so AddCycleListener is safe to call
+	// concurrently with a cycle.
+	m.cacheMu.RLock()
+	snapshot := m.snapshotLocked()
+	m.cacheMu.RUnlock()
+
+	m.listenersMu.RLock()
+	listeners := make([]cycleListener, len(m.listeners))
+	copy(listeners, m.listeners)
+	m.listenersMu.RUnlock()
+
+	for _, fn := range listeners {
+		fn(snapshot)
+	}
+}
+
+// snapshotLocked returns a freshly allocated slice containing copies of every
+// ImageUpdateStatus currently in the cache. It assumes the caller already
+// holds m.cacheMu (read or write). Callers receive value copies, so mutating
+// the returned slice cannot affect cached entries.
+func (m *ImageUpdateMonitor) snapshotLocked() []ImageUpdateStatus {
+	out := make([]ImageUpdateStatus, 0, len(m.cache))
+	for _, status := range m.cache {
+		if status == nil {
+			continue
+		}
+		out = append(out, *status)
+	}
+	return out
+}
+
+// AddCycleListener registers a listener that is invoked at the end of every
+// checkAll cycle with a snapshot of the cache. Listeners are called
+// sequentially in registration order, so they should return quickly and
+// dispatch long-running work to their own goroutine.
+func (m *ImageUpdateMonitor) AddCycleListener(fn cycleListener) {
+	if fn == nil {
+		return
+	}
+	m.listenersMu.Lock()
+	m.listeners = append(m.listeners, fn)
+	m.listenersMu.Unlock()
 }
 
 // GetStatus returns the cached update status for an image, or nil if not checked.

@@ -14,6 +14,13 @@ Dockpal.initialState = function() {
     instanceError: '',  // Error message for instance unavailability
     loading: false,
 
+    // Feature flags fetched from /api/config on boot (task 8.2). Default
+    // to true so the UI renders the auto-update toggle and "Update now"
+    // affordances when the config endpoint is unreachable (older
+    // backend) or the network call fails. Set to false when the
+    // operator pinned DOCKPAL_AUTO_UPDATE_ENABLED=false on the server.
+    featureAutoUpdate: true,
+
     // Instance state (Requirements 10.4, 10.5, 12.1)
     instances: [],
     selectedInstance: localStorage.getItem('dockpal_selected_instance') || 'local',
@@ -59,6 +66,9 @@ Dockpal.initialState = function() {
     imagePullName: '',
     imageUpdates: [],
     imageUpdateChecking: false,
+    containerImageUpdateChecking: false,
+    containerImageUpdating: false,
+    containerImageUpdateResult: null,
     imageUpdateLastCheck: null,
 
     domains: [],
@@ -81,7 +91,8 @@ Dockpal.initialState = function() {
       containers: { search: '', state: 'all' },
       templates: { search: '', category: 'all' },
       images: { search: '' },
-      domains: { search: '' }
+      domains: { search: '' },
+      apps: { search: '' }
     },
 
     instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' },
@@ -120,6 +131,7 @@ Dockpal.initialState = function() {
       { id: 'dashboard', label: 'Dashboard', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zm10-2a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1h-4a1 1 0 01-1-1v-5z"/></svg>' },
       { id: 'fleet', label: 'Fleet Dashboard', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>' },
       { type: 'group', label: 'Applications' },
+      { id: 'apps', label: 'Apps', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6a1.125 1.125 0 01-1.125-1.125v-3.75zM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-8.25zM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 01-1.125-1.125v-2.25z"/></svg>' },
       { id: 'deploy', label: 'Deploy', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>' },
       { id: 'templates', label: 'Templates', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>' },
       { type: 'group', label: 'Infrastructure' },
@@ -188,10 +200,22 @@ Dockpal.instances = {
     this.domains = [];
     this.templates = [];
     this.services = [];
+    this.apps = [];
     
+    // The App_Update_Feed is instance-scoped — tear it down before
+    // switching so it reopens against the new instance on next start.
+    if (this.stopFeed) this.stopFeed();
+
     // Reload dashboard data using the same method as auth module
     if (this.loadDashboard) {
       await this.loadDashboard();
+    }
+    // Auto-update affordances are gated on the global feature flag from
+    // /api/config (task 8.2). When the admin disabled the worker we skip
+    // the apps fetch and the SSE subscription on this instance switch.
+    if (this.featureAutoUpdate) {
+      if (this.loadApps) await this.loadApps();
+      if (this.startFeed) this.startFeed();
     }
   },
 

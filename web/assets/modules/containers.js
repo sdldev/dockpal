@@ -43,6 +43,7 @@ Dockpal.containers = {
     this.containerDetailTab = 'overview';
     this.containerEditMode = false;
     this.containerEditSaving = false;
+    this.containerImageUpdateResult = null;
     this.currentPage = 'container-detail';
     this.destroyChart();
     this.startStatsPolling(this.selectedContainer.id);
@@ -57,6 +58,30 @@ Dockpal.containers = {
       const resp = await this.instanceApi('GET', '/containers/' + lookup);
       if (resp && resp.ok) this.selectedContainer = await resp.json();
     }, 500);
+  },
+
+  async refreshContainerDetailNow(id) {
+    const lookup = id || this.selectedContainer?.id || this.selectedContainer?.name;
+    if (!lookup) return;
+    const resp = await this.instanceApi('GET', '/containers/' + lookup);
+    if (resp && resp.ok) this.selectedContainer = await resp.json();
+  },
+
+  containerAppName(c) {
+    const labels = c?.labels || this.containers.find(x => x.id === c?.id || x.name === c?.name)?.labels || {};
+    return labels['dockpal.project'] || labels['com.docker.compose.project'] || '';
+  },
+
+  isManagedAppContainer(c) {
+    return !!this.containerAppName(c);
+  },
+
+  selectedContainerUpdateAvailable() {
+    const imageRef = this.selectedContainer?.image;
+    return !!(
+      this.containerImageUpdateResult?.has_update ||
+      this.getImageUpdateStatus(imageRef)?.result?.has_update
+    );
   },
 
   startStatsPolling(id) {
@@ -127,12 +152,16 @@ Dockpal.containers = {
       return;
     }
     // Use instanceApi for container actions
+    if (action === 'restart') {
+      this.toast('Restarting container. Restart does not pull latest images; use Pull latest & recreate to apply image updates.', 'info', 6000);
+    }
     const resp = await this.instanceApi('POST', '/containers/' + id + '/' + action);
     if (resp && !resp.ok) {
       const data = await resp.json().catch(() => ({}));
       this.toast(data.error || ('Failed to ' + action), 'error', 5000);
     } else {
-      this.toast('Container ' + (labels[action] || action), 'success');
+      const suffix = action === 'restart' ? ' (same image)' : '';
+      this.toast('Container ' + (labels[action] || action) + suffix, 'success');
     }
     await this.loadDashboard();
   },

@@ -90,13 +90,16 @@ type DB struct {
 }
 
 var (
-	bucketUsers      = []byte("users")
-	bucketServices   = []byte("services")
-	bucketDomains    = []byte("domains")
-	bucketRegistries = []byte("registries")
-	bucketInstances  = []byte("instances")
-	bucketAuditLogs  = []byte("audit_logs")
-	bucketWebhooks   = []byte("webhooks")
+	bucketUsers          = []byte("users")
+	bucketServices       = []byte("services")
+	bucketDomains        = []byte("domains")
+	bucketRegistries     = []byte("registries")
+	bucketInstances      = []byte("instances")
+	bucketAuditLogs      = []byte("audit_logs")
+	bucketWebhooks       = []byte("webhooks")
+	bucketAppUpdates              = []byte("app_updates")
+	bucketAppUpdatesByID          = []byte("app_updates_by_id")
+	bucketNotificationWebhooks    = []byte("notification_webhooks")
 )
 
 var (
@@ -115,7 +118,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}

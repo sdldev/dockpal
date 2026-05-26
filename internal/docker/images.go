@@ -162,6 +162,38 @@ func (c *Client) ForcePullImage(ctx context.Context, image string, registryAuth 
 	return nil
 }
 
+// InspectRepoDigest returns the digest portion (after the `@`) of the local
+// image's first non-empty RepoDigests entry. When the local image has no
+// pull history (RepoDigests is empty) it returns ("", nil) so callers can
+// fall back to a tag-based rollback path. When the moby client is nil
+// (e.g. an unconfigured *Client used in tests) it returns ("", nil) without
+// performing an inspect.
+//
+// Used by the AutoUpdateWorker rollback path (task 3.7) to capture the
+// previously-running image digest for a service before the recreate.
+func (c *Client) InspectRepoDigest(ctx context.Context, image string) (string, error) {
+	if c == nil || c.cli == nil {
+		return "", nil
+	}
+	inspect, err := c.cli.ImageInspect(ctx, image)
+	if err != nil {
+		return "", err
+	}
+	if len(inspect.RepoDigests) == 0 {
+		return "", nil
+	}
+	for _, rd := range inspect.RepoDigests {
+		if rd == "" {
+			continue
+		}
+		parts := strings.SplitN(rd, "@", 2)
+		if len(parts) == 2 && parts[1] != "" {
+			return parts[1], nil
+		}
+	}
+	return "", nil
+}
+
 // extractImageDomain extracts the registry domain from an image reference.
 func extractImageDomain(image string) string {
 	parts := strings.SplitN(image, "/", 2)
