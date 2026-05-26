@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `make build-linux-amd64` — cross-compile `dockpal-linux-amd64`.
 - `make test` — run `go test -v ./...`.
 - `make lint` — run `go vet ./...`.
+- `make install-hooks` — install a local `.git/hooks/pre-commit` hook that runs `go vet ./...` and `go test ./...`, aborting commits on failure.
 - `make clean` — remove built binaries and `coverage.out`.
 - `go test ./internal/server -run TestName` — run one test in a package.
 - `go test ./internal/docker -run TestName -count=1` — rerun one test without cache.
@@ -28,6 +29,8 @@ Important environment variables:
 - `DOCKPAL_LOG_PATH` — rotating log path; default is `<data dir>/dockpal.log`.
 - `DOCKPAL_SECRET_PATH` — JWT secret file; default is `<data dir>/.secret`.
 - `JWT_SECRET` — override JWT signing key.
+- `DOCKPAL_BACKUP_INTERVAL` — automatic backup interval; default is `24h`, and `0` disables scheduled backups.
+- `DOCKPAL_BACKUP_RETENTION` — how long automatic backups are retained; default is `168h`, and the scheduler removes older backups after logging backup success/failure.
 - `DOCKPAL_TLS`, `DOCKPAL_TLS_CERT`, `DOCKPAL_TLS_KEY`, `DOCKPAL_TLS_DOMAIN` — TLS/self-signed/ACME configuration.
 - `DOCKPAL_AGENT_IMAGE` — image used when generating or running remote DockPal Agent install commands.
 
@@ -46,6 +49,8 @@ The backend is organized by domain under `internal/`:
 - `internal/git`, `internal/ssh`, `internal/installer`, `internal/traefik`, `internal/tunnel`, `internal/update`, `internal/logging`, and `internal/validator` support deploy, remote install, reverse proxy, Cloudflare Tunnel, self-update, logs, and input validation flows.
 
 The API has both legacy local routes like `/api/containers` and instance-scoped routes under `/api/instances/:instance_id/...`. New multi-instance features should usually use the instance-scoped path and the `AgentClient` interface rather than calling the local Docker client directly. `InstanceMiddleware` resolves the instance, sets `agent_client`, `instance_id`, `database`, and `registry_manager` in Gin context, and maps offline agents to 503.
+
+Operational endpoints include Prometheus-compatible metrics at `/api/metrics`, comprehensive health at `/health` or `/healthz`, liveness at `/health/live` or `/livez`, and readiness at `/health/ready` or `/readyz`.
 
 RBAC is layered in `RegisterRoutes`: unauthenticated login and webhook trigger routes are registered first, protected routes use `AuthMiddleware`, and viewer/operator/admin route groups enforce role capabilities. WebSocket routes that cannot send authorization headers pass JWTs as query parameters and still validate Origin against the request host.
 
