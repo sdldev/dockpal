@@ -1617,6 +1617,14 @@ func handleInstanceListApps(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	apps, err := client.ListApps(c.Request.Context())
 	if err != nil {
+		// Direct/edge agents deployed before the App routes were added return a
+		// route-level 404 for /agent/docker/apps. Treat that as "apps unsupported"
+		// rather than failing the Containers page, which still relies on older
+		// container endpoints that may be healthy on production instances.
+		if strings.Contains(err.Error(), "status 404") {
+			c.JSON(http.StatusOK, []docker.AppSummary{})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list apps on instance %s: %v", instanceID, err)})
 		return
 	}
