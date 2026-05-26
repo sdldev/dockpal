@@ -107,14 +107,7 @@ Dockpal.auth = {
     localStorage.removeItem('dockpal_token');
     this.token = '';
     this.view = 'login';
-    this.destroyChart();
-    if (this.statsInterval) clearInterval(this.statsInterval);
-    if (this.sysResourceInterval) clearInterval(this.sysResourceInterval);
-    if (Dockpal._charts.cpu) { Dockpal._charts.cpu.destroy(); Dockpal._charts.cpu = null; }
-    if (Dockpal._charts.ram) { Dockpal._charts.ram.destroy(); Dockpal._charts.ram = null; }
-    // Tear down the App_Update_Feed so the EventSource doesn't reconnect
-    // against an unauthenticated session.
-    if (this.stopFeed) this.stopFeed();
+    this.cleanupSessionResources();
   },
 
   // Load all instances from the server (Requirement 10.5)
@@ -136,7 +129,7 @@ Dockpal.auth = {
 
   async api(method, path, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + this.token } };
-    if (body) opts.body = JSON.stringify(body);
+    if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
     const resp = await fetch(path, opts);
     if (resp.status === 401) { this.logout(); return null; }
     return resp;

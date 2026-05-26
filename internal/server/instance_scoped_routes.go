@@ -51,6 +51,7 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 
 	// Image routes
 	g.GET("/images", RequireRole(auth.RoleViewer), handleInstanceListImages)
+	g.GET("/images/updates", RequireRole(auth.RoleViewer), handleInstanceListImageUpdates)
 	g.POST("/images/pull", RequireRole(auth.RoleOperator), handleInstancePullImage)
 	g.POST("/images/check", RequireRole(auth.RoleViewer), handleInstanceCheckImage)
 	g.POST("/images/pull-force", RequireRole(auth.RoleOperator), handleInstanceForcePullImage)
@@ -919,6 +920,21 @@ func handleInstanceListImages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, images)
+}
+
+// handleInstanceListImageUpdates returns cached image update statuses for the
+// selected instance. Today the in-process monitor only tracks the local Docker
+// host; remote instances can still run on-demand /images/check calls and get an
+// empty cache here instead of a route-level 404 that the frontend would surface
+// as "Instance unavailable".
+func handleInstanceListImageUpdates(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+	if instanceID != "local" || globalImageUpdateMonitor == nil {
+		c.JSON(http.StatusOK, gin.H{"updates": []docker.ImageUpdateStatus{}})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"updates": globalImageUpdateMonitor.GetAllStatuses()})
 }
 
 // handleInstancePullImage pulls an image to the instance.

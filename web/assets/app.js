@@ -13,7 +13,7 @@ function dockpalApp() {
   const target = D.initialState();
 
   // Merge plain methods from each module (preserves getters via descriptors).
-  const modules = [D.ui, D.auth, D.charts, D.computed, D.dashboard,
+  const modules = [D.ui, D.lifecycle, D.auth, D.charts, D.computed, D.dashboard,
                    D.containers, D.templates, D.services, D.images,
                    D.domains, D.files, D.updateBanner, D.registry, D.instances, D.fleet, D.profile, D.imageUpdates, D.apps];
   for (const mod of modules) {

@@ -32,6 +32,7 @@ Dockpal.initialState = function() {
     containerStats: null,
     logs: [],
     statsInterval: null,
+    containerLogSocket: null,
     statsHistory: { cpu: [], mem: [], rx: [], tx: [], labels: [] },
     containerEditMode: false,
     containerEditSaving: false,
@@ -126,6 +127,9 @@ Dockpal.initialState = function() {
     bulkDeployForm: { name: '', compose: '', targets: [] },
     bulkDeploying: false,
     bulkDeployLogs: [],
+    fleetInterval: null,
+    templateDeploySocket: null,
+    installLogSocket: null,
 
     navItems: [
       { id: 'dashboard', label: 'Dashboard', icon: '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zm10-2a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1h-4a1 1 0 01-1-1v-5z"/></svg>' },
@@ -168,8 +172,11 @@ Dockpal.instances = {
       resp = await Dockpal.auth.api(method, instancePath, body);
     }
     
-    // Handle instance offline/unreachable errors (Requirement 12.11)
-    if (resp && (resp.status === 503 || resp.status === 404)) {
+    // Handle instance offline/unreachable errors (Requirement 12.11). A plain
+    // route 404 is not an instance health signal; it usually means a missing
+    // endpoint. Do not toast "Instance unavailable" for those because it hides
+    // the real API/route mismatch.
+    if (resp && (resp.status === 503 || (resp.status === 404 && resp.headers.get('content-type')?.includes('application/json')))) {
       const errorData = await resp.json().catch(() => ({}));
       const errorMsg = errorData.error || 'Instance unavailable';
       
@@ -295,11 +302,13 @@ Dockpal.instances = {
   startSSHInstall(instanceId) {
     this.instanceForm.installLogs = [];
     this.instanceForm.installLogs.push('[Dockpal] Connecting to logs channel...');
+    if (this.closeWebSocket) this.closeWebSocket('installLogSocket');
     
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/instances/${instanceId}/install/logs`;
     
     const ws = new WebSocket(wsUrl);
+    this.installLogSocket = ws;
     
     ws.onmessage = (event) => {
       this.instanceForm.installLogs.push(event.data);
@@ -316,6 +325,7 @@ Dockpal.instances = {
     };
     
     ws.onclose = () => {
+      if (this.installLogSocket === ws) this.installLogSocket = null;
       this.instanceForm.installLogs.push('[Dockpal] Disconnected from logs channel.');
       this.instanceForm.installing = false;
       this.loadInstances();

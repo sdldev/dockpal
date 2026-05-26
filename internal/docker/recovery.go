@@ -109,17 +109,16 @@ func (c *Client) ListContainersWithLabel(ctx context.Context, label string) ([]C
 			}
 		}
 		containers[i] = ContainerInfo{
-			ID:      ctr.ID[:12],
-			Name:    name,
-			Image:   ctr.Image,
-			Status:  ctr.Status,
-			State:   string(ctr.State),
-			Ports:   ctr.Ports,
-			Created: ctr.Created,
-			Labels:  ctr.Labels,
+			ID:            ctr.ID[:12],
+			Name:          name,
+			Image:         ctr.Image,
+			Status:        ctr.Status,
+			State:         string(ctr.State),
+			Ports:         ctr.Ports,
+			Created:       ctr.Created,
+			RestartPolicy: "",
+			Labels:        ctr.Labels,
 		}
 	}
 	return containers, nil
 }
-
-

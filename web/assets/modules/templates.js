@@ -108,8 +108,10 @@ Dockpal.templates = {
     const { deploy_id } = await resp.json();
 
     // Use instance-scoped WebSocket path (Requirement 12.8)
+    if (this.closeWebSocket) this.closeWebSocket('templateDeploySocket');
     const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(wsProto + '//' + location.host + '/api/instances/' + this.selectedInstance + '/deploy/stream/' + deploy_id + '?token=' + this.token);
+    this.templateDeploySocket = ws;
 
     ws.onmessage = (e) => {
       const event = JSON.parse(e.data);
@@ -132,6 +134,9 @@ Dockpal.templates = {
       }
     };
     ws.onerror = () => { tc.error = 'Connection lost'; tc.deploying = false; };
-    ws.onclose = () => { if (tc.deploying) tc.deploying = false; };
+    ws.onclose = () => {
+      if (this.templateDeploySocket === ws) this.templateDeploySocket = null;
+      if (tc.deploying) tc.deploying = false;
+    };
   },
 };

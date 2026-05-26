@@ -33,6 +33,7 @@ Dockpal.containers = {
   },
 
   async selectContainer(c) {
+    this.cleanupContainerDetail();
     // Use instanceApi for container operations
     const resp = await this.instanceApi('GET', '/containers/' + c.id);
     if (!resp || !resp.ok) return;
@@ -45,7 +46,6 @@ Dockpal.containers = {
     this.containerEditSaving = false;
     this.containerImageUpdateResult = null;
     this.currentPage = 'container-detail';
-    this.destroyChart();
     this.startStatsPolling(this.selectedContainer.id);
     this.startLogStream(this.selectedContainer.id);
   },
@@ -84,6 +84,66 @@ Dockpal.containers = {
     );
   },
 
+  restartPolicyLabel(c) {
+    const policy = c?.restart_policy || 'no';
+    return policy === '' ? 'no' : policy;
+  },
+
+  isRestartPolicyUnsafe(c) {
+    const policy = this.restartPolicyLabel(c);
+    return policy === 'no' || policy === 'on-failure';
+  },
+
+  containersWithoutAutoStart() {
+    return (this.containers || []).filter(c => !this.isProtectedContainer(c) && this.isRestartPolicyUnsafe(c));
+  },
+
+  async setContainerRestartPolicy(container, policy = 'unless-stopped') {
+    if (!container?.id) return;
+    if (this.isProtectedContainer(container)) {
+      this.toast(container.protection_reason || 'Protected container cannot be changed here', 'warning', 5000);
+      return;
+    }
+    const resp = await this.instanceApi('PUT', '/containers/' + container.id, { restart_policy: policy });
+    if (!resp || !resp.ok) {
+      const data = resp ? await resp.json().catch(() => ({})) : {};
+      this.toast(data.error || 'Failed to update restart policy', 'error', 5000);
+      return;
+    }
+    const result = await resp.json();
+    this.toast('Restart policy set to ' + policy, 'success');
+    if (result.container) {
+      if (this.selectedContainer?.id === container.id || this.selectedContainer?.name === container.name) {
+        this.selectedContainer = result.container;
+      }
+    }
+    await this.loadDashboard();
+  },
+
+  setAllUnsafeRestartPolicies() {
+    const targets = this.containersWithoutAutoStart();
+    if (targets.length === 0) {
+      this.toast('All visible containers already have reboot-safe restart policies', 'success');
+      return;
+    }
+    this.showConfirm({
+      title: 'Enable auto-start after reboot',
+      message: 'Set restart policy to unless-stopped for ' + targets.length + ' container(s). Containers manually stopped later will remain stopped after reboot.',
+      confirmText: 'Set unless-stopped',
+      danger: false,
+      onConfirm: async () => {
+        let ok = 0;
+        for (const c of targets) {
+          const resp = await this.instanceApi('PUT', '/containers/' + c.id, { restart_policy: 'unless-stopped' });
+          if (resp && resp.ok) ok++;
+        }
+        this.toast('Updated restart policy for ' + ok + '/' + targets.length + ' container(s)', ok === targets.length ? 'success' : 'warning', 6000);
+        await this.loadDashboard();
+        if (this.selectedContainer) await this.refreshContainerDetailNow(this.selectedContainer.id || this.selectedContainer.name);
+      }
+    });
+  },
+
   startStatsPolling(id) {
     if (this.statsInterval) clearInterval(this.statsInterval);
     this.statsHistory = { cpu: [], mem: [], rx: [], tx: [], labels: [] };
@@ -109,15 +169,20 @@ Dockpal.containers = {
 
   async startLogStream(id) {
     try {
+      this.closeContainerLogStream();
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       // Use instance-scoped WebSocket path (Requirement 12.8)
       const wsUrl = wsProto + '//' + location.host + '/api/instances/' + this.selectedInstance + '/containers/' + id + '/logs?token=' + this.token;
       const ws = new WebSocket(wsUrl);
+      this.containerLogSocket = ws;
       ws.onmessage = (e) => {
         const lines = e.data.split('\n').filter(l => l.trim());
         this.logs = [...this.logs.slice(-200), ...lines];
       };
       ws.onerror = () => {};
+      ws.onclose = () => {
+        if (this.containerLogSocket === ws) this.containerLogSocket = null;
+      };
     } catch (e) {}
   },
 

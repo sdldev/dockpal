@@ -45,6 +45,7 @@ type ContainerInfo struct {
 	State            string                  `json:"state"`
 	Ports            []container.PortSummary `json:"ports"`
 	Created          int64                   `json:"created"`
+	RestartPolicy    string                  `json:"restart_policy,omitempty"`
 	Labels           map[string]string       `json:"labels,omitempty"`
 	Protected        bool                    `json:"protected,omitempty"`
 	ProtectionReason string                  `json:"protection_reason,omitempty"`
@@ -66,15 +67,20 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 		if len(ctr.Names) > 0 {
 			name = trimContainerName(ctr.Names[0])
 		}
+		restartPolicy := ""
+		if inspect, err := c.cli.ContainerInspect(ctx, ctr.ID, client.ContainerInspectOptions{}); err == nil && inspect.Container.HostConfig != nil {
+			restartPolicy = string(inspect.Container.HostConfig.RestartPolicy.Name)
+		}
 		containers[i] = ContainerInfo{
-			ID:      ctr.ID[:12],
-			Name:    name,
-			Image:   ctr.Image,
-			Status:  ctr.Status,
-			State:   string(ctr.State),
-			Ports:   ctr.Ports,
-			Created: ctr.Created,
-			Labels:  ctr.Labels,
+			ID:            ctr.ID[:12],
+			Name:          name,
+			Image:         ctr.Image,
+			Status:        ctr.Status,
+			State:         string(ctr.State),
+			Ports:         ctr.Ports,
+			Created:       ctr.Created,
+			RestartPolicy: restartPolicy,
+			Labels:        ctr.Labels,
 		}
 	}
 	return containers, nil
