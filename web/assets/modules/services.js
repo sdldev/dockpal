@@ -8,7 +8,7 @@ Dockpal.services = {
     if (resp && resp.ok) {
       this.toast('Stack deployed', 'success');
       this.deployForm = { name: '', domain: '', compose: '' };
-      this.currentPage = 'containers';
+      this.navigateTo('containers');
     } else {
       const data = resp ? await resp.json().catch(() => ({})) : {};
       this.toast(data.error || 'Deploy failed', 'error', 5000);
@@ -40,7 +40,7 @@ Dockpal.services = {
         this.gitForm = { repo: '', branch: 'main', compose_file: '', name: '' };
         this.githubSearch = '';
         this.composeFiles = [];
-        this.currentPage = 'containers';
+        this.navigateTo('containers');
       } else {
         const data = resp ? await resp.json().catch(() => ({})) : {};
         this.toast(data.error || 'Deploy failed', 'error', 5000);

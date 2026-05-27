@@ -53,6 +53,7 @@ type AgentClient interface {
 	RemoveImage(ctx context.Context, id string) error
 	CheckImageUpdate(ctx context.Context, image string) (*docker.ImageUpdateResult, error)
 	ForcePullImage(ctx context.Context, image, registryAuth string) error
+	PruneImages(ctx context.Context, danglingOnly bool) (*docker.PruneResult, error)
 
 	// Host operations
 	GetHostInfo(ctx context.Context) (*HostInfo, error)

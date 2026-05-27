@@ -11,7 +11,7 @@ type Handlers struct {
 }
 
 // NewHandlers creates new health check handlers
-func NewHandlers(dbPath string, dockerClient *client.Client, version string) *Handlers {
+func NewHandlers(dbPath, dataDir string, dockerClient *client.Client, version string) *Handlers {
 	// Convert docker client to our interface
 	var clientInterface DockerClient
 	if dockerClient != nil {
@@ -19,7 +19,7 @@ func NewHandlers(dbPath string, dockerClient *client.Client, version string) *Ha
 	}
 
 	return &Handlers{
-		checker: NewChecker(dbPath, clientInterface, version),
+		checker: NewChecker(dbPath, dataDir, clientInterface, version),
 	}
 }
 
@@ -27,7 +27,7 @@ func NewHandlers(dbPath string, dockerClient *client.Client, version string) *Ha
 // GET /health
 func (h *Handlers) HandleHealth(c *gin.Context) {
 	response := h.checker.CheckHealth(c.Request.Context())
-	
+
 	// Set appropriate HTTP status code
 	c.JSON(response.GetHTTPStatus(), response)
 }
@@ -36,7 +36,7 @@ func (h *Handlers) HandleHealth(c *gin.Context) {
 // GET /health/live
 func (h *Handlers) HandleLiveness(c *gin.Context) {
 	response := h.checker.CheckLiveness(c.Request.Context())
-	
+
 	// Set appropriate HTTP status code
 	c.JSON(response.GetHTTPStatus(), response)
 }
@@ -45,7 +45,7 @@ func (h *Handlers) HandleLiveness(c *gin.Context) {
 // GET /health/ready
 func (h *Handlers) HandleReadiness(c *gin.Context) {
 	response := h.checker.CheckReadiness(c.Request.Context())
-	
+
 	// Set appropriate HTTP status code
 	c.JSON(response.GetHTTPStatus(), response)
 }
@@ -54,13 +54,13 @@ func (h *Handlers) HandleReadiness(c *gin.Context) {
 func (h *Handlers) RegisterHealthRoutes(router *gin.Engine) {
 	// Main health check endpoint
 	router.GET("/health", h.HandleHealth)
-	
+
 	// Kubernetes-style probe endpoints
 	router.GET("/health/live", h.HandleLiveness)
 	router.GET("/health/ready", h.HandleReadiness)
-	
+
 	// Alternative probe endpoints for compatibility
-	router.GET("/healthz", h.HandleHealth)       // Kubernetes style
-	router.GET("/livez", h.HandleLiveness)       // Kubernetes style
-	router.GET("/readyz", h.HandleReadiness)     // Kubernetes style
+	router.GET("/healthz", h.HandleHealth)   // Kubernetes style
+	router.GET("/livez", h.HandleLiveness)   // Kubernetes style
+	router.GET("/readyz", h.HandleReadiness) // Kubernetes style
 }

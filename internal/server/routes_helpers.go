@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -120,10 +120,19 @@ var globalAutoUpdateWorker *docker.AutoUpdateWorker
 // instance. They are reassigned on every RegisterRoutes call to keep test
 // setups isolated.
 var (
-	globalDockerClient        *docker.Client
-	globalImageUpdateMonitor  *docker.ImageUpdateMonitor
-	globalRegistryManager     *registry.Manager
+	globalDockerClient       *docker.Client
+	globalImageUpdateMonitor *docker.ImageUpdateMonitor
+	globalRegistryManager    *registry.Manager
 )
+
+func StopBackgroundWorkers() {
+	if globalAutoUpdateWorker != nil {
+		globalAutoUpdateWorker.Stop()
+	}
+	if globalImageUpdateMonitor != nil {
+		globalImageUpdateMonitor.Stop()
+	}
+}
 
 // SystemInfo contains host hardware metrics and Docker version information.
 type SystemInfo struct {
@@ -160,8 +169,32 @@ func generateID(prefix string) string {
 // the real error. This prevents leaking internal details (file paths, DB
 // errors, etc.) in API responses.
 func internalError(c *gin.Context, err error) {
-	log.Printf("[ERROR] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	slog.Error("internal server error", "component", "server", "method", c.Request.Method, "path", c.Request.URL.Path, "error", err)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+}
+
+func legacyAPIWarningMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Header.Get("X-Dockpal-API-Version-Compat") == "v1" {
+			c.Next()
+			return
+		}
+		c.Header("Warning", `299 - "Deprecated API path; use /api/v1"`)
+		c.Next()
+	}
+}
+
+func registerAPIVersionCompatibility(r *gin.Engine) {
+	r.Any("/api/v1/*path", func(c *gin.Context) {
+		path := c.Param("path")
+		if path == "" || path == "/" {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.Request.Header.Set("X-Dockpal-API-Version-Compat", "v1")
+		c.Request.URL.Path = "/api" + path
+		r.HandleContext(c)
+	})
 }
 
 // extractFirstPort parses the compose YAML and extracts the first container port
@@ -201,24 +234,47 @@ func getRegistryAuths(registryMgr *registry.Manager, composeYAML string) map[str
 	return auths
 }
 
-// handleDeployStreamWS authenticates via query param token, validates origin,
-// and streams deploy session events over WebSocket.
+type webSocketAuthMessage struct {
+	Token string `json:"token"`
+}
+
+func authenticateWebSocketFirstMessage(conn *websocket.Conn, c *gin.Context) bool {
+	jwtSecret, ok := c.Get("jwt_secret")
+	if !ok {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication unavailable"))
+		return false
+	}
+	database, ok := c.Get("database")
+	if !ok {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication unavailable"))
+		return false
+	}
+	var authMsg webSocketAuthMessage
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return false
+	}
+	if err := conn.ReadJSON(&authMsg); err != nil {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication required"))
+		return false
+	}
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		return false
+	}
+	claims, err := auth.ValidateJWTWithVersionCheck(authMsg.Token, jwtSecret.(string), database.(*db.DB))
+	if err != nil {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+		return false
+	}
+	if !auth.HasRole(claims.Role, auth.RoleViewer) {
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
+		return false
+	}
+	return true
+}
+
+// handleDeployStreamWS authenticates via the first WebSocket message and streams deploy session events.
 func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *docker.DeployManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := c.Query("token")
-		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
-			return
-		}
-		claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-			return
-		}
-		if !auth.HasRole(claims.Role, auth.RoleViewer) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
-			return
-		}
 		if !checkOrigin(c.Request) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
 			return
@@ -235,6 +291,12 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 			return
 		}
 		defer conn.Close()
+
+		c.Set("jwt_secret", jwtSecret)
+		c.Set("database", database)
+		if !authenticateWebSocketFirstMessage(conn, c) {
+			return
+		}
 
 		for {
 			select {

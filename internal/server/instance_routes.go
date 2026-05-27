@@ -384,7 +384,7 @@ func handleTestInstance(agentMgr *agent.Manager, database *db.DB) gin.HandlerFun
 				c.JSON(http.StatusOK, TestResult{Status: "error", Message: "instance is offline"})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 

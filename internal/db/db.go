@@ -31,6 +31,14 @@ type AuditLog struct {
 	IPAddress string `json:"ip_address"`
 }
 
+type APIKey struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	KeyHash   string `json:"key_hash"`
+	Role      string `json:"role"`
+	CreatedAt int64  `json:"created_at"`
+}
+
 type Service struct {
 	ID         string `json:"id"`
 	InstanceID string `json:"instance_id,omitempty"`
@@ -90,16 +98,17 @@ type DB struct {
 }
 
 var (
-	bucketUsers          = []byte("users")
-	bucketServices       = []byte("services")
-	bucketDomains        = []byte("domains")
-	bucketRegistries     = []byte("registries")
-	bucketInstances      = []byte("instances")
-	bucketAuditLogs      = []byte("audit_logs")
-	bucketWebhooks       = []byte("webhooks")
-	bucketAppUpdates              = []byte("app_updates")
-	bucketAppUpdatesByID          = []byte("app_updates_by_id")
-	bucketNotificationWebhooks    = []byte("notification_webhooks")
+	bucketUsers                = []byte("users")
+	bucketServices             = []byte("services")
+	bucketDomains              = []byte("domains")
+	bucketRegistries           = []byte("registries")
+	bucketInstances            = []byte("instances")
+	bucketAuditLogs            = []byte("audit_logs")
+	bucketWebhooks             = []byte("webhooks")
+	bucketAppUpdates           = []byte("app_updates")
+	bucketAppUpdatesByID       = []byte("app_updates_by_id")
+	bucketNotificationWebhooks = []byte("notification_webhooks")
+	bucketAPIKeys              = []byte("api_keys")
 )
 
 var (
@@ -118,7 +127,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -248,6 +257,24 @@ func (d *DB) ListUsers() ([]User, error) {
 	return users, err
 }
 
+func (d *DB) IncrementAllTokenVersions() error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketUsers)
+		return b.ForEach(func(k, v []byte) error {
+			var user User
+			if err := json.Unmarshal(v, &user); err != nil {
+				return err
+			}
+			user.TokenVersion++
+			updated, err := json.Marshal(user)
+			if err != nil {
+				return err
+			}
+			return b.Put(k, updated)
+		})
+	})
+}
+
 func (d *DB) UpdateUserRole(username, role string) error {
 	return d.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketUsers)
@@ -281,6 +308,40 @@ func (d *DB) EnsureDefaultAdmin(passwordHash string) error {
 		})
 	}
 	return nil
+}
+
+// API Keys
+func (d *DB) SaveAPIKey(key APIKey) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketAPIKeys)
+		data, err := json.Marshal(key)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(key.ID), data)
+	})
+}
+
+func (d *DB) ListAPIKeys() ([]APIKey, error) {
+	var keys []APIKey
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketAPIKeys)
+		return b.ForEach(func(k, v []byte) error {
+			var key APIKey
+			if err := json.Unmarshal(v, &key); err != nil {
+				return err
+			}
+			keys = append(keys, key)
+			return nil
+		})
+	})
+	return keys, err
+}
+
+func (d *DB) DeleteAPIKey(id string) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketAPIKeys).Delete([]byte(id))
+	})
 }
 
 // Services
@@ -707,4 +768,29 @@ func (d *DB) ListAuditLogs(limit, offset int) ([]AuditLog, int, error) {
 		return nil
 	})
 	return logs, total, err
+}
+
+func (d *DB) PurgeAuditLogsOlderThan(cutoff time.Time) (int, error) {
+	cutoffUnix := cutoff.Unix()
+	deleted := 0
+	err := d.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketAuditLogs)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var logEntry AuditLog
+			if err := json.Unmarshal(v, &logEntry); err != nil {
+				return err
+			}
+			if logEntry.Timestamp >= cutoffUnix {
+				continue
+			}
+			key := append([]byte(nil), k...)
+			if err := b.Delete(key); err != nil {
+				return err
+			}
+			deleted++
+		}
+		return nil
+	})
+	return deleted, err
 }

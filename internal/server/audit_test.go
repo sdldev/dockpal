@@ -13,6 +13,44 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 )
 
+func TestPurgeAuditLogsOlderThan(t *testing.T) {
+	tmpDir := t.TempDir()
+	database, err := db.New(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to create test db: %v", err)
+	}
+	defer database.Close()
+
+	now := time.Now()
+	oldLog := db.AuditLog{ID: "old", Timestamp: now.Add(-48 * time.Hour).Unix(), Action: "old"}
+	newLog := db.AuditLog{ID: "new", Timestamp: now.Unix(), Action: "new"}
+	if err := database.SaveAuditLog(oldLog); err != nil {
+		t.Fatalf("save old audit log: %v", err)
+	}
+	if err := database.SaveAuditLog(newLog); err != nil {
+		t.Fatalf("save new audit log: %v", err)
+	}
+
+	deleted, err := database.PurgeAuditLogsOlderThan(now.Add(-24 * time.Hour))
+	if err != nil {
+		t.Fatalf("purge audit logs: %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1", deleted)
+	}
+
+	logs, total, err := database.ListAuditLogs(10, 0)
+	if err != nil {
+		t.Fatalf("list audit logs: %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("remaining logs total=%d len=%d, want 1", total, len(logs))
+	}
+	if logs[0].ID != "new" {
+		t.Fatalf("remaining log = %q, want new", logs[0].ID)
+	}
+}
+
 func TestAuditLogFramework(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

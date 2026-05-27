@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -14,7 +16,9 @@ import (
 func TestRouteRegistrationDoesNotPanic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
+	registerAPIVersionCompatibility(r)
 	api := r.Group("/api")
+	api.Use(legacyAPIWarningMiddleware())
 
 	// CRUD endpoints under /api/instances
 	api.GET("/instances", func(c *gin.Context) {})
@@ -28,4 +32,35 @@ func TestRouteRegistrationDoesNotPanic(t *testing.T) {
 	// Scoped group nested under the same prefix
 	scoped := api.Group("/instances/:instance_id")
 	RegisterInstanceScopedRoutes(scoped)
+}
+
+func TestAPIV1CompatibilityDispatchesToLegacyRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	registerAPIVersionCompatibility(r)
+	api := r.Group("/api")
+	api.Use(legacyAPIWarningMiddleware())
+	api.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	legacy := httptest.NewRecorder()
+	legacyReq := httptest.NewRequest(http.MethodGet, "/api/ping", nil)
+	r.ServeHTTP(legacy, legacyReq)
+	if legacy.Code != http.StatusOK {
+		t.Fatalf("legacy status = %d, want %d", legacy.Code, http.StatusOK)
+	}
+	if legacy.Header().Get("Warning") == "" {
+		t.Fatal("legacy route missing Warning header")
+	}
+
+	versioned := httptest.NewRecorder()
+	versionedReq := httptest.NewRequest(http.MethodGet, "/api/v1/ping", nil)
+	r.ServeHTTP(versioned, versionedReq)
+	if versioned.Code != http.StatusOK {
+		t.Fatalf("versioned status = %d, want %d", versioned.Code, http.StatusOK)
+	}
+	if versioned.Header().Get("Warning") != "" {
+		t.Fatal("versioned route should not include legacy Warning header")
+	}
 }

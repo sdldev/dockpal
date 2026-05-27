@@ -75,6 +75,9 @@ func (f *protectionFakeAgentClient) CheckImageUpdate(context.Context, string) (*
 	return nil, nil
 }
 func (f *protectionFakeAgentClient) ForcePullImage(context.Context, string, string) error { return nil }
+func (f *protectionFakeAgentClient) PruneImages(context.Context, bool) (*docker.PruneResult, error) {
+	return &docker.PruneResult{}, nil
+}
 func (f *protectionFakeAgentClient) GetHostInfo(context.Context) (*agent.HostInfo, error) {
 	return nil, nil
 }

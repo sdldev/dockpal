@@ -201,6 +201,10 @@ func (c *LocalClient) ForcePullImage(ctx context.Context, image, registryAuth st
 	return c.dockerClient.ForcePullImage(ctx, image, registryAuth)
 }
 
+func (c *LocalClient) PruneImages(ctx context.Context, danglingOnly bool) (*docker.PruneResult, error) {
+	return c.dockerClient.PruneImages(ctx, danglingOnly)
+}
+
 // App auto-update operations
 //
 // The methods below satisfy the AgentClient interface for the local

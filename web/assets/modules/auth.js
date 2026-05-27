@@ -39,14 +39,12 @@ Dockpal.auth = {
           this.view = 'app';
           await this.loadDashboard();
           await this.checkForUpdates();
-          // Open the App_Update_Feed (R4.4) and seed the apps list so the
-          // sidebar badge / Apps page have data on first navigation.
-          // Skip when the server has pinned auto-update off — there is
-          // no worker to publish events and no toggle to surface.
           if (this.featureAutoUpdate) {
             if (this.loadApps) await this.loadApps();
             if (this.startFeed) this.startFeed();
           }
+          // Parse URL to set initial page (SPA routing)
+          if (this.initRouter) this.initRouter();
           return;
         }
         // If instance-scoped call fails, try local for backward compatibility
@@ -61,6 +59,7 @@ Dockpal.auth = {
             if (this.loadApps) await this.loadApps();
             if (this.startFeed) this.startFeed();
           }
+          if (this.initRouter) this.initRouter();
           return;
         }
       } catch (e) {}
@@ -84,7 +83,7 @@ Dockpal.auth = {
       this.userRole = data.role || '';
       localStorage.setItem('dockpal_token', this.token);
       this.view = 'app';
-      this.currentPage = 'dashboard';
+      this.navigateTo('dashboard');
       // Load instances after login
       await this.loadInstances();
       await this.loadDashboard();

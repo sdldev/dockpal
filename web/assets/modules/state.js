@@ -65,6 +65,7 @@ Dockpal.initialState = function() {
     images: [],
     imageCount: 0,
     imagePullName: '',
+    imagePruning: false,
     imageUpdates: [],
     imageUpdateChecking: false,
     containerImageUpdateChecking: false,
@@ -260,7 +261,7 @@ Dockpal.instances = {
       installing: false,
       installLogs: []
     };
-    this.currentPage = 'add-instance';
+    this.navigateTo('add-instance');
   },
 
   async addInstance() {

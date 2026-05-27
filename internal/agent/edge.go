@@ -350,6 +350,20 @@ func (e *EdgeClient) ForcePullImage(ctx context.Context, image, registryAuth str
 	return err
 }
 
+// PruneImages prunes unused images on the remote agent.
+func (e *EdgeClient) PruneImages(ctx context.Context, danglingOnly bool) (*docker.PruneResult, error) {
+	var result docker.PruneResult
+	query := map[string]string{"dangling_only": strconv.FormatBool(danglingOnly)}
+	resp, err := e.sendRequestRaw(ctx, "POST", "/docker/images/prune", query)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse prune result: %w", err)
+	}
+	return &result, nil
+}
+
 // App auto-update operations
 //
 // Stubs added in task 5.4. The remote agent gains matching endpoints in

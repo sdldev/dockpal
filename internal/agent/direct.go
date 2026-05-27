@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -462,6 +463,24 @@ func (c *DirectClient) ForcePullImage(ctx context.Context, image, registryAuth s
 
 	_, err = c.doRequest(req)
 	return err
+}
+
+// PruneImages prunes unused images on the remote agent.
+func (c *DirectClient) PruneImages(ctx context.Context, danglingOnly bool) (*docker.PruneResult, error) {
+	var result docker.PruneResult
+	query := map[string]string{"dangling_only": strconv.FormatBool(danglingOnly)}
+	req, err := c.makeRequest(ctx, "POST", "/agent/docker/images/prune", query, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse prune result: %w", err)
+	}
+	return &result, nil
 }
 
 // App auto-update operations

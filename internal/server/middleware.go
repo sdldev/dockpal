@@ -16,24 +16,30 @@ import (
 
 func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-
-		// Fallback to query param token for WebSocket connections
-		// (WebSocket cannot send custom headers during upgrade)
-		if authHeader == "" {
-			if token := c.Query("token"); token != "" && c.IsWebsocket() {
-				claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
-				if err != nil {
-					c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
-					c.Abort()
-					return
-				}
-				c.Set("user_id", claims.UserID)
-				c.Set("username", claims.Username)
-				c.Set("role", claims.Role)
-				c.Next()
+		if key := c.GetHeader("X-API-Key"); key != "" {
+			apiKeys, err := database.ListAPIKeys()
+			if err != nil {
+				internalError(c, err)
+				c.Abort()
 				return
 			}
+			hashed := hashAPIKey(key)
+			for _, apiKey := range apiKeys {
+				if apiKey.KeyHash == hashed {
+					c.Set("user_id", apiKey.ID)
+					c.Set("username", "api-key:"+apiKey.Name)
+					c.Set("role", apiKey.Role)
+					c.Next()
+					return
+				}
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
+			c.Abort()
+			return
+		}
+
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
 			c.Abort()
 			return
@@ -85,6 +91,7 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("X-XSS-Protection", "0")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:")
 		c.Next()
 	}
 }
@@ -163,7 +170,7 @@ func InstanceMiddleware(agentMgr *agent.Manager, database *db.DB, jwtSecret stri
 				return
 			}
 			// Generic error
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			c.Abort()
 			return
 		}
@@ -174,6 +181,7 @@ func InstanceMiddleware(agentMgr *agent.Manager, database *db.DB, jwtSecret stri
 		c.Set("instance_id", instanceID)
 		c.Set("agent_client", client)
 		c.Set("database", database)
+		c.Set("jwt_secret", jwtSecret)
 		c.Set("registry_manager", registryMgr)
 		c.Next()
 	}

@@ -9,6 +9,24 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestAPIDocsUsesLocalAssets(t *testing.T) {
+	html := `<!DOCTYPE html>
+<html>
+  <head>
+    <title>Dockpal API Documentation</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>body { font-family: system-ui; }</style>
+  </head>
+  <body><main><a href="/api/v1/docs/swagger.json">spec</a></main></body>
+</html>`
+	for _, forbidden := range []string{"cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("docs html contains external dependency %q", forbidden)
+		}
+	}
+}
+
 func TestAPIDocsRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

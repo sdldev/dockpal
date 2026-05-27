@@ -2,11 +2,14 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +19,8 @@ import (
 // DefaultShutdownTimeout is used for ReadTimeout, WriteTimeout, IdleTimeout
 // and graceful Shutdown when DOCKPAL_SHUTDOWN_TIMEOUT is not set.
 const DefaultShutdownTimeout = 30 * time.Second
+
+const defaultMaxRequestBodyBytes int64 = 10 << 20
 
 type Server struct {
 	router          *gin.Engine
@@ -41,6 +46,7 @@ func New(tls bool, tlsCert, tlsKey, tlsDomain, dataDir string) *Server {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	router.Use(maxRequestBodyMiddleware(resolveMaxRequestBodyBytes()))
 	router.Use(gin.Recovery())
 
 	return &Server{
@@ -68,6 +74,41 @@ func resolveShutdownTimeout() time.Duration {
 		return DefaultShutdownTimeout
 	}
 	return d
+}
+
+func resolveMaxRequestBodyBytes() int64 {
+	raw := strings.TrimSpace(os.Getenv("DOCKPAL_MAX_REQUEST_BODY_BYTES"))
+	if raw == "" {
+		return defaultMaxRequestBodyBytes
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		log.Printf("Invalid DOCKPAL_MAX_REQUEST_BODY_BYTES %q, falling back to %d", raw, defaultMaxRequestBodyBytes)
+		return defaultMaxRequestBodyBytes
+	}
+	return n
+}
+
+func maxRequestBodyMiddleware(limit int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.ContentLength > limit {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+			return
+		}
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+		}
+		c.Next()
+		if len(c.Errors) == 0 {
+			return
+		}
+		for _, err := range c.Errors {
+			if errors.Is(err.Err, http.ErrBodyReadAfterClose) || strings.Contains(err.Err.Error(), "http: request body too large") {
+				c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+				return
+			}
+		}
+	}
 }
 
 // ShutdownTimeout returns the configured shutdown timeout.

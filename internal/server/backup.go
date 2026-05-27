@@ -40,15 +40,20 @@ func HandleTriggerBackup(database *db.DB, dataDir string) gin.HandlerFunc {
 		backupPath = cleaned
 
 		if err := database.BackupTo(backupPath); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("backup failed: %v", err)})
+			internalError(c, err)
+			return
+		}
+		checksumVerified, err := db.ValidateBackup(backupPath)
+		if err != nil {
+			internalError(c, err)
 			return
 		}
 
-		LogAudit(c, database, "backup.create", backupPath, "success", fmt.Sprintf("Created backup at %s", backupPath))
+		LogAudit(c, database, "backup.create", backupPath, "success", fmt.Sprintf("Created verified backup at %s", backupPath))
 
 		info, err := os.Stat(backupPath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to stat backup: %v", err)})
+			internalError(c, err)
 			return
 		}
 
@@ -60,10 +65,11 @@ func HandleTriggerBackup(database *db.DB, dataDir string) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"path":      backupPath,
-			"checksum":  checksum,
-			"size":      info.Size(),
-			"timestamp": time.Now().Format(time.RFC3339),
+			"path":              backupPath,
+			"checksum":          checksum,
+			"checksum_verified": checksumVerified,
+			"size":              info.Size(),
+			"timestamp":         time.Now().Format(time.RFC3339),
 		})
 	}
 }

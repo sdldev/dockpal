@@ -30,13 +30,15 @@ import (
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
-func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager, dataDir string, version string) {
+func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager, dataDir string, dbPath string, version string) {
 	// Health check endpoints (public, no authentication required)
-	dbPath := filepath.Join(dataDir, "dockpal.db")
-	healthHandlers := health.NewHandlers(dbPath, dockerClient.RawClient(), "v"+version)
+	healthHandlers := health.NewHandlers(dbPath, dataDir, dockerClient.RawClient(), "v"+version)
 	healthHandlers.RegisterHealthRoutes(r)
 
+	registerAPIVersionCompatibility(r)
+
 	api := r.Group("/api")
+	api.Use(legacyAPIWarningMiddleware())
 
 	// API Docs (Redoc + OpenAPI spec)
 	api.GET("/docs/swagger.json", func(c *gin.Context) {
@@ -51,12 +53,19 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
     <title>Dockpal API Documentation</title>
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
-    <style>body { margin: 0; padding: 0; }</style>
+    <style>
+      body { margin: 0; padding: 2rem; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #f9fafb; }
+      main { max-width: 960px; margin: 0 auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 2rem; }
+      a { color: #2563eb; }
+      code { background: #f3f4f6; padding: 0.125rem 0.375rem; border-radius: 4px; }
+    </style>
   </head>
   <body>
-    <redoc spec-url='/api/docs/swagger.json'></redoc>
-    <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"> </script>
+    <main>
+      <h1>Dockpal API Documentation</h1>
+      <p>The OpenAPI specification is available locally at <a href="/api/v1/docs/swagger.json"><code>/api/v1/docs/swagger.json</code></a>.</p>
+      <p>Legacy clients can still access <a href="/api/docs/swagger.json"><code>/api/docs/swagger.json</code></a>.</p>
+    </main>
   </body>
 </html>`)
 	})
@@ -83,17 +92,22 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	// Rate limiters
-	loginRateLimiter := NewRateLimiter()
-	mutationRateLimiter := NewRateLimiter()
+	loginRateLimiter := NewRateLimiterWithPolicy(LoginRateLimit)
+	readRateLimiter := NewRateLimiterWithPolicy(ReadRateLimit)
+	mutationRateLimiter := NewRateLimiterWithPolicy(MutationRateLimit)
+	webhookRateLimiter := NewRateLimiterWithPolicy(WebhookRateLimit)
+	readLimit := RateLimitMiddleware(readRateLimiter)
+	mutationLimit := RateLimitMiddleware(mutationRateLimiter)
 
 	// Auth (unprotected)
 	api.POST("/login", RateLimitMiddleware(loginRateLimiter), func(c *gin.Context) { auth.HandleLogin(c, jwtSecret, database) })
 
 	// Webhooks public trigger
-	api.POST("/webhooks/deploy/:webhook_id", HandleWebhookDeploy(database, agentMgr, jwtSecret))
+	api.POST("/webhooks/deploy/:webhook_id", RateLimitMiddleware(webhookRateLimiter), HandleWebhookDeploy(database, agentMgr, jwtSecret))
 
 	baseProtected := api.Group("")
 	baseProtected.Use(AuthMiddleware(jwtSecret, database))
+	baseProtected.Use(methodRateLimit(readLimit, mutationLimit))
 
 	viewerGroup := baseProtected.Group("")
 	viewerGroup.Use(RequireRole(auth.RoleViewer))
@@ -121,6 +135,9 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// User management (admin only)
 	adminGroup.GET("/users", func(c *gin.Context) { auth.HandleListUsers(c, database) })
 	adminGroup.PUT("/users/:username/role", func(c *gin.Context) { auth.HandleUpdateUserRole(c, database) })
+	adminGroup.GET("/api-keys", handleListAPIKeys(database))
+	adminGroup.POST("/api-keys", handleCreateAPIKey(database))
+	adminGroup.DELETE("/api-keys/:id", handleDeleteAPIKey(database))
 
 	// Backup (admin only)
 	adminGroup.POST("/backup", HandleTriggerBackup(database, dataDir))
@@ -138,6 +155,10 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	r.GET("/api/agent/connect", HandleAgentConnect(database, agentMgr))
 
 	// Instance-scoped operations (new route group)
+	instanceBase := api.Group("/instances/:instance_id")
+	instanceBase.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
+	instanceBase.GET("/containers/:id/logs", readLimit, handleInstanceContainerLogs)
+
 	instances := baseProtected.Group("/instances/:instance_id")
 	instances.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
 	RegisterInstanceScopedRoutes(instances)
@@ -228,11 +249,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// Install webhook lister so the worker can send best-effort notifications
 	// on rolled_back or failed (rollback_failed) outcomes (task 10.1, R3.5).
 	worker.SetWebhookLister(database.ListNotificationWebhooks)
-	// TODO: thread a real lifecycle context through RegisterRoutes so the
-	// worker can be stopped on graceful shutdown. context.Background() is
-	// safe today because (*AutoUpdateWorker).Stop cancels via the worker's
-	// own cancel func.
-	worker.Start(context.Background())
+	worker.Start(ctx)
 
 	// Expose the feed and worker to handler tasks (5.3, 5.4) and the
 	// agent client local impl (6.2) via package-level references. They
@@ -915,14 +932,20 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	})
 
 	// WebSocket logs
-	protected.GET("/containers/:id/logs", func(c *gin.Context) {
+	api.GET("/containers/:id/logs", readLimit, func(c *gin.Context) {
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
 			internalError(c, err)
 			return
 		}
+		c.Set("jwt_secret", jwtSecret)
+		c.Set("database", database)
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
+			return
+		}
+		if !authenticateWebSocketFirstMessage(conn, c) {
+			conn.Close()
 			return
 		}
 
@@ -1003,11 +1026,11 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 	// must be passed as query param. The token is short-lived (30 days max)
 	// and the endpoint is read-only (streaming logs only).
 	deployStreamWS := handleDeployStreamWS(jwtSecret, database, deployManager)
-	r.GET("/api/deploy/stream/:id", deployStreamWS)
+	r.GET("/api/deploy/stream/:id", legacyAPIWarningMiddleware(), deployStreamWS)
 
 	// Instance-scoped WebSocket endpoint for deploy log streaming.
 	// Same logic as above but matches the instance-scoped URL pattern used by the frontend.
-	r.GET("/api/instances/:instance_id/deploy/stream/:id", deployStreamWS)
+	r.GET("/api/instances/:instance_id/deploy/stream/:id", legacyAPIWarningMiddleware(), deployStreamWS)
 
 	protected.POST("/deploy/compose", func(c *gin.Context) {
 		var req struct {
@@ -1140,7 +1163,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		composePath := filepath.Join(info.Path, selectedFile)
 		composeData, err := os.ReadFile(composePath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
+			internalError(c, err)
 			return
 		}
 
@@ -1154,7 +1177,7 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 		}
 
 		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
+			internalError(c, err)
 			return
 		}
 
@@ -1588,6 +1611,27 @@ func RegisterRoutes(r *gin.Engine, dockerClient *docker.Client, jwtSecret string
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "pulled"})
+	})
+
+	// Image Prune
+	protected.POST("/images/prune", RequireRole(auth.RoleOperator), func(c *gin.Context) {
+		var req struct {
+			DanglingOnly bool `json:"dangling_only"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			req.DanglingOnly = true
+		}
+		client, err := agentMgr.GetClient("local")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		result, err := client.PruneImages(c.Request.Context(), req.DanglingOnly)
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, result)
 	})
 
 	// File Manager

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ const (
 	// DefaultCacheTTL is the default cache TTL (1 hour)
 	DefaultCacheTTL = time.Hour
 )
+
+var gitDescribeVersionPattern = regexp.MustCompile(`^(\d+\.\d+\.\d+)-\d+-g[0-9a-f]+(?:-dirty)?$`)
 
 // Version represents a semantic version
 type Version struct {
@@ -84,10 +87,15 @@ func (s *VersionService) GetVersionInfo(ctx context.Context) (*VersionInfo, erro
 	cached, err := ReadCache(cachePath)
 	if err == nil && cached != nil && !cached.IsCacheExpired() {
 		// Return cached data, compare versions
-		updateAvailable, _ := CompareVersions(s.currentVersion, cached.LatestVersion)
+		updateAvailable, err := CompareVersions(s.currentVersion, cached.LatestVersion)
+		latestVersion := cached.LatestVersion
+		if err != nil {
+			updateAvailable = false
+			latestVersion = s.currentVersion
+		}
 		return &VersionInfo{
 			CurrentVersion:  s.currentVersion,
-			LatestVersion:   cached.LatestVersion,
+			LatestVersion:   latestVersion,
 			UpdateAvailable: updateAvailable,
 			ReleaseNotes:    cached.ReleaseNotes,
 			DownloadURL:     cached.DownloadURL,
@@ -99,9 +107,13 @@ func (s *VersionService) GetVersionInfo(ctx context.Context) (*VersionInfo, erro
 	if err != nil {
 		// If GitHub API fails and we have cached data, return it
 		if cached != nil {
+			latestVersion := cached.LatestVersion
+			if _, compareErr := CompareVersions(s.currentVersion, cached.LatestVersion); compareErr != nil {
+				latestVersion = s.currentVersion
+			}
 			return &VersionInfo{
 				CurrentVersion:  s.currentVersion,
-				LatestVersion:   cached.LatestVersion,
+				LatestVersion:   latestVersion,
 				UpdateAvailable: false, // Unknown due to error
 				ReleaseNotes:    cached.ReleaseNotes,
 				DownloadURL:     cached.DownloadURL,
@@ -114,6 +126,7 @@ func (s *VersionService) GetVersionInfo(ctx context.Context) (*VersionInfo, erro
 	updateAvailable, err := CompareVersions(s.currentVersion, release.TagName)
 	if err != nil {
 		updateAvailable = false
+		release.TagName = s.currentVersion
 	}
 
 	// Update cache
@@ -274,8 +287,9 @@ func parseVersion(v string) (*Version, error) {
 
 // normalizeVersion removes 'v' prefix if present
 func normalizeVersion(v string) string {
-	if len(v) > 0 && v[0] == 'v' {
-		return v[1:]
+	v = strings.TrimPrefix(v, "v")
+	if match := gitDescribeVersionPattern.FindStringSubmatch(v); len(match) == 2 {
+		return match[1]
 	}
 	return v
 }

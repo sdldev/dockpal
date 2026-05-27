@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -206,6 +207,28 @@ func extractImageDomain(image string) string {
 func (c *Client) RemoveImage(ctx context.Context, id string) error {
 	_, err := c.cli.ImageRemove(ctx, id, client.ImageRemoveOptions{Force: true})
 	return err
+}
+
+// PruneResult holds the outcome of an image prune operation.
+type PruneResult struct {
+	ImagesDeleted  int   `json:"images_deleted"`
+	SpaceReclaimed int64 `json:"space_reclaimed"`
+}
+
+// PruneImages removes unused images. When danglingOnly is true, only
+// dangling images (<none>:<none>) are removed. Otherwise all images not
+// referenced by any container are pruned.
+func (c *Client) PruneImages(ctx context.Context, danglingOnly bool) (*PruneResult, error) {
+	f := make(client.Filters)
+	f.Add("dangling", strconv.FormatBool(danglingOnly))
+	result, err := c.cli.ImagePrune(ctx, client.ImagePruneOptions{Filters: f})
+	if err != nil {
+		return nil, fmt.Errorf("failed to prune images: %w", err)
+	}
+	return &PruneResult{
+		ImagesDeleted:  len(result.Report.ImagesDeleted),
+		SpaceReclaimed: int64(result.Report.SpaceReclaimed),
+	}, nil
 }
 
 func formatSize(size int64) string {

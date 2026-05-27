@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -88,6 +89,11 @@ type AppHandlerDeps struct {
 // DockerHandlerDeps bundles the agent-side Docker API dependencies used by
 // direct and edge transports for container/image operations that need to run
 // inside the agent process.
+func internalError(c *gin.Context, err error) {
+	log.Printf("[ERROR] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+}
+
 type DockerHandlerDeps struct {
 	DockerClient *docker.Client
 }
@@ -123,7 +129,7 @@ func (h *DockerHandler) HandleUpdateContainerImage(c *gin.Context) {
 	}
 	detail, err := h.deps.DockerClient.UpdateContainerImage(c.Request.Context(), id, c.Query("auth"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, detail)
@@ -208,7 +214,7 @@ func RegisterAppRoutes(rg gin.IRoutes, h *AppHandler) {
 func (h *AppHandler) HandleListApps(c *gin.Context) {
 	apps, err := h.deps.DockerClient.ListApps(c.Request.Context(), h.deps.Monitor, h.deps.Store)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	if apps == nil {
@@ -242,7 +248,7 @@ func (h *AppHandler) HandleListAppUpdates(c *gin.Context) {
 
 	recs, err := h.deps.Store.ListAppUpdates(name, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	if recs == nil {
@@ -262,7 +268,7 @@ func (h *AppHandler) HandleGetAppUpdate(c *gin.Context) {
 	}
 	rec, err := h.deps.Store.GetAppUpdate(attemptID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 	if rec == nil {
@@ -352,7 +358,7 @@ func (h *AppHandler) HandleTriggerAppUpdate(c *gin.Context) {
 				return
 			}
 			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				internalError(c, err)
 				return
 			}
 			// TriggerApp finished without error before the poll picked
@@ -420,7 +426,7 @@ func (h *AppHandler) HandleSetAppAutoUpdate(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "app not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		internalError(c, err)
 		return
 	}
 

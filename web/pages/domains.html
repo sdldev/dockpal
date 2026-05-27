@@ -1,6 +1,6 @@
       <!-- ===== DOMAINS ===== -->
       <!-- Domains are local-only - hide when remote instance selected (Requirement 12.9) -->
-      <div x-show="currentPage === 'domains' && isLocalInstance">
+      <div x-show="currentPage === 'domains' && isLocalInstance" x-cloak>
         <div class="mb-6">
           <h2 class="text-lg font-semibold text-white">Domains</h2>
           <p class="text-sm text-zinc-500">Manage custom domains with automatic SSL</p>

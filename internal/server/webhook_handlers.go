@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -120,7 +119,7 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 		// Clone repository
 		info, err := git.Clone(wh.Repo, wh.Branch, token)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("git clone failed: %s", err.Error())})
+			internalError(c, err)
 			return
 		}
 
@@ -137,7 +136,7 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 		composePath := filepath.Join(info.Path, selectedFile)
 		composeData, err := os.ReadFile(composePath)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
+			internalError(c, err)
 			return
 		}
 
@@ -163,7 +162,7 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 		}
 
 		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
+			internalError(c, err)
 			return
 		}
 
@@ -186,7 +185,7 @@ func HandleListWebhooks(database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		list, err := database.ListWebhooks()
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			internalError(c, err)
 			return
 		}
 		response := make([]webhookResponse, 0, len(list))

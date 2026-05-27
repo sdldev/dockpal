@@ -45,7 +45,7 @@ Dockpal.containers = {
     this.containerEditMode = false;
     this.containerEditSaving = false;
     this.containerImageUpdateResult = null;
-    this.currentPage = 'container-detail';
+    this.navigateTo('container-detail');
     this.startStatsPolling(this.selectedContainer.id);
     this.startLogStream(this.selectedContainer.id);
   },
@@ -171,10 +171,12 @@ Dockpal.containers = {
     try {
       this.closeContainerLogStream();
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // Use instance-scoped WebSocket path (Requirement 12.8)
-      const wsUrl = wsProto + '//' + location.host + '/api/instances/' + this.selectedInstance + '/containers/' + id + '/logs?token=' + this.token;
+      const wsUrl = wsProto + '//' + location.host + '/api/v1/instances/' + this.selectedInstance + '/containers/' + id + '/logs';
       const ws = new WebSocket(wsUrl);
       this.containerLogSocket = ws;
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ token: this.token }));
+      };
       ws.onmessage = (e) => {
         const lines = e.data.split('\n').filter(l => l.trim());
         this.logs = [...this.logs.slice(-200), ...lines];
@@ -207,7 +209,7 @@ Dockpal.containers = {
           } else {
             this.toast('Container removed', 'success');
             // Redirect to containers list after successful removal
-            this.currentPage = 'containers';
+            this.navigateTo('containers');
             this.selectedContainer = null;
             this.destroyChart();
           }

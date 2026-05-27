@@ -41,7 +41,6 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.PUT("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceEditContainer)
 	g.POST("/containers/:id/update-image", RequireRole(auth.RoleOperator), handleInstanceUpdateContainerImage)
 	g.GET("/containers/:id/stats", RequireRole(auth.RoleViewer), handleInstanceContainerStats)
-	g.GET("/containers/:id/logs", RequireRole(auth.RoleViewer), handleInstanceContainerLogs)
 
 	// Deploy routes
 	g.POST("/deploy/stream", RequireRole(auth.RoleOperator), handleInstanceDeployStream)
@@ -56,6 +55,7 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.POST("/images/check", RequireRole(auth.RoleViewer), handleInstanceCheckImage)
 	g.POST("/images/pull-force", RequireRole(auth.RoleOperator), handleInstanceForcePullImage)
 	g.DELETE("/images/:id", RequireRole(auth.RoleOperator), handleInstanceRemoveImage)
+	g.POST("/images/prune", RequireRole(auth.RoleOperator), handleInstancePruneImages)
 
 	// Host routes
 	g.GET("/host/info", RequireRole(auth.RoleViewer), handleInstanceHostInfo)
@@ -95,11 +95,10 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 // handleInstanceListContainers lists all containers for the instance.
 func handleInstanceListContainers(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	containers, err := client.ListContainers(c.Request.Context(), true)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list containers on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	markProtectedContainerInfos(containers)
@@ -110,12 +109,11 @@ func handleInstanceListContainers(c *gin.Context) {
 // handleInstanceInspectContainer returns detailed information about a container.
 func handleInstanceInspectContainer(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 	containerID := c.Param("id")
 
 	detail, err := client.InspectContainer(c.Request.Context(), containerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	markProtectedContainerDetail(detail)
@@ -130,7 +128,7 @@ func handleInstanceStartContainer(c *gin.Context) {
 	containerID := c.Param("id")
 
 	if err := client.StartContainer(c.Request.Context(), containerID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to start container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -144,7 +142,7 @@ func handleInstanceStopContainer(c *gin.Context) {
 	containerID := c.Param("id")
 
 	if err := client.StopContainer(c.Request.Context(), containerID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to stop container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -158,7 +156,7 @@ func handleInstanceRestartContainer(c *gin.Context) {
 	containerID := c.Param("id")
 
 	if err := client.RestartContainer(c.Request.Context(), containerID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to restart container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -177,12 +175,12 @@ func handleInstanceRemoveContainer(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": dockpalAgentProtectionReason, "protected": true})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
 	if err := client.RemoveContainer(c.Request.Context(), containerID, force); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to remove container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -280,14 +278,14 @@ func handleInstanceEditContainer(c *gin.Context) {
 				c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be recreated from Dockpal", "protected": true})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+			internalError(c, err)
 			return
 		}
 	}
 
 	detail, err := client.EditContainer(c.Request.Context(), containerID, req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to edit container: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -312,7 +310,7 @@ func handleInstanceUpdateContainerImage(c *gin.Context) {
 
 	detail, err := client.InspectContainer(c.Request.Context(), containerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to inspect container %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	if isProtectedDockpalAgentContainer(detail) {
@@ -332,7 +330,7 @@ func handleInstanceUpdateContainerImage(c *gin.Context) {
 
 	updated, err := client.UpdateContainerImage(c.Request.Context(), containerID, authHeader)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to update container image for %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	markProtectedContainerDetail(updated)
@@ -349,12 +347,11 @@ func handleInstanceUpdateContainerImage(c *gin.Context) {
 // handleInstanceContainerStats returns container statistics.
 func handleInstanceContainerStats(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 	containerID := c.Param("id")
 
 	stats, err := client.GetContainerStats(c.Request.Context(), containerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get container stats for %s on instance %s: %v", containerID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -364,11 +361,15 @@ func handleInstanceContainerStats(c *gin.Context) {
 // handleInstanceContainerLogs streams container logs via WebSocket.
 func handleInstanceContainerLogs(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 	containerID := c.Param("id")
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
+		return
+	}
+
+	if !authenticateWebSocketFirstMessage(conn, c) {
+		conn.Close()
 		return
 	}
 
@@ -377,7 +378,7 @@ func handleInstanceContainerLogs(c *gin.Context) {
 
 	reader, err := client.ContainerLogs(c.Request.Context(), containerID, tail)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Error: failed to retrieve container logs from instance %s: %v", instanceID, err)))
+		conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
 		conn.Close()
 		return
 	}
@@ -611,7 +612,7 @@ func handleInstanceDeployCompose(c *gin.Context) {
 
 	// Deploy compose via agent client
 	if err := client.DeployCompose(c.Request.Context(), req.Name, req.Compose, registryAuths, false); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -728,7 +729,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 	composePath := filepath.Join(info.Path, selectedFile)
 	composeData, err := os.ReadFile(composePath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read compose file: %s", err.Error())})
+		internalError(c, err)
 		return
 	}
 
@@ -737,7 +738,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 
 	// Deploy compose via agent client
 	if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy failed: %s", err.Error())})
+		internalError(c, err)
 		return
 	}
 
@@ -911,11 +912,10 @@ func getRegistryManager(c *gin.Context) *registry.Manager {
 // handleInstanceListImages lists all images for the instance.
 func handleInstanceListImages(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	images, err := client.ListImages(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list images on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -940,7 +940,6 @@ func handleInstanceListImageUpdates(c *gin.Context) {
 // handleInstancePullImage pulls an image to the instance.
 func handleInstancePullImage(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
 		Image string `json:"image" binding:"required"`
@@ -956,7 +955,7 @@ func handleInstancePullImage(c *gin.Context) {
 		authHeader, _ := registryMgr.GetAuthHeader(req.Image)
 		if authHeader != "" {
 			if err := client.PullImageWithAuth(c.Request.Context(), req.Image, authHeader); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to pull image on instance %s: %v", instanceID, err)})
+				internalError(c, err)
 				return
 			}
 			c.JSON(http.StatusOK, gin.H{"status": "pulled"})
@@ -966,7 +965,7 @@ func handleInstancePullImage(c *gin.Context) {
 
 	// Fallback to unauthenticated pull
 	if err := client.PullImage(c.Request.Context(), req.Image); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to pull image on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -980,7 +979,7 @@ func handleInstanceRemoveImage(c *gin.Context) {
 	imageID := c.Param("id")
 
 	if err := client.RemoveImage(c.Request.Context(), imageID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to remove image %s on instance %s: %v", imageID, instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -990,7 +989,6 @@ func handleInstanceRemoveImage(c *gin.Context) {
 // handleInstanceCheckImage checks if an image has an update available on the instance.
 func handleInstanceCheckImage(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
 		Image string `json:"image" binding:"required"`
@@ -1002,7 +1000,7 @@ func handleInstanceCheckImage(c *gin.Context) {
 
 	result, err := client.CheckImageUpdate(c.Request.Context(), req.Image)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to check image update on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, result)
@@ -1011,7 +1009,6 @@ func handleInstanceCheckImage(c *gin.Context) {
 // handleInstanceForcePullImage force-pulls an image on the instance.
 func handleInstanceForcePullImage(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
 		Image string `json:"image" binding:"required"`
@@ -1028,11 +1025,30 @@ func handleInstanceForcePullImage(c *gin.Context) {
 	}
 
 	if err := client.ForcePullImage(c.Request.Context(), req.Image, authHeader); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to force pull image on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "pulled"})
+}
+
+// handleInstancePruneImages prunes unused images on the instance.
+func handleInstancePruneImages(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+
+	var req struct {
+		DanglingOnly bool `json:"dangling_only"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.DanglingOnly = true
+	}
+
+	result, err := client.PruneImages(c.Request.Context(), req.DanglingOnly)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // =============================================================================
@@ -1042,11 +1058,10 @@ func handleInstanceForcePullImage(c *gin.Context) {
 // handleInstanceHostInfo returns host information for the instance.
 func handleInstanceHostInfo(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	info, err := client.GetHostInfo(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get host info from instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1056,11 +1071,10 @@ func handleInstanceHostInfo(c *gin.Context) {
 // handleInstanceHostStats returns host statistics for the instance.
 func handleInstanceHostStats(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	stats, err := client.GetHostStats(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get host stats from instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1073,17 +1087,16 @@ func handleInstanceHostStats(c *gin.Context) {
 // into the SystemInfo format.
 func handleInstanceSystemInfo(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	instanceID := c.MustGet("instance_id").(string)
 
 	info, err := client.GetHostInfo(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get host info from instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
 	stats, err := client.GetHostStats(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get host stats from instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1119,7 +1132,7 @@ func handleInstanceListServices(c *gin.Context) {
 
 	services, err := database.ListServicesByInstance(instanceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list services: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1161,7 +1174,7 @@ func handleInstanceDeleteService(c *gin.Context) {
 	}
 
 	if err := database.DeleteService(serviceID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete service: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1184,7 +1197,7 @@ func handleInstanceListDomains(c *gin.Context) {
 
 	domains, err := database.ListDomainsByInstance(instanceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list domains: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1234,7 +1247,7 @@ func handleInstanceCreateDomain(c *gin.Context) {
 	}
 
 	if err := database.SaveDomain(domain); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save domain: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1255,7 +1268,7 @@ func handleInstanceDeleteDomain(c *gin.Context) {
 	// Get domain to verify it belongs to this instance
 	domains, err := database.ListDomainsByInstance(instanceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list domains: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1274,7 +1287,7 @@ func handleInstanceDeleteDomain(c *gin.Context) {
 	}
 
 	if err := database.DeleteDomain(domainID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to delete domain: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1312,7 +1325,7 @@ func handleInstanceListRegistries(c *gin.Context) {
 	// Get all registry credentials from database
 	allCreds, err := database.ListRegistryCredentials()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list registries: %v", err)})
+		internalError(c, err)
 		return
 	}
 
@@ -1625,7 +1638,7 @@ func handleInstanceListApps(c *gin.Context) {
 			c.JSON(http.StatusOK, []docker.AppSummary{})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list apps on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	if apps == nil {
@@ -1677,7 +1690,7 @@ func handleInstanceListAppUpdates(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	recs, err := client.ListAppUpdates(c.Request.Context(), name, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to list app updates on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	if recs == nil {
@@ -1711,7 +1724,7 @@ func handleInstanceGetAppUpdate(c *gin.Context) {
 		client := c.MustGet("agent_client").(agent.AgentClient)
 		r, err := client.GetAppUpdate(c.Request.Context(), attemptID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get app update on instance %s: %v", instanceID, err)})
+			internalError(c, err)
 			return
 		}
 		rec = r
@@ -1845,7 +1858,7 @@ func handleInstanceTriggerAppUpdate(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to trigger app update on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"attempt_id": attemptID})
@@ -1939,7 +1952,7 @@ func handleInstanceSetAppAutoUpdate(c *gin.Context) {
 
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	if err := client.SetAppAutoUpdate(c.Request.Context(), name, req.Enabled); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to set auto-update on instance %s: %v", instanceID, err)})
+		internalError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

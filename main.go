@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,6 +27,7 @@ import (
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/logging"
 	"github.com/sdldev/dockpal/internal/metrics"
+	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/server"
 	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/web"
@@ -88,6 +90,8 @@ func main() {
 		restore(*from, *force)
 	case "reset-password":
 		resetPassword()
+	case "rotate-secrets":
+		rotateSecrets()
 	case "version":
 		fmt.Printf("Dockpal v%s\n", version)
 	case "help":
@@ -99,6 +103,7 @@ func main() {
 		fmt.Println("  backup          Create a database backup")
 		fmt.Println("  restore         Restore database from a backup")
 		fmt.Println("  reset-password  Reset admin password")
+		fmt.Println("  rotate-secrets  Rotate JWT/encryption secret")
 		fmt.Println("  version         Show version")
 		fmt.Println("  help            Show this help")
 	default:
@@ -136,6 +141,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 	defer logRotator.Close()
 	log.SetOutput(logRotator)
+	logging.ConfigureJSON(logRotator)
 
 	dbPath := os.Getenv("DOCKPAL_DB_PATH")
 	if dbPath == "" {
@@ -269,7 +275,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 		log.Fatalf("Failed to create agent manager: %v", err)
 	}
 
-// Initialize Prometheus metrics
+	// Initialize Prometheus metrics
 	if err := metrics.RegisterMetrics("v" + version); err != nil {
 		log.Fatalf("Failed to register Prometheus metrics: %v", err)
 	}
@@ -280,18 +286,21 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	// Add HTTP metrics middleware
 	srv.Router().Use(metrics.MetricsMiddleware())
 
-	server.RegisterRoutes(srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir, version)
+	appCtx, cancelApp := context.WithCancel(context.Background())
+	server.RegisterRoutes(appCtx, srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir, dbPath, version)
 
 	// Initialize and start background version check scheduler (6-hour interval)
 	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)
-	ctx, cancelScheduler := context.WithCancel(context.Background())
-	scheduler.Start(ctx, 6*time.Hour)
+	scheduler.Start(appCtx, 6*time.Hour)
 
 	// Initialize and start background backup scheduler
 	backupInterval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
 	backupRetention := parseDurationEnv("DOCKPAL_BACKUP_RETENTION", 168*time.Hour)
 	backupScheduler := backupPkg.NewScheduler(database, dataDir, backupInterval, backupRetention)
-	backupScheduler.Start(ctx)
+	backupScheduler.Start(appCtx)
+
+	auditRetention := parseDurationEnv("DOCKPAL_AUDIT_LOG_RETENTION", 2160*time.Hour)
+	startAuditRetentionWorker(appCtx, database, auditRetention)
 
 	// Serve embedded frontend
 	assetsFS, _ := fs.Sub(web.Assets, "assets")
@@ -305,7 +314,14 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	srv.Router().GET("/", func(c *gin.Context) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
 	})
-	// Note: NoRoute handler removed to avoid conflicts with API routes like /metrics
+	// SPA fallback: serve index.html for client-side routes (/dashboard, /containers, etc.)
+	srv.Router().NoRoute(func(c *gin.Context) {
+		if c.Request.Method == "GET" && !strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
 
 	go func() {
 		if err := srv.Run(); err != nil {
@@ -313,21 +329,21 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 		}
 	}()
 
-	log.Printf("Dockpal v%s running on port 3012", version)
+	slog.Info("server started", "component", "startup", "version", version, "port", 3012)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down...")
-	// Stop the schedulers first for graceful shutdown
-	cancelScheduler()
+	slog.Info("shutdown requested", "component", "shutdown")
+	cancelApp()
 	scheduler.Stop()
 	backupScheduler.Stop()
+	server.StopBackgroundWorkers()
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), srv.ShutdownTimeout())
 	defer cancelShutdown()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		slog.Error("server shutdown failed", "component", "shutdown", "error", err)
 	}
 }
 
@@ -360,11 +376,20 @@ func backup(outputPath string) {
 	if err := database.BackupTo(outputPath); err != nil {
 		log.Fatalf("Backup failed: %v", err)
 	}
+	checksumVerified, err := db.ValidateBackup(outputPath)
+	if err != nil {
+		log.Fatalf("Backup verification failed: %v", err)
+	}
 
 	checksumPath := outputPath + ".sha256"
 	checksum, _ := os.ReadFile(checksumPath)
 	fmt.Printf("Backup created: %s\n", outputPath)
 	fmt.Printf("Checksum: %s\n", strings.TrimSpace(string(checksum)))
+	if checksumVerified {
+		fmt.Println("Verification: OK")
+	} else {
+		fmt.Println("Verification: OK (checksum sidecar missing)")
+	}
 }
 
 func restore(fromPath string, force bool) {
@@ -422,6 +447,124 @@ func restore(fromPath string, force bool) {
 	fmt.Println("Database restored successfully")
 }
 
+func rotateSecrets() {
+	if os.Getenv("JWT_SECRET") != "" {
+		log.Fatal("rotate-secrets requires file-based secrets; unset JWT_SECRET and use DOCKPAL_SECRET_PATH")
+	}
+
+	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
+	if dataDir == "" {
+		dataDir = defaultDataDir
+	}
+	dataDir = mustAbs("DOCKPAL_DATA_DIR", dataDir)
+
+	dbPath := os.Getenv("DOCKPAL_DB_PATH")
+	if dbPath == "" {
+		dbPath = filepath.Join(dataDir, "dockpal.db")
+	}
+	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
+
+	secretPath := os.Getenv("DOCKPAL_SECRET_PATH")
+	if secretPath == "" {
+		secretPath = filepath.Join(dataDir, ".secret")
+	}
+	secretPath = mustAbs("DOCKPAL_SECRET_PATH", secretPath)
+
+	oldSecret, err := auth.LoadOrGenerateSecretAt(secretPath)
+	if err != nil {
+		log.Fatalf("Failed to load current secret: %v", err)
+	}
+	newSecret, err := generateSecretHex()
+	if err != nil {
+		log.Fatalf("Failed to generate new secret: %v", err)
+	}
+	oldKey, err := registry.DeriveKey(oldSecret)
+	if err != nil {
+		log.Fatalf("Failed to derive old encryption key: %v", err)
+	}
+	newKey, err := registry.DeriveKey(newSecret)
+	if err != nil {
+		log.Fatalf("Failed to derive new encryption key: %v", err)
+	}
+
+	database, err := db.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	backupPath := filepath.Join(dataDir, "backups", fmt.Sprintf("pre-secret-rotation-%s.db", time.Now().Format("20060102-150405")))
+	if err := database.BackupTo(backupPath); err != nil {
+		log.Fatalf("Pre-rotation backup failed: %v", err)
+	}
+	if _, err := db.ValidateBackup(backupPath); err != nil {
+		log.Fatalf("Pre-rotation backup verification failed: %v", err)
+	}
+
+	registries, err := database.ListRegistryCredentials()
+	if err != nil {
+		log.Fatalf("Failed to list registry credentials: %v", err)
+	}
+	for _, cred := range registries {
+		plaintext, err := registry.Decrypt(cred.EncryptedToken, oldKey)
+		if err != nil {
+			log.Fatalf("Failed to decrypt registry credential %s: %v", cred.ID, err)
+		}
+		cred.EncryptedToken, err = registry.Encrypt(plaintext, newKey)
+		for i := range plaintext {
+			plaintext[i] = 0
+		}
+		if err != nil {
+			log.Fatalf("Failed to re-encrypt registry credential %s: %v", cred.ID, err)
+		}
+		cred.UpdatedAt = time.Now().Unix()
+		if err := database.SaveRegistryCredential(cred); err != nil {
+			log.Fatalf("Failed to save registry credential %s: %v", cred.ID, err)
+		}
+	}
+
+	instances, err := database.ListInstances()
+	if err != nil {
+		log.Fatalf("Failed to list instances: %v", err)
+	}
+	for _, inst := range instances {
+		if len(inst.AgentTokenEncrypted) == 0 {
+			continue
+		}
+		plaintext, err := registry.Decrypt(inst.AgentTokenEncrypted, oldKey)
+		if err != nil {
+			log.Fatalf("Failed to decrypt instance token %s: %v", inst.ID, err)
+		}
+		inst.AgentTokenEncrypted, err = registry.Encrypt(plaintext, newKey)
+		for i := range plaintext {
+			plaintext[i] = 0
+		}
+		if err != nil {
+			log.Fatalf("Failed to re-encrypt instance token %s: %v", inst.ID, err)
+		}
+		if err := database.SaveInstance(inst); err != nil {
+			log.Fatalf("Failed to save instance %s: %v", inst.ID, err)
+		}
+	}
+
+	if err := database.IncrementAllTokenVersions(); err != nil {
+		log.Fatalf("Failed to invalidate existing JWT tokens: %v", err)
+	}
+	if err := os.WriteFile(secretPath, []byte(newSecret), 0600); err != nil {
+		log.Fatalf("Failed to write new secret: %v", err)
+	}
+
+	fmt.Printf("Secrets rotated successfully. Verified backup: %s\n", backupPath)
+}
+
+func generateSecretHex() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
 func resetPassword() {
 	dbPath := os.Getenv("DOCKPAL_DB_PATH")
 	if dbPath == "" {
@@ -468,6 +611,37 @@ func parseDurationEnv(name string, defaultVal time.Duration) time.Duration {
 		log.Fatalf("Invalid %s value %q: %v", name, raw, err)
 	}
 	return d
+}
+
+func startAuditRetentionWorker(ctx context.Context, database *db.DB, retention time.Duration) {
+	if retention == 0 {
+		slog.Info("audit log retention disabled", "component", "audit")
+		return
+	}
+	purge := func() {
+		cutoff := time.Now().Add(-retention)
+		deleted, err := database.PurgeAuditLogsOlderThan(cutoff)
+		if err != nil {
+			slog.Error("audit log purge failed", "component", "audit", "cutoff", cutoff.Format(time.RFC3339), "error", err)
+			return
+		}
+		if deleted > 0 {
+			slog.Info("audit logs purged", "component", "audit", "deleted", deleted, "cutoff", cutoff.Format(time.RFC3339))
+		}
+	}
+	purge()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				purge()
+			}
+		}
+	}()
 }
 
 // parseIntEnv reads a positive integer from an environment variable.

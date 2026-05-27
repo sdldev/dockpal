@@ -40,17 +40,18 @@ type CheckResult struct {
 
 // HealthResponse represents the complete health check response
 type HealthResponse struct {
-	Status    Status                   `json:"status"`
-	Timestamp string                   `json:"timestamp"`
-	Uptime    string                   `json:"uptime"`
-	Version   string                   `json:"version"`
-	Checks    map[string]CheckResult   `json:"checks"`
-	summary   map[CheckStatus]int      // internal summary
+	Status    Status                 `json:"status"`
+	Timestamp string                 `json:"timestamp"`
+	Uptime    string                 `json:"uptime"`
+	Version   string                 `json:"version"`
+	Checks    map[string]CheckResult `json:"checks"`
+	summary   map[CheckStatus]int    // internal summary
 }
 
 // Checker performs health checks on various system components
 type Checker struct {
 	dbPath       string
+	dataDir      string
 	dockerClient DockerClient
 	startTime    time.Time
 	version      string
@@ -63,9 +64,13 @@ type DockerClient interface {
 }
 
 // NewChecker creates a new health checker
-func NewChecker(dbPath string, dockerClient DockerClient, version string) *Checker {
+func NewChecker(dbPath, dataDir string, dockerClient DockerClient, version string) *Checker {
+	if dataDir == "" {
+		dataDir = "/"
+	}
 	return &Checker{
 		dbPath:       dbPath,
+		dataDir:      dataDir,
 		dockerClient: dockerClient,
 		startTime:    time.Now(),
 		version:      version,
@@ -85,10 +90,11 @@ func (c *Checker) CheckHealth(ctx context.Context) *HealthResponse {
 
 	// Perform all health checks
 	checks := map[string]func(context.Context) CheckResult{
-		"database": c.checkDatabase,
-		"docker":   c.checkDocker,
-		"disk":     c.checkDiskSpace,
-		"memory":   c.checkMemory,
+		"database":  c.checkDatabase,
+		"docker":    c.checkDocker,
+		"disk_root": c.checkRootDiskSpace,
+		"disk_data": c.checkDataDiskSpace,
+		"memory":    c.checkMemory,
 	}
 
 	for name, checkFunc := range checks {
@@ -166,7 +172,7 @@ func (c *Checker) CheckReadiness(ctx context.Context) *HealthResponse {
 // checkDatabase tests database connectivity and basic operations
 func (c *Checker) checkDatabase(ctx context.Context) CheckResult {
 	start := time.Now()
-	
+
 	// Test database connection and basic operations
 	db, err := bbolt.Open(c.dbPath, 0600, &bbolt.Options{Timeout: 2 * time.Second})
 	if err != nil {
@@ -223,7 +229,7 @@ func (c *Checker) checkDatabase(ctx context.Context) CheckResult {
 // checkDocker tests Docker daemon connectivity
 func (c *Checker) checkDocker(ctx context.Context) CheckResult {
 	start := time.Now()
-	
+
 	if c.dockerClient == nil {
 		return CheckResult{
 			Status:      CheckFail,
@@ -251,20 +257,31 @@ func (c *Checker) checkDocker(ctx context.Context) CheckResult {
 	}
 }
 
-// checkDiskSpace checks available disk space
-func (c *Checker) checkDiskSpace(ctx context.Context) CheckResult {
+func (c *Checker) checkRootDiskSpace(ctx context.Context) CheckResult {
+	return c.checkDiskSpace(ctx, "/")
+}
+
+func (c *Checker) checkDataDiskSpace(ctx context.Context) CheckResult {
+	return c.checkDiskSpace(ctx, c.dataDir)
+}
+
+// checkDiskSpace checks available disk space for path.
+func (c *Checker) checkDiskSpace(ctx context.Context, path string) CheckResult {
 	start := time.Now()
-	
+	if path == "" {
+		path = "/"
+	}
+
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
+	if err := syscall.Statfs(path, &stat); err != nil {
 		return CheckResult{
 			Status:      CheckWarn,
 			Description: fmt.Sprintf("Cannot check disk space: %v", err),
 			Duration:    time.Since(start).String(),
+			Details:     map[string]interface{}{"path": path},
 		}
 	}
 
-	// Calculate available space in bytes and MB
 	availableBytes := stat.Bavail * uint64(stat.Bsize)
 	availableMB := availableBytes / (1024 * 1024)
 	totalBytes := stat.Blocks * uint64(stat.Bsize)
@@ -272,19 +289,19 @@ func (c *Checker) checkDiskSpace(ctx context.Context) CheckResult {
 	usedPercent := float64(totalBytes-availableBytes) / float64(totalBytes) * 100
 
 	details := map[string]interface{}{
+		"path":         path,
 		"available_mb": availableMB,
 		"total_mb":     totalMB,
 		"used_percent": usedPercent,
 	}
 
-	// Determine status based on available space
 	status := CheckPass
 	description := "Disk space OK"
-	
-	if availableMB < 100 { // Less than 100MB
+
+	if availableMB < 100 {
 		status = CheckFail
 		description = "Critically low disk space"
-	} else if availableMB < 500 { // Less than 500MB
+	} else if availableMB < 500 {
 		status = CheckWarn
 		description = "Low disk space"
 	}
@@ -300,7 +317,7 @@ func (c *Checker) checkDiskSpace(ctx context.Context) CheckResult {
 // checkMemory checks available system memory
 func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	start := time.Now()
-	
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
@@ -320,7 +337,7 @@ func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	// Determine status based on available memory
 	status := CheckPass
 	description := "Memory usage OK"
-	
+
 	if availableMB < 50 { // Less than 50MB available
 		status = CheckFail
 		description = "Critically low memory"

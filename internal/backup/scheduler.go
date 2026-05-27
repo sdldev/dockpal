@@ -3,7 +3,7 @@ package backup
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,13 +85,22 @@ func (s *Scheduler) performBackup() {
 	path := filepath.Join(backupDir, fmt.Sprintf("dockpal-%s.db", timestamp))
 
 	if err := s.database.BackupTo(path); err != nil {
-		log.Printf("[ERROR] scheduled backup failed: %v", err)
+		slog.Error("scheduled backup failed", "component", "backup", "error", err)
+		return
+	}
+	checksumVerified, err := db.ValidateBackup(path)
+	if err != nil {
+		slog.Error("scheduled backup verification failed", "component", "backup", "path", path, "error", err)
 		return
 	}
 
 	checksumPath := path + ".sha256"
 	checksum, _ := os.ReadFile(checksumPath)
-	log.Printf("[INFO] scheduled backup created: %s (checksum: %s)", path, strings.TrimSpace(string(checksum)))
+	if checksumVerified {
+		slog.Info("scheduled backup created and verified", "component", "backup", "path", path, "checksum", strings.TrimSpace(string(checksum)))
+	} else {
+		slog.Warn("scheduled backup created without checksum sidecar", "component", "backup", "path", path)
+	}
 
 	if s.retention > 0 {
 		s.cleanupOldBackups()
@@ -102,7 +111,7 @@ func (s *Scheduler) cleanupOldBackups() {
 	backupDir := filepath.Join(s.dataDir, "backups")
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
-		log.Printf("[WARN] failed to read backup directory for cleanup: %v", err)
+		slog.Warn("failed to read backup directory for cleanup", "component", "backup", "error", err)
 		return
 	}
 
@@ -124,11 +133,11 @@ func (s *Scheduler) cleanupOldBackups() {
 		if info.ModTime().Before(cutoff) {
 			path := filepath.Join(backupDir, name)
 			if err := os.Remove(path); err != nil {
-				log.Printf("[WARN] failed to remove old backup %s: %v", path, err)
+				slog.Warn("failed to remove old backup", "component", "backup", "path", path, "error", err)
 				continue
 			}
 			_ = os.Remove(path + ".sha256")
-			log.Printf("[INFO] removed old backup: %s", path)
+			slog.Info("removed old backup", "component", "backup", "path", path)
 		}
 	}
 }
