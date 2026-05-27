@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
@@ -217,11 +218,11 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	// Ensure default admin user exists
 	generatedAdminPassword := false
 	if adminPassword == "" {
-		passwordBytes := make([]byte, 18)
-		if _, err := rand.Read(passwordBytes); err != nil {
+		var err error
+		adminPassword, err = generatePassword(12)
+		if err != nil {
 			log.Fatalf("Failed to generate initial admin password: %v", err)
 		}
-		adminPassword = hex.EncodeToString(passwordBytes)
 		generatedAdminPassword = true
 	}
 	if len(adminPassword) < 8 {
@@ -474,7 +475,7 @@ func rotateSecrets() {
 	if err != nil {
 		log.Fatalf("Failed to load current secret: %v", err)
 	}
-	newSecret, err := generateSecretHex()
+	newSecret, err := generateSecretHex(32)
 	if err != nil {
 		log.Fatalf("Failed to generate new secret: %v", err)
 	}
@@ -557,8 +558,22 @@ func rotateSecrets() {
 	fmt.Printf("Secrets rotated successfully. Verified backup: %s\n", backupPath)
 }
 
-func generateSecretHex() (string, error) {
-	buf := make([]byte, 32)
+// generatePassword creates a cryptographically random alphanumeric password.
+func generatePassword(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	result := make([]byte, length)
+	for i := range result {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = charset[n.Int64()]
+	}
+	return string(result), nil
+}
+
+func generateSecretHex(length int) (string, error) {
+	buf := make([]byte, length)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
@@ -574,16 +589,14 @@ func resetPassword() {
 
 	database, err := db.New(dbPath)
 	if err != nil {
-		log.Fatalf("Failed to open database: %v", err)
+		log.Printf("Failed to open database: %v", err)
+		log.Fatalf("If Dockpal server is running, stop it first: systemctl stop dockpal")
 	}
 	defer database.Close()
 
-	fmt.Print("Enter new admin password: ")
-	var password string
-	fmt.Scanln(&password)
-
-	if len(password) < 8 {
-		log.Fatal("Password must be at least 8 characters")
+	password, err := generatePassword(12)
+	if err != nil {
+		log.Fatalf("Failed to generate password: %v", err)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -595,7 +608,9 @@ func resetPassword() {
 		log.Fatalf("Failed to update password: %v", err)
 	}
 
-	fmt.Println("Dockpal: password reset successfully")
+	fmt.Printf("Dockpal: password reset successfully\n")
+	fmt.Printf("New admin password: %s\n", password)
+	fmt.Printf("Username: admin\n")
 }
 
 // parseDurationEnv reads a duration from an environment variable.

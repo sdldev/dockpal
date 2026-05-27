@@ -330,6 +330,16 @@ verify_installation() {
     return 1
 }
 
+# Retrieve the generated admin password from journalctl.
+# Returns the password on stdout, or empty string if not found.
+fetch_admin_password() {
+    local log_line
+    log_line=$(journalctl -u dockpal --no-pager 2>/dev/null | grep "Generated initial admin password for username admin:" | tail -1 || true)
+    if [[ -n "$log_line" ]]; then
+        echo "$log_line" | sed -n 's/.*admin: //p'
+    fi
+}
+
 open_firewall() {
     # Open port 3012 in any active host firewall so the UI is reachable from outside.
     # Failures are non-fatal: the service is already running, the user can open it manually.
@@ -392,7 +402,14 @@ main() {
     echo ""
     log_info "Installation complete!"
     log_info "Access Dockpal at: http://${ip}:3012"
-    log_info "Default credentials: admin / admin"
+    local admin_pass
+    admin_pass=$(fetch_admin_password)
+    if [[ -n "$admin_pass" ]]; then
+        log_info "Default credentials: admin / $admin_pass"
+    else
+        log_warn "Could not retrieve admin password from logs"
+        log_info "Check logs with: journalctl -u dockpal --no-pager | grep Generated"
+    fi
     echo ""
 }
 
