@@ -237,6 +237,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 	if generatedAdminPassword {
 		log.Printf("Generated initial admin password for username admin: %s", adminPassword)
+		fmt.Fprintf(os.Stderr, "Generated initial admin password for username admin: %s\n", adminPassword)
 		log.Printf("Set DOCKPAL_INITIAL_ADMIN_PASSWORD before first startup to choose a bootstrap password")
 	}
 

@@ -329,12 +329,19 @@ verify_installation() {
     log_error "Check logs with: journalctl -u dockpal -n 100 --no-pager"
     return 1
 }
-
-# Retrieve the generated admin password from journalctl.
+# Retrieve the generated admin password from journalctl or log file.
 # Returns the password on stdout, or empty string if not found.
 fetch_admin_password() {
     local log_line
+    # Try journalctl first (stderr output captured by systemd)
     log_line=$(journalctl -u dockpal --no-pager 2>/dev/null | grep "Generated initial admin password for username admin:" | tail -1 || true)
+    if [[ -z "$log_line" ]]; then
+        # Fallback: read from the log file
+        local log_file="/opt/dockpal/data/dockpal.log"
+        if [[ -f "$log_file" ]]; then
+            log_line=$(grep "Generated initial admin password for username admin:" "$log_file" | tail -1 || true)
+        fi
+    fi
     if [[ -n "$log_line" ]]; then
         echo "$log_line" | sed -n 's/.*admin: //p'
     fi
