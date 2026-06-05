@@ -97,7 +97,7 @@ Dockpal.initialState = function() {
       apps: { search: '' }
     },
 
-    instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '' },
+    instanceForm: { name: '', mode: 'direct', host: '', port: 9273, installCommand: '', autoInstall: false, sshHost: '', sshPort: 22, sshUser: 'root', sshAuthType: 'password', sshSecret: '', installDocker: true, installing: false, installLogs: [] },
     installCommandModal: { show: false, command: '', instanceId: '' },
 
     // Profile state
