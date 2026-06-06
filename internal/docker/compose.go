@@ -51,6 +51,7 @@ type VolumeMount struct {
 // ParseComposeFile parses a docker-compose YAML string into a ComposeFile struct.
 func ParseComposeFile(yamlContent string) (*ComposeFile, error) {
 	var cf ComposeFile
+	yamlContent = SubstituteComposeEnv(yamlContent)
 	if err := yaml.Unmarshal([]byte(yamlContent), &cf); err != nil {
 		return nil, fmt.Errorf("invalid compose YAML: %w", err)
 	}
@@ -408,6 +409,8 @@ type AuthHeaderFunc func(imageRef string) (string, error)
 // If getAuthHeader is non-nil, it will be called per image to get registry credentials.
 // If forcePull is true, images are always pulled even if they already exist locally.
 func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML string, getAuthHeader AuthHeaderFunc, forcePull bool) error {
+	composeYAML = SubstituteComposeEnv(composeYAML)
+
 	if err := writeComposeFile(projectName, composeYAML); err != nil {
 		return err
 	}
