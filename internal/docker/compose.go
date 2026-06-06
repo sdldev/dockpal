@@ -258,7 +258,13 @@ func (c *Client) pullImageIfNeeded(ctx context.Context, image string, registryAu
 	return c.PullImage(ctx, image)
 }
 
-const composeBaseDir = "/opt/dockpal/compose"
+func composeBaseDir() string {
+	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "/opt/dockpal/data"
+	}
+	return filepath.Join(filepath.Dir(dataDir), "compose")
+}
 
 func composeProjectDir(projectName string) (string, error) {
 	if err := validator.ValidateContainerName(projectName); err != nil {
@@ -267,7 +273,7 @@ func composeProjectDir(projectName string) (string, error) {
 	if strings.Contains(projectName, "..") || strings.ContainsAny(projectName, `/\\`) {
 		return "", fmt.Errorf("invalid project name")
 	}
-	base := filepath.Clean(composeBaseDir)
+	base := filepath.Clean(composeBaseDir())
 	composeDir := filepath.Clean(filepath.Join(base, projectName))
 	if composeDir == base || !strings.HasPrefix(composeDir, base+string(os.PathSeparator)) {
 		return "", fmt.Errorf("invalid project path")

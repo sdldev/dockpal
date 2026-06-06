@@ -20,7 +20,7 @@ type RepoInfo struct {
 
 func Clone(repoURL, branch, token string) (*RepoInfo, error) {
 	repoName := extractRepoName(repoURL)
-	repoPath := filepath.Join("/opt/dockpal/repos", repoName)
+	repoPath := filepath.Join(getReposDir(), repoName)
 
 	if err := os.MkdirAll(repoPath, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create repo directory: %w", err)
@@ -119,4 +119,12 @@ func detectComposeFiles(repoPath string) []string {
 		}
 	}
 	return found
+}
+
+func getReposDir() string {
+	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "/opt/dockpal/data"
+	}
+	return filepath.Join(filepath.Dir(dataDir), "repos")
 }
