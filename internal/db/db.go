@@ -357,7 +357,7 @@ func (d *DB) SaveService(svc Service) error {
 }
 
 func (d *DB) ListServices() ([]Service, error) {
-	var services []Service
+	services := make([]Service, 0)
 	err := d.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketServices)
 		return b.ForEach(func(k, v []byte) error {
@@ -398,7 +398,7 @@ func (d *DB) DeleteService(id string) error {
 // For "local" instance, returns services with empty InstanceID.
 // For other instances, returns services with matching InstanceID.
 func (d *DB) ListServicesByInstance(instanceID string) ([]Service, error) {
-	var services []Service
+	services := make([]Service, 0)
 	err := d.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketServices)
 		return b.ForEach(func(k, v []byte) error {
