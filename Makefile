@@ -24,6 +24,11 @@ dev: build
 	@echo "Starting Dockpal dev server on port 3012..."
 	DOCKPAL_DATA_DIR=$(CURDIR)/.data ./dockpal server
 
+## dev-watch: Build and run with hot reload on .go file changes (requires reflex)
+dev-watch:
+	@echo "Starting Dockpal dev server with hot reload (reflex)..."
+	@reflex -r '\.go$$' -R '_test\.go$$' -s -- sh -c 'go build -o .dockpal-dev . && DOCKPAL_DATA_DIR=$(CURDIR)/.data ./.dockpal-dev server'
+
 ## test: Run unit tests
 test:
 	@echo "Running tests..."

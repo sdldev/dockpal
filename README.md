@@ -1,387 +1,721 @@
 # Dockpal
 
-Lightweight Docker management platform — single binary, embedded UI, multi-instance support.
+Self-hosted Docker management panel — single binary, embedded UI, no dependencies.
 
-Manage containers, deploy stacks, monitor resources, and orchestrate remote Docker hosts from a clean web dashboard.
+Manage containers, deploy compose stacks, monitor resources, and control multiple remote Docker hosts from one dashboard.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Development](#development)
+- [Configuration](#configuration)
+- [CLI Reference](#cli-reference)
+- [API Reference](#api-reference)
+- [Health Checks](#health-checks)
+- [Metrics](#metrics)
+- [Backup & Restore](#backup--restore)
+- [TLS](#tls)
+- [Multi-Instance](#multi-instance)
+- [RBAC](#rbac)
+- [Production Install](#production-install)
+- [Project Structure](#project-structure)
+
+---
 
 ## Features
 
-- Real-time CPU, memory, and network monitoring (host + per-container)
-- One-click deploy from 25+ templates (PostgreSQL, Redis, Grafana, n8n, etc.)
-- Compose & Git deploy with streamed progress logs
-- Multi-instance management — manage remote Docker hosts via DockPal Agent
-- Fleet Dashboard — global view of all instances and bulk deploy
-- RBAC — admin, operator, viewer roles
-- Private registry support (encrypted PAT tokens)
-- Traefik integration & Cloudflare Tunnel support
-- Auto-recovery for crashed containers
-- Self-update mechanism
-- Embedded UI — works offline, no CDN dependencies
-- Prometheus metrics export for external monitoring
-- Comprehensive health check endpoints for monitoring
+| Category | Details |
+|---|---|
+| **Containers** | List, start, stop, restart, delete, inspect, tail logs, real-time stats |
+| **Deploy** | Compose YAML, Git repo deploy, 25+ built-in templates (PostgreSQL, Redis, Grafana, n8n, …) |
+| **Images** | Pull, check updates, prune, registry auth |
+| **Files** | Browse, read, write, upload, download files inside containers |
+| **Domains** | Traefik integration, custom domain routing |
+| **Tunnel** | Cloudflare Tunnel setup & teardown |
+| **Multi-instance** | Manage remote Docker hosts via DockPal Agent (direct or WebSocket edge) |
+| **Fleet** | Global dashboard across all instances, bulk deploy |
+| **Security** | RBAC (admin / operator / viewer), JWT auth, rate limiting, audit log |
+| **Registry** | Private registry credentials, encrypted at rest |
+| **Webhooks** | Trigger deploys from CI/CD pipelines |
+| **API Keys** | Programmatic access without username/password |
+| **Monitoring** | Prometheus metrics, health endpoints, auto-recovery for crashed containers |
+| **Backup** | Scheduled + on-demand database backup, restore, retention policy |
 
-## Quick Start (Development)
+---
 
-```bash
-git clone https://github.com/sdldev/dockpal.git
-cd dockpal
-make dev
-```
-
-This builds the binary and starts the server on port 3012 with local data directory (`.data/`).
-
-Open http://localhost:3012 and log in as `admin`. On first startup, DockPal generates an initial admin password and prints it in the server logs. To choose the bootstrap password yourself, set `DOCKPAL_INITIAL_ADMIN_PASSWORD` before the first startup.
-
-## Development
+## Quick Start
 
 ### Prerequisites
 
 - Go 1.25+
-- Docker (running)
+- Docker daemon running
+- `git`
 
-### Commands
+### Run locally
 
 ```bash
-make dev              # Build + run server locally
-make build            # Build binary
-make test             # Run all tests
-make lint             # Run go vet
-make clean            # Remove build artifacts
+git clone https://github.com/sdldev/dockpal
+cd dockpal
+make dev
 ```
 
-### Environment Variables
+Server starts at **http://localhost:3012**.
+
+On first startup, admin credentials are printed to the log:
+
+```
+Generated initial admin password for username admin: <password>
+```
+
+Set `DOCKPAL_INITIAL_ADMIN_PASSWORD` before first startup to choose your own password instead.
+
+---
+
+## Development
+
+### Hot reload (recommended)
+
+Requires [`reflex`](https://github.com/cespare/reflex):
+
+```bash
+# install reflex once
+go install github.com/cespare/reflex@latest
+# or on Debian/Ubuntu
+sudo apt install reflex
+
+# start dev server with auto-rebuild on .go changes
+make dev-watch
+```
+
+Every time you save a `.go` file, reflex kills the old process, rebuilds, and restarts the server automatically.
+
+**Frontend changes** (HTML/JS in `web/`) take effect on browser refresh — no restart needed.
+
+### Common commands
+
+```bash
+make build              # build ./dockpal binary
+make dev                # build + run once (no watch)
+make dev-watch          # build + run with hot reload
+make test               # go test -v ./...
+make lint               # go vet ./...
+make install-hooks      # install pre-commit hook (runs vet + test)
+make build-linux-amd64  # cross-compile for linux/amd64
+make clean              # remove build artifacts
+```
+
+### Run a specific test
+
+```bash
+# single test in a package
+go test ./internal/server -run TestName -v
+
+# rerun without cache
+go test ./internal/docker -run TestName -count=1
+
+# multiple tests across packages
+go test ./... -run 'TestA|TestB'
+```
+
+### Data directory
+
+Dev data lives in `.data/` (created automatically):
+
+```
+.data/
+├── dockpal.db        # BBolt database
+├── dockpal.log       # rotating log
+├── .secret           # JWT signing key
+└── backups/          # scheduled backups
+```
+
+---
+
+## Configuration
+
+All configuration is via environment variables. No config file is required.
+
+### Core
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `DOCKPAL_DATA_DIR` | `/opt/dockpal/data` | Data directory (DB, logs, secrets) |
-| `DOCKPAL_DB_PATH` | `<DATA_DIR>/dockpal.db` | BBolt database path |
-| `DOCKPAL_LOG_PATH` | `<DATA_DIR>/dockpal.log` | Log file path |
-| `DOCKPAL_SECRET_PATH` | `<DATA_DIR>/.secret` | JWT secret file |
-| `DOCKPAL_INITIAL_ADMIN_PASSWORD` | auto-generated | Initial `admin` password used only when the admin user is first created |
-| `JWT_SECRET` | auto-generated | Override JWT signing key |
-| `DOCKPAL_TLS_DOMAIN` | | ACME Let's Encrypt domain |
-| `DOCKPAL_TLS_CERT` | | Custom TLS certificate path |
-| `DOCKPAL_TLS_KEY` | | Custom TLS key path |
-| `DOCKPAL_BACKUP_INTERVAL` | `24h` | Automatic backup interval (set to `0` to disable) |
-| `DOCKPAL_BACKUP_RETENTION` | `168h` | How long to keep automatic backups |
+|---|---|---|
+| `DOCKPAL_DATA_DIR` | `/opt/dockpal/data` | Root directory for db, log, secret, backups |
+| `DOCKPAL_DB_PATH` | `<data_dir>/dockpal.db` | BBolt database path |
+| `DOCKPAL_LOG_PATH` | `<data_dir>/dockpal.log` | Rotating log file path |
+| `DOCKPAL_SECRET_PATH` | `<data_dir>/.secret` | JWT signing key file |
+| `JWT_SECRET` | — | Override JWT signing key directly (skips file) |
+| `PORT` | `3012` (HTTP) / `3443` (TLS) | Server listen port |
+| `DOCKPAL_INITIAL_ADMIN_PASSWORD` | random (printed to log) | Admin password on first startup |
 
-### Configuration Validation
+### TLS
 
-Dockpal performs comprehensive configuration validation at startup to prevent runtime errors. The validation checks:
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKPAL_TLS` | `false` | Enable TLS |
+| `DOCKPAL_TLS_CERT` | — | Path to TLS certificate file |
+| `DOCKPAL_TLS_KEY` | — | Path to TLS key file |
+| `DOCKPAL_TLS_DOMAIN` | — | Domain for ACME/Let's Encrypt auto-cert |
 
-**Path Validation**
-- All directories are created and writable
-- Minimum 100MB disk space available (with warnings for low space)
-- Absolute path requirements enforced
+TLS modes (pick one):
+- **Custom cert**: set `DOCKPAL_TLS=true` + `DOCKPAL_TLS_CERT` + `DOCKPAL_TLS_KEY`
+- **ACME/Let's Encrypt**: set `DOCKPAL_TLS_DOMAIN` (cert auto-generated)
+- **Self-signed**: set `DOCKPAL_TLS=true` without cert/key (generates on startup)
 
-**System Dependencies**
-- Docker daemon connectivity and accessibility
-- Port availability (detects conflicts with existing services)
-- Database file creation and read/write operations
+### Backup
 
-**Resource Checks**
-- Available system memory (warnings for low memory conditions)
-- TLS configuration validation (when enabled)
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKPAL_BACKUP_INTERVAL` | `24h` | Scheduled backup interval (`0` = disable) |
+| `DOCKPAL_BACKUP_RETENTION` | `168h` (7 days) | How long to keep automatic backups |
 
-**Configuration Logging**
-At startup, Dockpal logs all configuration values **without sensitive data**:
-- Passwords and secrets are shown as `[SET]` or `[WILL BE GENERATED]`
-- Full configuration summary helps with troubleshooting
+### Agent
 
-**Example Validation Output**
-```
-Starting configuration validation...
-Docker daemon connection: OK
-Port 3012 availability: OK
-Database connectivity: OK
-System resources: 512.0 MB memory available
-=== Configuration Summary ===
-Data Directory: /opt/dockpal/data
-Database Path: /opt/dockpal/data/dockpal.db
-Log Path: /opt/dockpal/data/dockpal.log
-Port: 3012
-TLS Enabled: false
-Admin Password: [SET]
-JWT Secret: [WILL BE GENERATED]
-=== End Configuration Summary ===
-Configuration validation completed successfully
-```
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKPAL_AGENT_IMAGE` | — | Docker image used for remote agent install commands |
 
-If validation fails, Dockpal will display specific error messages and exit with a non-zero status code, preventing partial startup states.
+### Audit log
 
-### Reset Admin Password
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKPAL_AUDIT_LOG_RETENTION` | `2160h` (90 days) | How long to retain audit log entries |
+
+### Example: minimal dev env
 
 ```bash
-./dockpal reset-password
+DOCKPAL_DATA_DIR=$(pwd)/.data \
+DOCKPAL_INITIAL_ADMIN_PASSWORD=mypassword \
+./dockpal server
 ```
 
-### Backup & Restore
-
-**CLI Backup** (requires server to be stopped because BoltDB uses file locking):
+### Example: production with TLS
 
 ```bash
-# Default backup path: <data_dir>/backups/dockpal-<timestamp>.db
-./dockpal backup
-
-# Custom output path
-./dockpal backup --output /opt/dockpal/backups/my-backup.db
+DOCKPAL_DATA_DIR=/opt/dockpal/data \
+DOCKPAL_TLS_DOMAIN=panel.example.com \
+PORT=443 \
+./dockpal server
 ```
 
-**Hot Backup** (while server is running) via the admin API:
+---
+
+## CLI Reference
+
+```
+dockpal <subcommand> [flags]
+
+Subcommands:
+  server            Start the HTTP server
+  backup            Create a database backup
+  restore           Restore a database from backup
+  reset-password    Reset a user's password
+  version           Print version
+  help              Show this help
+```
+
+### `dockpal server`
+
+Starts the web server. Reads all config from environment variables.
 
 ```bash
-curl -X POST https://localhost:3012/api/backup \
-  -H "Authorization: Bearer <admin-jwt>"
+DOCKPAL_DATA_DIR=/opt/dockpal/data ./dockpal server
 ```
 
-**Restore** (requires server to be stopped):
+### `dockpal backup`
+
+On-demand backup of the database.
 
 ```bash
-# Interactive confirmation
-./dockpal restore --from /opt/dockpal/backups/dockpal-20260521-120000.db
-
-# Skip confirmation
-./dockpal restore --from /path/to/backup.db --force
+./dockpal backup --output /tmp/dockpal-backup.db
 ```
 
-Backups include a sidecar `.sha256` checksum file. The restore command validates
-the backup integrity and checksum before replacing the live database.
+### `dockpal restore`
 
-### Automated Backup Scheduling
-
-The server includes a built-in background scheduler that automatically backs up
-the database at regular intervals. It is enabled by default with a `24h` interval.
-
-**Configuration:**
+Restore database from a backup file.
 
 ```bash
-# Disable automatic backups
-DOCKPAL_BACKUP_INTERVAL=0 ./dockpal server
-
-# Backup every 6 hours, keep for 3 days
-DOCKPAL_BACKUP_INTERVAL=6h DOCKPAL_BACKUP_RETENTION=72h ./dockpal server
+# Stop the server first, then:
+./dockpal restore --input /tmp/dockpal-backup.db
 ```
 
-The scheduler logs every backup success/failure and automatically removes backups
-older than the retention period.
+### `dockpal reset-password`
 
-## Prometheus Metrics
+Reset a user's password without logging in. Server must be stopped first.
 
-DockPal exports Prometheus-compatible metrics at `/api/metrics` for external monitoring and alerting.
+```bash
+# Set a specific password
+./dockpal reset-password --username admin --password MyNewPassword123
 
-### Available Metrics
+# Generate a random password (printed to stdout)
+./dockpal reset-password --username admin
 
-- **Container metrics**: CPU, memory, network I/O per container
-- **Host metrics**: CPU, memory, disk usage per instance  
-- **HTTP metrics**: Request count, duration, and error rates
-- **Build info**: Version and build information
+# Defaults to username=admin if --username is omitted
+./dockpal reset-password --password MyNewPassword123
+```
 
-### Quick Setup
+Flags:
+- `--username` — user to reset (default: `admin`)
+- `--password` — new password, min 8 chars; omit to auto-generate
 
-Add to your `prometheus.yml`:
+> Passwords set by users in the UI are **never touched** by `update.sh` or server restarts.
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:3012/api`
+
+All protected routes require: `Authorization: Bearer <jwt_token>`
+
+### Authentication
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/login` | — | Login, returns JWT |
+| `POST` | `/api/logout` | ✓ | Invalidate token |
+| `POST` | `/api/auth/reset-password` | ✓ | Change own password |
+| `GET` | `/api/profile` | ✓ | Get current user profile |
+| `PUT` | `/api/profile/password` | ✓ | Update own password |
+
+### Users & API Keys (admin only)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/users` | List all users |
+| `PUT` | `/api/users/:username/role` | Change user role |
+| `GET` | `/api/api-keys` | List API keys |
+| `POST` | `/api/api-keys` | Create API key |
+| `DELETE` | `/api/api-keys/:id` | Delete API key |
+
+### Containers
+
+All routes below are available both as legacy (`/api/...`) and instance-scoped (`/api/instances/:instance_id/...`).
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/containers` | ✓ | List containers |
+| `GET` | `/api/containers/:id` | ✓ | Inspect container |
+| `PUT` | `/api/containers/:id` | operator | Update container |
+| `DELETE` | `/api/containers/:id` | operator | Remove container |
+| `POST` | `/api/containers/:id/start` | operator | Start container |
+| `POST` | `/api/containers/:id/stop` | operator | Stop container |
+| `POST` | `/api/containers/:id/restart` | operator | Restart container |
+| `GET` | `/api/containers/:id/logs` | ✓ | Tail container logs |
+| `GET` | `/api/containers/:id/stats` | ✓ | Resource stats (polling) |
+| `GET` | `/api/containers/:id/stats/ws` | ✓ | Resource stats (WebSocket) |
+| `GET` | `/api/containers/:id/files` | ✓ | — (see Files) |
+| `POST` | `/api/containers/:id/files/write` | operator | Write file into container |
+
+### Deploy
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/deploy/compose` | operator | Deploy Compose YAML |
+| `POST` | `/api/deploy/stream` | operator | Deploy with SSE progress stream |
+| `POST` | `/api/deploy/git` | operator | Deploy from Git repo |
+| `GET` | `/api/deploy/stream/:id` | ✓ | WebSocket attach to deploy stream |
+
+### Templates
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/templates` | ✓ | List available templates |
+| `GET` | `/api/templates/:id` | ✓ | Get template detail |
+| `POST` | `/api/templates/:id/deploy` | operator | Deploy a template |
+| `POST` | `/api/templates/:id/deploy/stream` | operator | Deploy a template (streamed) |
+
+### Images
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/images` | ✓ | List images |
+| `GET` | `/api/images/updates` | ✓ | Check for image updates |
+| `POST` | `/api/images/pull` | operator | Pull an image |
+| `POST` | `/api/images/pull-force` | operator | Force re-pull image |
+| `POST` | `/api/images/check` | operator | Check image exists |
+| `POST` | `/api/images/prune` | operator | Remove unused images |
+| `DELETE` | `/api/images/:id` | operator | Remove an image |
+
+### Apps (running compose stacks)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/apps` | ✓ | List deployed apps |
+| `GET` | `/api/apps/:name/updates` | ✓ | List update attempts |
+| `GET` | `/api/apps/:name/updates/:attemptID` | ✓ | Get update attempt detail |
+| `GET` | `/api/apps/updates/stream` | ✓ | Stream update events (WebSocket) |
+| `POST` | `/api/apps/:name/update` | operator | Trigger app update |
+| `PATCH` | `/api/apps/:name/auto-update` | operator | Toggle auto-update |
+
+### Files
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/files` | ✓ | Browse filesystem |
+| `GET` | `/api/files/read` | ✓ | Read a file |
+| `GET` | `/api/files/download` | ✓ | Download a file |
+| `POST` | `/api/files/upload` | operator | Upload a file |
+| `POST` | `/api/files/write` | operator | Write file content |
+| `DELETE` | `/api/files` | operator | Delete a file |
+
+### Domains
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/domains` | ✓ | List domains |
+| `POST` | `/api/domains` | operator | Create domain |
+| `DELETE` | `/api/domains/:id` | operator | Remove domain |
+
+### Registry Credentials
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/registries` | ✓ | List registries |
+| `GET` | `/api/registries/:id` | ✓ | Get registry |
+| `POST` | `/api/registries` | operator | Add registry |
+| `PUT` | `/api/registries/:id` | operator | Update registry |
+| `POST` | `/api/registries/:id/test` | operator | Test registry credentials |
+| `DELETE` | `/api/registries/:id` | operator | Remove registry |
+
+### Webhooks
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/webhooks` | ✓ | List webhooks |
+| `POST` | `/api/webhooks` | operator | Create webhook |
+| `DELETE` | `/api/webhooks/:webhook_id` | operator | Delete webhook |
+| `POST` | `/api/webhooks/deploy/:webhook_id` | — | Trigger deploy (no auth, secret in URL) |
+
+### Cloudflare Tunnel
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/tunnel` | admin | Create tunnel |
+| `DELETE` | `/api/tunnel` | admin | Remove tunnel |
+
+### System
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/system/info` | ✓ | Host info (CPU, disk, Docker version) |
+| `POST` | `/api/backup` | admin | Trigger manual backup |
+| `GET` | `/api/audit-logs` | admin | List audit log entries |
+| `GET` | `/api/config` | — | Server public config |
+| `GET` | `/api/docs` | — | API docs (Redoc UI) |
+| `GET` | `/api/docs/swagger.json` | — | OpenAPI spec |
+
+### GitHub
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/github/repos` | ✓ | List accessible repos (via PAT) |
+
+### Multi-Instance (Agent)
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/agent/connect` | ✓ | WebSocket — edge agent registration |
+| `GET` | `/api/instances/:instance_id/...` | ✓ | All above routes, scoped to an instance |
+
+---
+
+## Health Checks
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Full health report (database, docker, disk, memory) |
+| `GET /healthz` | Alias for `/health` (Kubernetes style) |
+| `GET /health/live` | Liveness — is the process alive? |
+| `GET /livez` | Alias for `/health/live` |
+| `GET /health/ready` | Readiness — can the server accept traffic? (checks db + docker) |
+| `GET /readyz` | Alias for `/health/ready` |
+
+### Example response
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-06-07T10:00:00Z",
+  "uptime": "2h30m",
+  "version": "v0.9.0",
+  "checks": {
+    "database": { "status": "pass", "description": "Database connectivity and operations OK" },
+    "docker":   { "status": "pass", "description": "Docker daemon connectivity OK" },
+    "disk_data":{ "status": "pass", "details": { "available_mb": 50000 } },
+    "disk_root":{ "status": "pass" },
+    "memory":   { "status": "pass", "details": { "available_mb": 512 } }
+  }
+}
+```
+
+Status values: `healthy` (HTTP 200) · `degraded` (HTTP 200) · `unhealthy` (HTTP 503)
+
+---
+
+## Metrics
+
+Prometheus-compatible metrics at `GET /api/metrics` (no auth required).
+
+### Available metrics
+
+| Metric | Type | Description |
+|---|---|---|
+| `dockpal_containers_total` | Gauge | Total containers per instance |
+| `dockpal_containers_running` | Gauge | Running containers per instance |
+| `dockpal_http_requests_total` | Counter | HTTP requests by method/path/status |
+| `dockpal_http_duration_seconds` | Histogram | HTTP request latency |
+| `dockpal_instances_total` | Gauge | Total registered instances |
+
+### Prometheus scrape config
 
 ```yaml
 scrape_configs:
-  - job_name: 'dockpal'
+  - job_name: dockpal
     static_configs:
       - targets: ['localhost:3012']
-    metrics_path: '/api/metrics'
-    scrape_interval: 15s
+    metrics_path: /api/metrics
 ```
 
-### Example Queries
+---
 
-```promql
-# Total running containers
-sum(dockpal_containers_total{status="running"})
+## Backup & Restore
 
-# Host CPU usage
-dockpal_host_cpu_percent
+### Automatic backups
 
-# Container memory usage
-topk(10, dockpal_container_memory_bytes)
-
-# HTTP request rate
-sum(rate(dockpal_http_requests_total[5m])) by (endpoint)
-```
-
-For detailed documentation, see [docs/PROMETHEUS_METRICS.md](docs/PROMETHEUS_METRICS.md).
-
-## Multi-Instance Architecture
-
-DockPal supports managing multiple Docker hosts from a single dashboard.
-
-```
-┌─────────────────┐         ┌──────────────────────┐
-│  DockPal Server │◄────────│  Browser (UI)        │
-│  (port 3012)    │         └──────────────────────┘
-└────────┬────────┘
-         │
-         ├── local Docker (This Server)
-         │
-         ├── HTTPS ──► Agent @ 192.168.x.x:9273  (direct mode)
-         │
-         └── WSS ◄── Agent @ remote-host          (edge mode)
-```
-
-**Direct mode**: Server connects to agent via HTTPS. Agent must be reachable from server.
-
-**Edge mode**: Agent connects to server via WebSocket. For agents behind NAT/firewall.
-
-### DockPal Agent
-
-Agent source code lives in `dockpal-agent/`. It's a separate Go module with its own repo.
+Configured via environment variables:
 
 ```bash
-cd dockpal-agent
-CGO_ENABLED=0 go build -o dockpal-agent .
+DOCKPAL_BACKUP_INTERVAL=24h     # how often to backup (0 = disabled)
+DOCKPAL_BACKUP_RETENTION=168h   # how long to keep backups (7 days)
 ```
 
-Agent runs as a Docker container on remote hosts:
+Backups are written to `<data_dir>/backups/` as `.db` files with SHA-256 checksums.
+
+### Manual backup via API
 
 ```bash
-docker run -d --name dockpal-agent --restart unless-stopped \
-  -e DOCKPAL_MODE=direct \
-  -e DOCKPAL_TOKEN=<token> \
-  -p 9273:9273 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/dockpal-agent:/opt/dockpal-agent \
-  ghcr.io/sdldev/dockpal-agent:latest
+curl -X POST http://localhost:3012/api/backup \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-## Project Structure
+### Manual backup via CLI
 
-```
-dockpal/
-├── main.go                 # Entry point, CLI (server, reset-password)
-├── Makefile                # Build, test, dev commands
-├── internal/
-│   ├── agent/              # Multi-instance client (direct HTTP, edge WebSocket)
-│   ├── auth/               # JWT, RBAC, login, secret management
-│   ├── db/                 # BBolt persistence (users, services, instances, audit)
-│   ├── docker/             # Docker SDK wrapper, compose, health monitor
-│   ├── git/                # Git deploy helper
-│   ├── installer/          # Remote agent SSH installer
-│   ├── logging/            # Log rotation
-│   ├── registry/           # Private registry credentials (AES-256-GCM)
-│   ├── server/             # HTTP routes, middleware, WebSocket handlers
-│   ├── ssh/                # SSH client for remote agent install
-│   ├── traefik/            # Reverse proxy config generator
-│   ├── tunnel/             # Cloudflare tunnel lifecycle
-│   ├── update/             # Self-update service
-│   └── validator/          # Input validation
-├── web/
-│   ├── index.html          # Shell with #include directives
-│   ├── pages/              # Page templates (dashboard, containers, instances, etc.)
-│   ├── partials/           # Reusable components (sidebar, dialogs)
-│   ├── assets/modules/     # Alpine.js feature modules
-│   └── embed.go            # go:embed + HTML assembler
-├── templates/              # Deploy template JSON files
-├── dockpal-agent/          # Agent source (separate Go module)
-│   ├── main.go
-│   ├── internal/
-│   │   ├── server/         # Agent HTTP/WebSocket server
-│   │   ├── docker/         # Docker operations (deploy, compose, images)
-│   │   ├── auth/           # Token authentication middleware
-│   │   ├── config/         # Agent configuration
-│   │   ├── host/           # System info & stats
-│   │   └── edge/           # Edge mode WebSocket client
-│   └── Dockerfile
-└── scripts/
-    └── pbt-baseline.txt    # Property-based test iteration baselines
+```bash
+./dockpal backup --output /tmp/dockpal-$(date +%Y%m%d).db
 ```
 
-## Tech Stack
+### Restore
 
-- **Backend**: Go 1.25, Gin, BBolt, Docker SDK
-- **Frontend**: Alpine.js, Tailwind CSS, Chart.js (all embedded)
-- **Agent**: Go, Chi router, gorilla/websocket
-- **Security**: JWT with versioning, bcrypt, AES-256-GCM, rate limiting
+```bash
+# 1. Stop the server
+systemctl stop dockpal   # production
+# or kill the dev process
+
+# 2. Restore
+./dockpal restore --input /tmp/dockpal-20260607.db
+
+# 3. Restart
+systemctl start dockpal
+```
+
+---
+
+## TLS
+
+### Let's Encrypt (recommended for production)
+
+```bash
+DOCKPAL_TLS_DOMAIN=panel.example.com ./dockpal server
+```
+
+- Port defaults to 3443
+- Cert stored in `<data_dir>/certs/`
+- Auto-renews
+
+### Custom certificate
+
+```bash
+DOCKPAL_TLS=true \
+DOCKPAL_TLS_CERT=/etc/ssl/certs/panel.crt \
+DOCKPAL_TLS_KEY=/etc/ssl/private/panel.key \
+./dockpal server
+```
+
+### Self-signed (testing only)
+
+```bash
+DOCKPAL_TLS=true ./dockpal server
+```
+
+---
+
+## Multi-Instance
+
+Dockpal can manage multiple remote Docker hosts using DockPal Agent.
+
+### Agent types
+
+| Type | Description |
+|---|---|
+| `local` | The Docker daemon on the Dockpal server itself |
+| `direct` | Remote host reachable by HTTP (same network) |
+| `edge` | Remote host behind NAT — connects out via WebSocket |
+
+### Add an instance
+
+1. Open **Instances** in the UI  
+2. Click **Add Instance**  
+3. For edge agents: copy the install command, run it on the remote host  
+4. The agent connects back to Dockpal over WebSocket
+
+### API access
+
+All container/deploy/image routes work per-instance:
+
+```
+GET /api/instances/{instance_id}/containers
+POST /api/instances/{instance_id}/deploy/compose
+```
+
+`instance_id = "local"` always refers to the local host.
+
+---
+
+## RBAC
+
+Three roles, assigned per user:
+
+| Role | Can view | Can operate | Can administrate |
+|---|---|---|---|
+| `viewer` | ✓ | — | — |
+| `operator` | ✓ | ✓ | — |
+| `admin` | ✓ | ✓ | ✓ |
+
+Admin-only operations: user management, API key management, audit logs, backup trigger, role assignment, tunnel management.
+
+### Change a user's role (API)
+
+```bash
+curl -X PUT http://localhost:3012/api/users/alice/role \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "operator"}'
+```
+
+---
 
 ## Production Install
+
+Install as a systemd service on Debian/Ubuntu (linux/amd64):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/installer.sh | sudo bash
 ```
 
-Installs as systemd service on port 3012. Supports Debian/Ubuntu on linux/amd64.
+- Installs binary to `/opt/dockpal/dockpal`  
+- Creates systemd unit `dockpal.service`  
+- Data directory: `/opt/dockpal/data`
+- Starts on port 3012
 
-## Update
-
-Update an existing systemd installation to the latest release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
-```
-
-Install a specific release:
+### Post-install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo DOCKPAL_VERSION=v1.1.1 bash
+# Check status
+systemctl status dockpal
+
+# Read logs
+journalctl -u dockpal -f
+
+# Get the generated admin password (first run only)
+journalctl -u dockpal | grep "admin password"
+
+# Set a custom admin password for next startup
+DOCKPAL_INITIAL_ADMIN_PASSWORD=mypassword systemctl restart dockpal
 ```
 
-The updater downloads and verifies the release binary, backs up the current binary and templates, restarts the service, and rolls back automatically if health checks fail.
+---
 
-Optional variables:
+## Project Structure
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DOCKPAL_VERSION` | `latest` | Release tag to install |
-| `DOCKPAL_UPDATE_TEMPLATES` | `1` | Refresh templates from the release archive |
-| `DOCKPAL_FORCE` | `0` | Reinstall even when already on the target version |
-| `DOCKPAL_BACKUP_DIR` | `/opt/dockpal/backups` | Backup directory for binary/templates |
-
-## Health Checks
-
-Dockpal provides comprehensive health check endpoints for monitoring and container orchestration:
-
-### Endpoints
-
-- `/health` or `/healthz` - Comprehensive health status
-- `/health/live` or `/livez` - Liveness probe (process running)
-- `/health/ready` or `/readyz` - Readiness probe (dependencies ready)
-
-### Usage
-
-```bash
-# Check overall health
-curl http://localhost:3012/health
-
-# Kubernetes liveness probe
-curl http://localhost:3012/health/live
-
-# Kubernetes readiness probe  
-curl http://localhost:3012/health/ready
+```
+dockpal/
+├── main.go                    # Entry point — wires all services
+├── Makefile                   # Build, dev, test targets
+├── go.mod / go.sum
+│
+├── internal/
+│   ├── agent/                 # AgentClient abstraction (local/direct/edge/WebSocket)
+│   ├── auth/                  # JWT, login, roles, password reset
+│   ├── backup/                # Backup scheduler and restore logic
+│   ├── config/                # Config helpers
+│   ├── db/                    # BBolt persistence (users, containers, audit, webhooks, …)
+│   ├── docker/                # Moby client wrapper (containers, images, compose, stats)
+│   ├── git/                   # Git deploy support
+│   ├── health/                # Health check endpoints (db ping via interface, no double-open)
+│   ├── installer/             # Remote agent install command generation
+│   ├── logging/               # Rotating log setup
+│   ├── metrics/               # Prometheus metrics collector
+│   ├── registry/              # Private registry credentials (encrypted)
+│   ├── server/                # Gin setup, middleware, route registration, RBAC, audit
+│   ├── ssh/                   # SSH helpers for remote agent install
+│   ├── traefik/               # Traefik domain/proxy integration
+│   ├── tunnel/                # Cloudflare Tunnel management
+│   └── validator/             # Input validation helpers
+│
+├── web/                       # Embedded frontend
+│   ├── embed.go               # go:embed directive
+│   ├── index.html             # Shell with <!--#include--> directives
+│   ├── assets/
+│   │   ├── app.js             # Alpine.js root — merges all modules
+│   │   ├── modules/           # One JS module per feature domain
+│   │   │   ├── auth.js        # Login / logout / token
+│   │   │   ├── containers.js  # Container list + actions
+│   │   │   ├── dashboard.js   # Real-time charts
+│   │   │   ├── deploy.js      # (inline in routes)
+│   │   │   ├── images.js      # Image management
+│   │   │   ├── imageUpdates.js# Pull-on-update logic
+│   │   │   ├── apps.js        # Running compose apps
+│   │   │   ├── domains.js     # Traefik domains
+│   │   │   ├── files.js       # File browser
+│   │   │   ├── fleet.js       # Multi-instance fleet view
+│   │   │   ├── instances.js   # Instance management
+│   │   │   ├── registry.js    # Private registry
+│   │   │   ├── profile.js     # User profile
+│   │   │   ├── router.js      # Client-side routing
+│   │   │   ├── state.js       # Shared Alpine state
+│   │   │   ├── ui.js          # Toast, modal helpers
+│   │   │   ├── lifecycle.js   # Init / cleanup hooks
+│   │   │   └── …
+│   │   └── vendor/            # Alpine.js, Tailwind, Chart.js (offline-safe)
+│   └── pages/ partials/       # HTML fragments (included at startup)
+│
+├── templates/                 # JSON deploy templates (PostgreSQL, Redis, …)
+└── scripts/                   # PBT baseline, tooling scripts
 ```
 
-Health checks include database connectivity, Docker daemon status, disk space, and memory availability. See [docs/HEALTH_CHECK.md](docs/HEALTH_CHECK.md) for detailed configuration and monitoring integration.
+### Adding a frontend module
 
-## Operational Configuration
+1. Create `web/assets/modules/myfeature.js` — attach to `window.Dockpal.myfeature = { … }`
+2. Add `<script src="/assets/modules/myfeature.js"></script>` in `web/index.html` before `app.js`
+3. Add `D.myfeature` to the merge array in `web/assets/app.js`
 
-Tune logging and shutdown behavior with environment variables.
+---
 
-### Log Retention
+## Tech Stack
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DOCKPAL_LOG_PATH` | `<DATA_DIR>/dockpal.log` | Active log file path (must be absolute) |
-| `DOCKPAL_LOG_MAX_SIZE` | `2MB` | Max active log file size before rotation. Accepts plain bytes or units `B`, `KB`, `MB`, `GB` |
-| `DOCKPAL_LOG_MAX_FILES` | `5` | Number of rotated files to retain (`dockpal.log.1` through `.N`) |
-| `DOCKPAL_LOG_MAX_AGE` | unlimited | Delete rotated files older than this duration (e.g. `168h`, `7d` is not accepted, use `168h`). Empty disables age pruning |
+| Layer | Technology |
+|---|---|
+| Backend | Go 1.25, Gin, BBolt, Moby (Docker SDK) |
+| Frontend | Alpine.js, Tailwind CSS, Chart.js (all embedded, no CDN) |
+| Auth | JWT (HS256), bcrypt passwords |
+| Storage | BBolt (single-file embedded KV) |
+| Metrics | Prometheus-compatible |
+| Live data | WebSocket (gorilla/websocket), SSE |
 
-Rotated files are pruned by age on startup and after every rotation.
-
-### Graceful Shutdown
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DOCKPAL_SHUTDOWN_TIMEOUT` | `30s` | Timeout for graceful HTTP shutdown. Also drives `ReadTimeout` (1x), `WriteTimeout` (2x), and `IdleTimeout` (4x) |
-
-Set a longer timeout for production deployments with long-running operations:
-
-```bash
-DOCKPAL_SHUTDOWN_TIMEOUT=2m dockpal server
-```
+---
 
 ## License
 

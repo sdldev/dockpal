@@ -10,8 +10,9 @@ type Handlers struct {
 	checker *Checker
 }
 
-// NewHandlers creates new health check handlers
-func NewHandlers(dbPath, dataDir string, dockerClient *client.Client, version string) *Handlers {
+// NewHandlers creates new health check handlers.
+// db is the already-open database instance.
+func NewHandlers(db DBPinger, dataDir string, dockerClient *client.Client, version string) *Handlers {
 	// Convert docker client to our interface
 	var clientInterface DockerClient
 	if dockerClient != nil {
@@ -19,7 +20,7 @@ func NewHandlers(dbPath, dataDir string, dockerClient *client.Client, version st
 	}
 
 	return &Handlers{
-		checker: NewChecker(dbPath, dataDir, clientInterface, version),
+		checker: NewChecker(db, "", dataDir, clientInterface, version),
 	}
 }
 

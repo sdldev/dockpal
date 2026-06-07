@@ -26,13 +26,12 @@ import (
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
 	"github.com/sdldev/dockpal/internal/tunnel"
-	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
-func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, versionService *update.VersionService, updateService *update.UpdateService, agentMgr *agent.Manager, dataDir string, dbPath string, version string) {
+func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, agentMgr *agent.Manager, dataDir string, dbPath string, version string) {
 	// Health check endpoints (public, no authentication required)
-	healthHandlers := health.NewHandlers(dbPath, dataDir, dockerClient.RawClient(), "v"+version)
+	healthHandlers := health.NewHandlers(database, dataDir, dockerClient.RawClient(), "v"+version)
 	healthHandlers.RegisterHealthRoutes(r)
 
 	registerAPIVersionCompatibility(r)
@@ -1779,15 +1778,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		c.JSON(http.StatusOK, info)
 	})
 
-	// Version (protected with auth)
-	protected.GET("/system/version", func(c *gin.Context) {
-		HandleGetVersion(c, versionService)
-	})
-
-	// Update (requires admin authentication)
-	protected.POST("/system/update", func(c *gin.Context) {
-		HandleUpdate(c, updateService, database)
-	})
+	// Version and update routes removed
 
 	// Audit logs (requires admin authentication)
 	adminGroup.GET("/audit-logs", handleListAuditLogs(database))

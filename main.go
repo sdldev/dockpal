@@ -30,7 +30,6 @@ import (
 	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/server"
-	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/web"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -90,7 +89,11 @@ func main() {
 		restoreCmd.Parse(os.Args[2:])
 		restore(*from, *force)
 	case "reset-password":
-		resetPassword()
+		resetCmd := flag.NewFlagSet("reset-password", flag.ExitOnError)
+		resetUsername := resetCmd.String("username", "admin", "Username to reset")
+		resetPassword := resetCmd.String("password", "", "New password (min 8 chars); omit to generate a random one")
+		resetCmd.Parse(os.Args[2:])
+		runResetPassword(*resetUsername, *resetPassword)
 	case "rotate-secrets":
 		rotateSecrets()
 	case "version":
@@ -103,7 +106,7 @@ func main() {
 		fmt.Println("  server          Start the HTTP/HTTPS server")
 		fmt.Println("  backup          Create a database backup")
 		fmt.Println("  restore         Restore database from a backup")
-		fmt.Println("  reset-password  Reset admin password")
+		fmt.Println("  reset-password  Reset a user's password (--username, --password)")
 		fmt.Println("  rotate-secrets  Rotate JWT/encryption secret")
 		fmt.Println("  version         Show version")
 		fmt.Println("  help            Show this help")
@@ -265,12 +268,6 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	srv.Router().Use(server.SecurityHeadersMiddleware())
 	srv.Router().Use(server.CORSMiddleware())
 
-	// Initialize version service
-	versionService := update.NewVersionService(dataDir, "v"+version)
-
-	// Initialize update service
-	updateService := update.NewUpdateService("v" + version)
-
 	// Initialize agent manager (for multi-instance support)
 	agentMgr, err := agent.NewManager(database, dockerClient, jwtSecret)
 	if err != nil {
@@ -289,11 +286,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	srv.Router().Use(metrics.MetricsMiddleware())
 
 	appCtx, cancelApp := context.WithCancel(context.Background())
-	server.RegisterRoutes(appCtx, srv.Router(), dockerClient, jwtSecret, database, versionService, updateService, agentMgr, dataDir, dbPath, version)
-
-	// Initialize and start background version check scheduler (6-hour interval)
-	scheduler := update.NewVersionCheckScheduler(versionService, 6*time.Hour)
-	scheduler.Start(appCtx, 6*time.Hour)
+	server.RegisterRoutes(appCtx, srv.Router(), dockerClient, jwtSecret, database, agentMgr, dataDir, dbPath, version)
 
 	// Initialize and start background backup scheduler
 	backupInterval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
@@ -339,7 +332,6 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 
 	slog.Info("shutdown requested", "component", "shutdown")
 	cancelApp()
-	scheduler.Stop()
 	backupScheduler.Stop()
 	server.StopBackgroundWorkers()
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), srv.ShutdownTimeout())
@@ -581,7 +573,7 @@ func generateSecretHex(length int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func resetPassword() {
+func runResetPassword(username, password string) {
 	dbPath := os.Getenv("DOCKPAL_DB_PATH")
 	if dbPath == "" {
 		dbPath = defaultDBPath
@@ -595,9 +587,17 @@ func resetPassword() {
 	}
 	defer database.Close()
 
-	password, err := generatePassword(12)
-	if err != nil {
-		log.Fatalf("Failed to generate password: %v", err)
+	generated := false
+	if password == "" {
+		password, err = generatePassword(12)
+		if err != nil {
+			log.Fatalf("Failed to generate password: %v", err)
+		}
+		generated = true
+	}
+
+	if len(password) < 8 {
+		log.Fatalf("Password must be at least 8 characters")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -605,13 +605,17 @@ func resetPassword() {
 		log.Fatalf("Failed to hash password: %v", err)
 	}
 
-	if err := database.UpdatePasswordWithVersion("admin", string(hash)); err != nil {
+	if err := database.UpdatePasswordWithVersion(username, string(hash)); err != nil {
 		log.Fatalf("Failed to update password: %v", err)
 	}
 
 	fmt.Printf("Dockpal: password reset successfully\n")
-	fmt.Printf("New admin password: %s\n", password)
-	fmt.Printf("Username: admin\n")
+	fmt.Printf("Username: %s\n", username)
+	if generated {
+		fmt.Printf("New password (generated): %s\n", password)
+	} else {
+		fmt.Printf("Password updated.\n")
+	}
 }
 
 // parseDurationEnv reads a duration from an environment variable.

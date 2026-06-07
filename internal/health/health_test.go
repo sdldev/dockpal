@@ -2,28 +2,26 @@ package health
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"errors"
 	"testing"
 	"time"
 )
 
+// mockDB implements DBPinger for tests.
+type mockDB struct {
+	err error
+}
+
+func (m *mockDB) Ping() error { return m.err }
+
+func okDB() DBPinger  { return &mockDB{} }
+func badDB() DBPinger { return &mockDB{err: errors.New("db error")} }
+
 func TestChecker_CheckHealth(t *testing.T) {
-	// Create temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "dockpal-health-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-
-	// Create checker with nil docker client for testing
-	checker := NewChecker(dbPath, tempDir, nil, "v0.9.0-test")
+	checker := NewChecker(okDB(), "", "/", nil, "v0.9.0-test")
 
 	response := checker.CheckHealth(context.Background())
 
-	// Should have some checks
 	if len(response.Checks) == 0 {
 		t.Error("Expected health checks to be performed")
 	}
@@ -33,8 +31,6 @@ func TestChecker_CheckHealth(t *testing.T) {
 	if _, exists := response.Checks["disk_data"]; !exists {
 		t.Error("Expected disk_data check to exist")
 	}
-
-	// Should have required fields
 	if response.Status == "" {
 		t.Error("Expected status to be set")
 	}
@@ -50,23 +46,13 @@ func TestChecker_CheckHealth(t *testing.T) {
 }
 
 func TestChecker_CheckLiveness(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "dockpal-liveness-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-	checker := NewChecker(dbPath, tempDir, nil, "v0.9.0-test")
+	checker := NewChecker(okDB(), "", "/", nil, "v0.9.0-test")
 
 	response := checker.CheckLiveness(context.Background())
 
-	// Liveness should always be healthy if process is running
 	if response.Status != StatusHealthy {
 		t.Errorf("Expected liveness to be healthy, got %s", response.Status)
 	}
-
-	// Should only have process check
 	if len(response.Checks) != 1 {
 		t.Errorf("Expected 1 check for liveness, got %d", len(response.Checks))
 	}
@@ -75,35 +61,22 @@ func TestChecker_CheckLiveness(t *testing.T) {
 	if !exists {
 		t.Error("Expected process check to exist")
 	}
-
 	if processCheck.Status != CheckPass {
 		t.Errorf("Expected process check to pass, got %s", processCheck.Status)
 	}
 }
 
 func TestChecker_CheckReadiness(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "dockpal-readiness-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-	checker := NewChecker(dbPath, tempDir, nil, "v0.9.0-test")
+	checker := NewChecker(okDB(), "", "/", nil, "v0.9.0-test")
 
 	response := checker.CheckReadiness(context.Background())
 
-	// Should have database and docker checks
 	if len(response.Checks) != 2 {
 		t.Errorf("Expected 2 checks for readiness, got %d", len(response.Checks))
 	}
-
-	// Should have database check
 	if _, exists := response.Checks["database"]; !exists {
 		t.Error("Expected database check to exist")
 	}
-
-	// Should have docker check (should fail with nil client)
 	dockerCheck, exists := response.Checks["docker"]
 	if !exists {
 		t.Error("Expected docker check to exist")
@@ -114,66 +87,53 @@ func TestChecker_CheckReadiness(t *testing.T) {
 	t.Logf("Readiness status: %s", response.Status)
 }
 
-func TestChecker_CheckDatabase(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "dockpal-db-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	dbPath := filepath.Join(tempDir, "test.db")
-	checker := NewChecker(dbPath, tempDir, nil, "v0.9.0-test")
+func TestChecker_CheckDatabase_Pass(t *testing.T) {
+	checker := NewChecker(okDB(), "", "/", nil, "v0.9.0-test")
 
 	result := checker.checkDatabase(context.Background())
 
-	// Database should be accessible
 	if result.Status != CheckPass {
 		t.Errorf("Expected database check to pass, got %s: %s", result.Status, result.Description)
 	}
-
 	if result.Duration == "" {
 		t.Error("Expected duration to be set")
 	}
 }
 
-func TestChecker_CheckDatabaseInvalidPath(t *testing.T) {
-	// Use invalid path
-	invalidPath := "/non/existent/path/test.db"
-	checker := NewChecker(invalidPath, "/", nil, "v0.9.0-test")
+func TestChecker_CheckDatabase_Fail(t *testing.T) {
+	checker := NewChecker(badDB(), "", "/", nil, "v0.9.0-test")
 
 	result := checker.checkDatabase(context.Background())
 
-	// Should fail with invalid path
 	if result.Status != CheckFail {
-		t.Errorf("Expected database check to fail with invalid path, got %s", result.Status)
+		t.Errorf("Expected database check to fail, got %s", result.Status)
 	}
-
 	if result.Description == "" {
 		t.Error("Expected error description to be set")
 	}
 }
 
-func TestChecker_CheckDiskSpace(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "dockpal-disk-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
+func TestChecker_CheckDatabase_Nil(t *testing.T) {
+	checker := NewChecker(nil, "", "/", nil, "v0.9.0-test")
+
+	result := checker.checkDatabase(context.Background())
+
+	if result.Status != CheckFail {
+		t.Errorf("Expected database check to fail with nil db, got %s", result.Status)
 	}
-	defer os.RemoveAll(tempDir)
+}
 
-	checker := NewChecker("", "/", nil, "v0.9.0-test")
+func TestChecker_CheckDiskSpace(t *testing.T) {
+	checker := NewChecker(okDB(), "", "/", nil, "v0.9.0-test")
 
-	result := checker.checkDiskSpace(context.Background(), tempDir)
+	result := checker.checkDiskSpace(context.Background(), "/")
 
-	// Should at least not crash
 	if result.Status == "" {
 		t.Error("Expected disk check status to be set")
 	}
-
 	if result.Duration == "" {
 		t.Error("Expected duration to be set")
 	}
-
-	// Should have details
 	if result.Details == nil {
 		t.Error("Expected disk details to be set")
 	}
@@ -182,24 +142,19 @@ func TestChecker_CheckDiskSpace(t *testing.T) {
 }
 
 func TestChecker_CheckMemory(t *testing.T) {
-	checker := NewChecker("", "/", nil, "v0.9.0-test")
+	checker := NewChecker(okDB(), "", "/", nil, "v0.9.0-test")
 
 	result := checker.checkMemory(context.Background())
 
-	// Should at least not crash
 	if result.Status == "" {
 		t.Error("Expected memory check status to be set")
 	}
-
 	if result.Duration == "" {
 		t.Error("Expected duration to be set")
 	}
-
-	// Should have details
 	if result.Details == nil {
 		t.Error("Expected memory details to be set")
 	}
-
 	if details, ok := result.Details.(map[string]interface{}); ok {
 		if _, exists := details["available_mb"]; !exists {
 			t.Error("Expected available_mb in memory details")
@@ -261,7 +216,6 @@ func TestHealthResponse_ToJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to convert to JSON: %v", err)
 	}
-
 	if len(jsonBytes) == 0 {
 		t.Error("Expected non-empty JSON output")
 	}
@@ -269,7 +223,6 @@ func TestHealthResponse_ToJSON(t *testing.T) {
 	jsonStr := string(jsonBytes)
 	t.Logf("JSON output: %s", jsonStr)
 
-	// Should contain expected fields
 	if !contains(jsonStr, "healthy") {
 		t.Error("Expected JSON to contain 'healthy'")
 	}
@@ -280,14 +233,13 @@ func TestHealthResponse_ToJSON(t *testing.T) {
 
 // Helper function
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-			func() bool {
-				for i := 0; i <= len(s)-len(substr); i++ {
-					if s[i:i+len(substr)] == substr {
-						return true
-					}
-				}
-				return false
-			}())))
+	if len(substr) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

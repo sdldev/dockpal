@@ -413,6 +413,8 @@ print_success() {
         log_info "Templates backup: $BACKUP_TEMPLATES"
     fi
     log_info "Logs: journalctl -u $SERVICE -n 100 --no-pager"
+    log_info "Note: existing user passwords are preserved — admin credentials unchanged"
+    log_info "To reset admin password: $BINARY reset-password --username admin --password <newpassword>"
     echo ""
 }
 

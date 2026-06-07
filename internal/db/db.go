@@ -770,6 +770,14 @@ func (d *DB) ListAuditLogs(limit, offset int) ([]AuditLog, int, error) {
 	return logs, total, err
 }
 
+// Ping checks that the database is reachable and can perform a basic read.
+func (d *DB) Ping() error {
+	return d.db.View(func(tx *bbolt.Tx) error {
+		// Just verify we can open a read transaction
+		return nil
+	})
+}
+
 func (d *DB) PurgeAuditLogsOlderThan(cutoff time.Time) (int, error) {
 	cutoffUnix := cutoff.Unix()
 	deleted := 0

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/moby/moby/client"
-	"go.etcd.io/bbolt"
 )
 
 // Status represents the overall health status
@@ -48,8 +47,14 @@ type HealthResponse struct {
 	summary   map[CheckStatus]int    // internal summary
 }
 
+// DBPinger is the interface used by the health checker to verify database connectivity.
+type DBPinger interface {
+	Ping() error
+}
+
 // Checker performs health checks on various system components
 type Checker struct {
+	db           DBPinger
 	dbPath       string
 	dataDir      string
 	dockerClient DockerClient
@@ -63,12 +68,14 @@ type DockerClient interface {
 	Close() error
 }
 
-// NewChecker creates a new health checker
-func NewChecker(dbPath, dataDir string, dockerClient DockerClient, version string) *Checker {
+// NewChecker creates a new health checker.
+// db is the already-open database instance; dbPath may be empty when db is provided.
+func NewChecker(db DBPinger, dbPath, dataDir string, dockerClient DockerClient, version string) *Checker {
 	if dataDir == "" {
 		dataDir = "/"
 	}
 	return &Checker{
+		db:           db,
 		dbPath:       dbPath,
 		dataDir:      dataDir,
 		dockerClient: dockerClient,
@@ -173,51 +180,21 @@ func (c *Checker) CheckReadiness(ctx context.Context) *HealthResponse {
 func (c *Checker) checkDatabase(ctx context.Context) CheckResult {
 	start := time.Now()
 
-	// Test database connection and basic operations
-	db, err := bbolt.Open(c.dbPath, 0600, &bbolt.Options{Timeout: 2 * time.Second})
-	if err != nil {
+	if c.db == nil {
 		return CheckResult{
 			Status:      CheckFail,
-			Description: fmt.Sprintf("Cannot open database: %v", err),
-			Duration:    time.Since(start).String(),
-		}
-	}
-	defer db.Close()
-
-	// Test basic read/write operation
-	if err := db.Update(func(tx *bbolt.Tx) error {
-		bucket := []byte("health_check")
-		if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
-			return err
-		}
-		return tx.Bucket(bucket).Put([]byte("test"), []byte("ok"))
-	}); err != nil {
-		return CheckResult{
-			Status:      CheckFail,
-			Description: fmt.Sprintf("Database write test failed: %v", err),
+			Description: "Database not configured",
 			Duration:    time.Since(start).String(),
 		}
 	}
 
-	// Test read operation
-	if err := db.View(func(tx *bbolt.Tx) error {
-		val := tx.Bucket([]byte("health_check")).Get([]byte("test"))
-		if string(val) != "ok" {
-			return fmt.Errorf("read test failed")
-		}
-		return nil
-	}); err != nil {
+	if err := c.db.Ping(); err != nil {
 		return CheckResult{
 			Status:      CheckFail,
-			Description: fmt.Sprintf("Database read test failed: %v", err),
+			Description: fmt.Sprintf("Database ping failed: %v", err),
 			Duration:    time.Since(start).String(),
 		}
 	}
-
-	// Clean up test data
-	db.Update(func(tx *bbolt.Tx) error {
-		return tx.DeleteBucket([]byte("health_check"))
-	})
 
 	return CheckResult{
 		Status:      CheckPass,

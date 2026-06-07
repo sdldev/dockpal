@@ -16,7 +16,6 @@ import (
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
-	"github.com/sdldev/dockpal/internal/update"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -116,8 +115,6 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 	}
 	defer dockerClient.Close()
 
-	versionService := update.NewVersionService(tmpDir, "v0.8.0")
-	updateService := update.NewUpdateService("v0.8.0")
 	agentMgr, err := agent.NewManager(database, dockerClient, jwtSecret)
 	if err != nil {
 		t.Fatalf("failed to create agent manager: %v", err)
@@ -125,7 +122,7 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 
 	router := gin.New()
 	router.Use(CORSMiddleware())
-	RegisterRoutes(context.Background(), router, dockerClient, jwtSecret, database, versionService, updateService, agentMgr, tmpDir, dbPath, "v0.9.0-test")
+	RegisterRoutes(context.Background(), router, dockerClient, jwtSecret, database, agentMgr, tmpDir, dbPath, "v0.9.0-test")
 
 	// Generate tokens
 	adminToken, _ := auth.GenerateJWT("u-admin", "admin", jwtSecret, auth.RoleAdmin, 0)
@@ -160,22 +157,6 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 		_, code = request("POST", "/api/login", "", body)
 		if code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", code)
-		}
-	})
-
-	// 2. Test GET /api/system/version
-	t.Run("System Version API", func(t *testing.T) {
-		_, code := request("GET", "/api/system/version", "", nil)
-		if code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", code)
-		}
-
-		w, code := request("GET", "/api/system/version", viewToken, nil)
-		if code != http.StatusOK {
-			t.Errorf("expected 200, got %d", code)
-		}
-		if !bytes.Contains(w.Body.Bytes(), []byte("currentVersion")) {
-			t.Errorf("expected response to contain currentVersion info, got %s", w.Body.String())
 		}
 	})
 
@@ -434,7 +415,6 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 
 		// System
 		request("GET", "/api/system/info", viewToken, nil)
-		request("POST", "/api/system/update", opToken, nil)
 
 		// GitHub
 		request("GET", "/api/github/repos", opToken, nil)
@@ -498,15 +478,13 @@ func TestVerifyMockEndpoints_RuteRelay(t *testing.T) {
 	}
 	defer dockerClient.Close()
 
-	versionService := update.NewVersionService(tmpDir, "v0.8.0")
-	updateService := update.NewUpdateService("v0.8.0")
 	agentMgr, err := agent.NewManager(database, dockerClient, jwtSecret)
 	if err != nil {
 		t.Fatalf("failed to create agent manager: %v", err)
 	}
 
 	router := gin.New()
-	RegisterRoutes(context.Background(), router, dockerClient, jwtSecret, database, versionService, updateService, agentMgr, tmpDir, dbPath, "v0.9.0-test")
+	RegisterRoutes(context.Background(), router, dockerClient, jwtSecret, database, agentMgr, tmpDir, dbPath, "v0.9.0-test")
 
 	adminToken, _ := auth.GenerateJWT("admin", "admin", jwtSecret, auth.RoleAdmin, 0)
 

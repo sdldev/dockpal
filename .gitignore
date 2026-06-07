@@ -18,3 +18,12 @@ dockpal-agent/
 dockpal
 dockpal-linux-amd64
 .aider*
+
+# Dev watch binary
+.dockpal-dev
+
+# Agent / tool state
+.omc/
+
+# Temp compose dirs
+compose/
