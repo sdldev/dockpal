@@ -7,7 +7,7 @@ Dockpal.services = {
     const resp = await this.instanceApi('POST', '/deploy/compose', this.deployForm);
     if (resp && resp.ok) {
       this.toast('Stack deployed', 'success');
-      this.deployForm = { name: '', domain: '', compose: '' };
+      this.deployForm = { name: '', domain: '', compose: '', auto_start: true };
       this.navigateTo('containers');
     } else {
       const data = resp ? await resp.json().catch(() => ({})) : {};

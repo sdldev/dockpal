@@ -427,9 +427,11 @@ func handleInstanceDeployStream(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		Domain  string `json:"domain"`
-		Compose string `json:"compose" binding:"required"`
+		Name          string `json:"name" binding:"required"`
+		Domain        string `json:"domain"`
+		Compose       string `json:"compose" binding:"required"`
+		RestartPolicy string `json:"restart_policy"`
+		AutoStart     *bool  `json:"auto_start"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -446,6 +448,8 @@ func handleInstanceDeployStream(c *gin.Context) {
 			return
 		}
 	}
+
+	req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, req.Compose)
@@ -512,6 +516,7 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 		Ports         map[string]int    `json:"ports"`
 		CustomName    string            `json:"custom_name"`
 		RestartPolicy string            `json:"restart_policy"`
+		AutoStart     *bool             `json:"auto_start"`
 		AutoRecover   bool              `json:"auto_recover"`
 		Domain        string            `json:"domain"`
 	}
@@ -539,10 +544,8 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 		newPort := fmt.Sprintf("'%d:%d'", hostPort, p.ContainerPort)
 		compose = strings.ReplaceAll(compose, oldPort, newPort)
 	}
-	// Apply restart policy override
-	if req.RestartPolicy != "" && req.RestartPolicy != "unless-stopped" {
-		compose = strings.ReplaceAll(compose, "unless-stopped", req.RestartPolicy)
-	}
+	// Normalize restart policy so apps come back up after a host reboot.
+	compose = ensureAutoStart(compose, req.RestartPolicy, req.AutoStart)
 	// Add auto-recover label if requested
 	if req.AutoRecover {
 		compose = strings.ReplaceAll(compose, "image: ", "labels:\n      dockpal.auto-recover: \"true\"\n    image: ")
@@ -593,9 +596,11 @@ func handleInstanceDeployCompose(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
-		Name    string `json:"name" binding:"required"`
-		Domain  string `json:"domain"`
-		Compose string `json:"compose" binding:"required"`
+		Name          string `json:"name" binding:"required"`
+		Domain        string `json:"domain"`
+		Compose       string `json:"compose" binding:"required"`
+		RestartPolicy string `json:"restart_policy"`
+		AutoStart     *bool  `json:"auto_start"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -606,6 +611,8 @@ func handleInstanceDeployCompose(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
 		return
 	}
+
+	req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, req.Compose)
@@ -732,12 +739,13 @@ func handleInstanceDeployGit(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	composeYAML := ensureAutoStart(string(composeData), "", nil)
 
 	// Resolve registry credentials for this instance
-	registryAuths := resolveRegistryAuths(c, string(composeData))
+	registryAuths := resolveRegistryAuths(c, composeYAML)
 
 	// Deploy compose via agent client
-	if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
+	if err := client.DeployCompose(c.Request.Context(), projectName, composeYAML, registryAuths, false); err != nil {
 		internalError(c, err)
 		return
 	}

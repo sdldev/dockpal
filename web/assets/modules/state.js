@@ -43,7 +43,7 @@ Dockpal.initialState = function() {
     sysResourceHistory: { labels: [], cpu: [], ram: [] },
 
     loginForm: { username: '', password: '' },
-    deployForm: { name: '', domain: '', compose: '' },
+    deployForm: { name: '', domain: '', compose: '', auto_start: true },
     gitForm: { repo: '', branch: 'main', compose_file: '', name: '' },
     deploySource: 'github',
     githubRepos: [],

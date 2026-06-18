@@ -113,6 +113,17 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 		fmt.Fprintln(w, "[Dockpal Installer] Docker is already installed.")
 	}
 
+	// Always ensure the Docker service is enabled at boot, even when Docker was
+	// pre-installed. Without this, containers with a restart policy will not
+	// come back up after a host reboot because the daemon itself never starts.
+	// Best-effort: ignore errors on hosts without systemd.
+	enableDockerCmd := "systemctl enable docker"
+	if params.User != "root" {
+		enableDockerCmd = "sudo " + enableDockerCmd
+	}
+	fmt.Fprintln(w, "[Dockpal Installer] Ensuring Docker starts on boot...")
+	_ = runCommand(client, enableDockerCmd, io.Discard)
+
 	// 3. Ensure Docker daemon is accessible
 	fmt.Fprintln(w, "[Dockpal Installer] Verifying Docker daemon accessibility...")
 	dockerInfoCmd := "docker info"

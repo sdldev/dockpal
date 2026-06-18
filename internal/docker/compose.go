@@ -352,10 +352,9 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 		}
 	}
 
-	restartPolicy := "unless-stopped"
-	if svc.Restart != "" {
-		restartPolicy = svc.Restart
-	}
+	// Default empty/unknown to unless-stopped so the app survives a host
+	// reboot; deploy handlers normalize explicit no/on-failure beforehand.
+	restartPolicy := NormalizeRestartPolicy(svc.Restart, false)
 
 	containerConfig := &container.Config{
 		Labels:       svcLabels,

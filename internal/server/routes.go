@@ -964,9 +964,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	// Streamed deploy endpoint - returns deploy session ID
 	protected.POST("/deploy/stream", func(c *gin.Context) {
 		var req struct {
-			Name    string `json:"name" binding:"required"`
-			Domain  string `json:"domain"`
-			Compose string `json:"compose" binding:"required"`
+			Name          string `json:"name" binding:"required"`
+			Domain        string `json:"domain"`
+			Compose       string `json:"compose" binding:"required"`
+			RestartPolicy string `json:"restart_policy"`
+			AutoStart     *bool  `json:"auto_start"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -982,6 +984,8 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 				return
 			}
 		}
+
+		req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
 
 		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, req.Compose)
@@ -1033,9 +1037,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 	protected.POST("/deploy/compose", func(c *gin.Context) {
 		var req struct {
-			Name    string `json:"name" binding:"required"`
-			Domain  string `json:"domain"`
-			Compose string `json:"compose" binding:"required"`
+			Name          string `json:"name" binding:"required"`
+			Domain        string `json:"domain"`
+			Compose       string `json:"compose" binding:"required"`
+			RestartPolicy string `json:"restart_policy"`
+			AutoStart     *bool  `json:"auto_start"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -1046,6 +1052,8 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
 			return
 		}
+
+		req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
 
 		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, req.Compose)
@@ -1165,9 +1173,10 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		composeYAML := ensureAutoStart(string(composeData), "", nil)
 
 		// Get auth headers for registries
-		registryAuths := getRegistryAuths(registryManager, string(composeData))
+		registryAuths := getRegistryAuths(registryManager, composeYAML)
 
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -1175,7 +1184,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			return
 		}
 
-		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), projectName, composeYAML, registryAuths, false); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -1371,6 +1380,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		for k, v := range req.Env {
 			compose = strings.ReplaceAll(compose, "${"+k+"}", v)
 		}
+		compose = ensureAutoStart(compose, "", nil)
 
 		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, compose)
@@ -1423,6 +1433,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			Ports         map[string]int    `json:"ports"`
 			CustomName    string            `json:"custom_name"`
 			RestartPolicy string            `json:"restart_policy"`
+			AutoStart     *bool             `json:"auto_start"`
 			AutoRecover   bool              `json:"auto_recover"`
 			Domain        string            `json:"domain"`
 		}
@@ -1450,10 +1461,8 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			newPort := fmt.Sprintf("'%d:%d'", hostPort, p.ContainerPort)
 			compose = strings.ReplaceAll(compose, oldPort, newPort)
 		}
-		// Apply restart policy override
-		if req.RestartPolicy != "" && req.RestartPolicy != "unless-stopped" {
-			compose = strings.ReplaceAll(compose, "unless-stopped", req.RestartPolicy)
-		}
+		// Normalize restart policy so apps come back up after a host reboot.
+		compose = ensureAutoStart(compose, req.RestartPolicy, req.AutoStart)
 		// Add auto-recover label if requested
 		if req.AutoRecover {
 			compose = strings.ReplaceAll(compose, "image: ", "labels:\n      dockpal.auto-recover: \"true\"\n    image: ")

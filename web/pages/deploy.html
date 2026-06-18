@@ -130,6 +130,13 @@
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-none"
                   placeholder="services:&#10;  nginx:&#10;    image: nginx:alpine&#10;    ports:&#10;      - '8080:80'"></textarea>
               </div>
+              <label class="flex items-start gap-2.5 cursor-pointer select-none">
+                <input type="checkbox" x-model="deployForm.auto_start"
+                  class="mt-0.5 h-4 w-4 rounded-sm bg-zinc-950 border-zinc-700 text-blue-600 focus:ring-blue-600 focus:ring-offset-0">
+                <span class="text-xs text-zinc-400">Auto-start after reboot
+                  <span class="block text-zinc-600">Sets restart policy to <span class="font-mono">unless-stopped</span> so the app comes back up when the host reboots.</span>
+                </span>
+              </label>
               <button type="submit" class="w-full py-2.5 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">Deploy</button>
             </form>
           </div>

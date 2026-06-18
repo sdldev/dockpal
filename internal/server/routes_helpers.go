@@ -215,6 +215,22 @@ func extractFirstPort(composeYAML string) int {
 	return 80
 }
 
+// ensureAutoStart normalizes a compose YAML so every service carries a
+// reboot-safe restart policy before deploy. override is an explicit restart
+// policy chosen by the user ("" = none); autoStart is the per-deploy toggle
+// (nil = enabled by default). On a parse error the original YAML is returned so
+// a deploy is never blocked here — the downstream parser still applies its own
+// default.
+func ensureAutoStart(composeYAML, override string, autoStart *bool) string {
+	force := autoStart == nil || *autoStart
+	out, err := docker.EnsureComposeAutoStart(composeYAML, override, force)
+	if err != nil {
+		slog.Warn("restart policy normalization skipped", "component", "deploy", "error", err)
+		return composeYAML
+	}
+	return out
+}
+
 // getRegistryAuths extracts registry authentication headers from the registry manager.
 // Returns a map of registry domain to auth header string.
 func getRegistryAuths(registryMgr *registry.Manager, composeYAML string) map[string]string {

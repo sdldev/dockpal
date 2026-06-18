@@ -139,10 +139,14 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 			internalError(c, err)
 			return
 		}
+		// Webhook redeploys pull a fresh compose from git; normalize so a
+		// reboot-unsafe restart policy in the repo does not silently disable
+		// auto-start after a host reboot.
+		composeYAML := ensureAutoStart(string(composeData), "", nil)
 
 		// Resolve registry auths from compose file using direct DB lookup
 		var domains []string
-		for _, line := range strings.Split(string(composeData), "\n") {
+		for _, line := range strings.Split(composeYAML, "\n") {
 			if strings.Contains(line, "image:") {
 				parts := strings.Fields(line)
 				if len(parts) >= 2 {
@@ -161,7 +165,7 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 			projectName = filepath.Base(info.Path)
 		}
 
-		if err := client.DeployCompose(c.Request.Context(), projectName, string(composeData), registryAuths, false); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), projectName, composeYAML, registryAuths, false); err != nil {
 			internalError(c, err)
 			return
 		}
