@@ -46,6 +46,7 @@ type ContainerInfo struct {
 	Ports            []container.PortSummary `json:"ports"`
 	Created          int64                   `json:"created"`
 	RestartPolicy    string                  `json:"restart_policy,omitempty"`
+	Networks         map[string]string       `json:"networks,omitempty"`
 	Labels           map[string]string       `json:"labels,omitempty"`
 	Protected        bool                    `json:"protected,omitempty"`
 	ProtectionReason string                  `json:"protection_reason,omitempty"`
@@ -67,9 +68,20 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 		if len(ctr.Names) > 0 {
 			name = trimContainerName(ctr.Names[0])
 		}
-		restartPolicy := ""
-		if inspect, err := c.cli.ContainerInspect(ctx, ctr.ID, client.ContainerInspectOptions{}); err == nil && inspect.Container.HostConfig != nil {
-			restartPolicy = string(inspect.Container.HostConfig.RestartPolicy.Name)
+		var (
+			restartPolicy string
+			networks      map[string]string
+		)
+		if inspect, err := c.cli.ContainerInspect(ctx, ctr.ID, client.ContainerInspectOptions{}); err == nil {
+			if inspect.Container.HostConfig != nil {
+				restartPolicy = string(inspect.Container.HostConfig.RestartPolicy.Name)
+			}
+			if inspect.Container.NetworkSettings != nil {
+				networks = make(map[string]string)
+				for netName, ep := range inspect.Container.NetworkSettings.Networks {
+					networks[netName] = ep.IPAddress.String()
+				}
+			}
 		}
 		containers[i] = ContainerInfo{
 			ID:            ctr.ID[:12],
@@ -80,6 +92,7 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 			Ports:         ctr.Ports,
 			Created:       ctr.Created,
 			RestartPolicy: restartPolicy,
+			Networks:      networks,
 			Labels:        ctr.Labels,
 		}
 	}

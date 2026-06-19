@@ -47,6 +47,7 @@
                 <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">Image</th>
                 <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden lg:table-cell">Restart</th>
                 <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden md:table-cell">Ports</th>
+                <th class="text-left px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider hidden lg:table-cell">Networks</th>
                 <th class="text-right px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -87,6 +88,14 @@
                           x-text="p.PublicPort ? (p.PublicPort + ':' + p.PrivatePort + '/' + p.Type) : (p.PrivatePort + '/' + p.Type)"></span>
                       </template>
                       <span x-show="!c.ports || c.ports.length===0" class="text-xs text-zinc-600">—</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 hidden lg:table-cell">
+                    <div class="flex flex-wrap gap-1">
+                      <template x-for="(ip, net) in c.networks" :key="net">
+                        <span class="px-1.5 py-0.5 rounded-sm text-xs bg-zinc-800 text-emerald-400 border border-zinc-700 font-mono" x-text="net + ': ' + ip"></span>
+                      </template>
+                      <span x-show="!c.networks || Object.keys(c.networks).length===0" class="text-xs text-zinc-600">—</span>
                     </div>
                   </td>
                   <td class="px-4 py-3 text-right" @click.stop>
