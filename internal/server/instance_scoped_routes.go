@@ -665,11 +665,13 @@ func handleInstanceDeployGit(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
-		Repo        string            `json:"repo" binding:"required"`
-		Branch      string            `json:"branch"`
-		ComposeFile string            `json:"compose_file"`
-		Name        string            `json:"name"`
-		Env         map[string]string `json:"env"`
+		Repo          string            `json:"repo" binding:"required"`
+		Branch        string            `json:"branch"`
+		ComposeFile   string            `json:"compose_file"`
+		Name          string            `json:"name"`
+		Env           map[string]string `json:"env"`
+		RestartPolicy string            `json:"restart_policy"`
+		AutoStart     *bool             `json:"auto_start"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -757,7 +759,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	composeYAML = ensureAutoStart(composeYAML, "", nil)
+	composeYAML = ensureAutoStart(composeYAML, req.RestartPolicy, req.AutoStart)
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, composeYAML)
