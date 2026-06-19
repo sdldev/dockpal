@@ -171,7 +171,7 @@ Dockpal.containers = {
     try {
       this.closeContainerLogStream();
       const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = wsProto + '//' + location.host + '/api/v1/instances/' + this.selectedInstance + '/containers/' + id + '/logs';
+      const wsUrl = wsProto + '//' + location.host + '/api/instances/' + this.selectedInstance + '/containers/' + id + '/logs';
       const ws = new WebSocket(wsUrl);
       this.containerLogSocket = ws;
       ws.onopen = () => {

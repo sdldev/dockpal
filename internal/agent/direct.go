@@ -240,25 +240,49 @@ func (c *DirectClient) GetContainerStats(ctx context.Context, id string) (*docke
 	return &stats, nil
 }
 
-// ContainerLogs returns the logs of a container.
+// ContainerLogs returns the logs of a container via WebSocket.
+// The agent exposes a WebSocket endpoint at /agent/docker/containers/{id}/logs.
+// We upgrade to WebSocket, authenticate via first message (JSON token), then stream log lines.
 func (c *DirectClient) ContainerLogs(ctx context.Context, id string, tail string) (io.ReadCloser, error) {
-	req, err := c.makeRequest(ctx, "GET", "/agent/docker/containers/"+id+"/logs", map[string]string{"tail": tail}, nil)
+	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1)
+	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+	wsURL += "/agent/docker/containers/" + id + "/logs?tail=" + tail
+
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPClient: c.httpClient,
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.authToken}},
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("websocket dial failed: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
+	// Authenticate via first message (JSON-encoded token)
+	authMsg, _ := json.Marshal(map[string]string{"token": c.authToken})
+	if err := conn.Write(ctx, websocket.MessageText, authMsg); err != nil {
+		conn.Close(websocket.StatusInternalError, "auth write failed")
+		return nil, fmt.Errorf("websocket auth failed: %w", err)
 	}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
-	}
+	// Read incoming messages and pipe them through a pipe
+	pr, pw := io.Pipe()
+	go func() {
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer pw.Close()
+		for {
+			_, msg, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			if _, err := pw.Write(msg); err != nil {
+				return
+			}
+			if _, err := pw.Write([]byte("\n")); err != nil {
+				return
+			}
+		}
+	}()
 
-	return resp.Body, nil
+	return pr, nil
 }
 
 // Compose operations
