@@ -27,3 +27,4 @@ dockpal-linux-amd64
 
 # Temp compose dirs
 compose/
+repos/
