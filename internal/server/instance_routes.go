@@ -500,7 +500,8 @@ func generateInstallCommand(mode, serverHost, token string) string {
 	case "direct":
 		// For direct mode: include host, port mapping, token
 		runCmd = fmt.Sprintf(
-			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=direct \\\n  -e DOCKPAL_TOKEN=%s \\\n  -p 9273:9273 \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
+			"docker rm -f dockpal-agent 2>/dev/null || true\n"+
+				"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=direct \\\n  -e DOCKPAL_TOKEN=%s \\\n  -p 9273:9273 \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
 			token,
 			agentImg,
 		)
@@ -508,7 +509,8 @@ func generateInstallCommand(mode, serverHost, token string) string {
 		// For edge mode: include server WebSocket URL, token, no port mapping
 		wsURL := fmt.Sprintf("wss://%s/api/agent/connect", serverHost)
 		runCmd = fmt.Sprintf(
-			"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
+			"docker rm -f dockpal-agent 2>/dev/null || true\n"+
+				"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
 			wsURL,
 			token,
 			agentImg,
