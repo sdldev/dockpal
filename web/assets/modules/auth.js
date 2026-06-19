@@ -27,43 +27,40 @@ Dockpal.auth = {
     await this.loadFeatureConfig();
 
     const saved = localStorage.getItem('dockpal_token');
-    if (saved) {
-      this.token = saved;
-      try {
-        // Load instances first to get the instance list
-        await this.loadInstances();
-        
-        // Try to access the selected instance's containers
-        const resp = await this.instanceApi('GET', '/containers');
-        if (resp && resp.ok) {
-          this.view = 'app';
-          await this.loadDashboard();
-          await this.checkForUpdates();
-          if (this.featureAutoUpdate) {
-            if (this.loadApps) await this.loadApps();
-            if (this.startFeed) this.startFeed();
-          }
-          // Parse URL to set initial page (SPA routing)
-          if (this.initRouter) this.initRouter();
-          return;
-        }
-        // If instance-scoped call fails, try local for backward compatibility
-        const localResp = await fetch('/api/containers', { headers: { Authorization: 'Bearer ' + this.token } });
-        if (localResp.ok) {
-          // Reset to local instance if the selected instance is not accessible
-          this.selectedInstance = 'local';
-          this.view = 'app';
-          await this.loadDashboard();
-          await this.checkForUpdates();
-          if (this.featureAutoUpdate) {
-            if (this.loadApps) await this.loadApps();
-            if (this.startFeed) this.startFeed();
-          }
-          if (this.initRouter) this.initRouter();
-          return;
-        }
-      } catch (e) {}
-      localStorage.removeItem('dockpal_token');
+    if (!saved) return; // No token — stay on login screen.
+
+    this.token = saved;
+
+    // Show the app shell immediately. If the token turns out to be
+    // expired the api() wrapper will receive a 401, call logout(), and
+    // flip us back to the login view automatically.
+    this.view = 'app';
+
+    try {
+      // Load instances list.
+      await this.loadInstances();
+      // If logout() was triggered by a 401 inside loadInstances, bail.
+      if (!this.token) return;
+
+      // Parse URL and set the initial page (SPA routing).
+      if (this.initRouter) this.initRouter();
+
+      // Load dashboard data best-effort.
+      await this.loadDashboard();
+      if (!this.token) return;
+
+      await this.checkForUpdates();
+      if (this.featureAutoUpdate) {
+        if (this.loadApps) await this.loadApps();
+        if (!this.token) return;
+        if (this.startFeed) this.startFeed();
+      }
+    } catch (e) {
+      // Network failures should NOT wipe the session. The user stays in
+      // the app view and can retry by navigating / refreshing once the
+      // server is reachable again. Only a 401 (handled inside api())
+      // clears the token.
+      console.warn('Init error (session preserved):', e);
     }
   },
 
