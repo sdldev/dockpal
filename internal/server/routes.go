@@ -207,6 +207,29 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 				return s.Compose, nil
 			}
 		}
+		// Fallback: read compose from the filesystem via the dockpal.compose
+		// label on running containers. This handles apps deployed via CLI
+		// that are not yet tracked in the services database.
+		containers, lErr := dockerClient.ListContainersWithLabel(context.Background(), "dockpal.project="+project)
+		if lErr == nil && len(containers) > 0 {
+			composePath := containers[0].Labels["dockpal.compose"]
+			if composePath != "" {
+				content, fsErr := os.ReadFile(composePath)
+				if fsErr == nil && len(content) > 0 {
+					// Persist to DB so subsequent calls hit the fast path.
+					newSvc := db.Service{
+						ID:         generateID("svc-"),
+						InstanceID: "local",
+						Name:       project,
+						Type:       "compose",
+						Compose:    string(content),
+						CreatedAt:  time.Now().Unix(),
+					}
+					_ = database.SaveService(newSvc) // best-effort
+					return string(content), nil
+				}
+			}
+		}
 		return "", fmt.Errorf("compose not found for project %q", project)
 	}
 

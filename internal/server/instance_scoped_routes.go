@@ -1863,7 +1863,7 @@ func handleInstanceTriggerAppUpdate(c *gin.Context) {
 					return
 				}
 				if err != nil {
-					internalError(c, err)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("trigger app failed: %v", err)})
 					return
 				}
 				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
@@ -1951,8 +1951,30 @@ func handleInstanceSetAppAutoUpdate(c *gin.Context) {
 			}
 		}
 		if svc == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "app not found"})
-			return
+			// Fallback: Check if the app exists in Docker with a dockpal.compose label
+			// This handles apps deployed via CLI before they were added to the DB.
+			containers, lErr := globalDockerClient.ListContainersWithLabel(c.Request.Context(), "dockpal.project="+name)
+			if lErr == nil && len(containers) > 0 {
+				composePath := containers[0].Labels["dockpal.compose"]
+				if composePath != "" {
+					content, fsErr := os.ReadFile(composePath)
+					if fsErr == nil {
+						// Create a new service entry on the fly
+						svc = &db.Service{
+							ID:         generateID("svc-"),
+							InstanceID: "local",
+							Name:       name,
+							Type:       "compose",
+							Compose:    string(content),
+							CreatedAt:  time.Now().Unix(),
+						}
+					}
+				}
+			}
+			if svc == nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "app not found in database and lacks compose file path"})
+				return
+			}
 		}
 		if svc.Compose == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "app has no compose YAML to patch"})
@@ -1965,7 +1987,7 @@ func handleInstanceSetAppAutoUpdate(c *gin.Context) {
 		}
 		newCompose, err := docker.SetServiceLabel(svc.Compose, "dockpal.auto-update", labelValue)
 		if err != nil {
-			internalError(c, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to modify compose yaml: %v", err)})
 			return
 		}
 
@@ -1975,14 +1997,14 @@ func handleInstanceSetAppAutoUpdate(c *gin.Context) {
 		updated := *svc
 		updated.Compose = newCompose
 		if err := database.SaveService(updated); err != nil {
-			internalError(c, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save service to db: %v", err)})
 			return
 		}
 
 		client := c.MustGet("agent_client").(agent.AgentClient)
 		registryAuths := getRegistryAuths(globalRegistryManager, newCompose)
 		if err := client.DeployCompose(c.Request.Context(), name, newCompose, registryAuths, false); err != nil {
-			internalError(c, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("deploy compose failed: %v", err)})
 			return
 		}
 
