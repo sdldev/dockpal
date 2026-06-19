@@ -2,12 +2,37 @@
 window.Dockpal = window.Dockpal || {};
 
 Dockpal.services = {
+  parseEnvText(envText) {
+    const env = {};
+    const lines = (envText || '').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith('#')) continue;
+      const equalsIndex = line.indexOf('=');
+      if (equalsIndex <= 0) throw new Error(`Invalid env line ${i + 1}: expected KEY=value`);
+      const key = line.slice(0, equalsIndex).trim();
+      const value = line.slice(equalsIndex + 1);
+      if (!key) throw new Error(`Invalid env line ${i + 1}: empty key`);
+      env[key] = value;
+    }
+    return env;
+  },
+
   async deployCompose() {
+    let env;
+    try {
+      env = this.parseEnvText(this.deployForm.env_text);
+    } catch (e) {
+      this.toast(e.message || 'Invalid environment variables', 'error', 5000);
+      return;
+    }
+    const payload = { ...this.deployForm, env };
+    delete payload.env_text;
     // Use instanceApi for compose deploy
-    const resp = await this.instanceApi('POST', '/deploy/compose', this.deployForm);
+    const resp = await this.instanceApi('POST', '/deploy/compose', payload);
     if (resp && resp.ok) {
       this.toast('Stack deployed', 'success');
-      this.deployForm = { name: '', domain: '', compose: '', auto_start: true };
+      this.deployForm = { name: '', domain: '', compose: '', auto_start: true, env_text: '' };
       this.navigateTo('containers');
     } else {
       const data = resp ? await resp.json().catch(() => ({})) : {};
@@ -20,11 +45,19 @@ Dockpal.services = {
   async deployGit() {
     this.gitDeploying = true;
     try {
+      let env;
+      try {
+        env = this.parseEnvText(this.gitForm.env_text);
+      } catch (e) {
+        this.toast(e.message || 'Invalid environment variables', 'error', 5000);
+        return;
+      }
       const payload = {
         repo: this.gitForm.repo,
         branch: this.gitForm.branch,
         compose_file: this.gitForm.compose_file || '',
-        name: this.gitForm.name || ''
+        name: this.gitForm.name || '',
+        env
       };
       // Use instanceApi for git deploy
       const resp = await this.instanceApi('POST', '/deploy/git', payload);
@@ -37,7 +70,7 @@ Dockpal.services = {
           return;
         }
         this.toast('Deployed successfully', 'success');
-        this.gitForm = { repo: '', branch: 'main', compose_file: '', name: '' };
+        this.gitForm = { repo: '', branch: 'main', compose_file: '', name: '', env_text: '' };
         this.githubSearch = '';
         this.composeFiles = [];
         this.navigateTo('containers');
@@ -78,6 +111,7 @@ Dockpal.services = {
     this.gitForm.branch = repo.default_branch || 'main';
     this.gitForm.compose_file = '';
     this.gitForm.name = '';
+    this.gitForm.env_text = '';
     this.composeFiles = [];
   },
 

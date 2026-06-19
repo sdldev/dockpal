@@ -427,11 +427,12 @@ func handleInstanceDeployStream(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
-		Name          string `json:"name" binding:"required"`
-		Domain        string `json:"domain"`
-		Compose       string `json:"compose" binding:"required"`
-		RestartPolicy string `json:"restart_policy"`
-		AutoStart     *bool  `json:"auto_start"`
+		Name          string            `json:"name" binding:"required"`
+		Domain        string            `json:"domain"`
+		Compose       string            `json:"compose" binding:"required"`
+		Env           map[string]string `json:"env"`
+		RestartPolicy string            `json:"restart_policy"`
+		AutoStart     *bool             `json:"auto_start"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -449,7 +450,12 @@ func handleInstanceDeployStream(c *gin.Context) {
 		}
 	}
 
-	req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
+	preparedCompose, err := prepareDeployCompose(req.Compose, req.Env)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Compose = ensureAutoStart(preparedCompose, req.RestartPolicy, req.AutoStart)
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, req.Compose)
@@ -596,11 +602,12 @@ func handleInstanceDeployCompose(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
-		Name          string `json:"name" binding:"required"`
-		Domain        string `json:"domain"`
-		Compose       string `json:"compose" binding:"required"`
-		RestartPolicy string `json:"restart_policy"`
-		AutoStart     *bool  `json:"auto_start"`
+		Name          string            `json:"name" binding:"required"`
+		Domain        string            `json:"domain"`
+		Compose       string            `json:"compose" binding:"required"`
+		Env           map[string]string `json:"env"`
+		RestartPolicy string            `json:"restart_policy"`
+		AutoStart     *bool             `json:"auto_start"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -612,7 +619,12 @@ func handleInstanceDeployCompose(c *gin.Context) {
 		return
 	}
 
-	req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
+	compose, err := prepareDeployCompose(req.Compose, req.Env)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Compose = ensureAutoStart(compose, req.RestartPolicy, req.AutoStart)
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, req.Compose)
@@ -653,10 +665,11 @@ func handleInstanceDeployGit(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 
 	var req struct {
-		Repo        string `json:"repo" binding:"required"`
-		Branch      string `json:"branch"`
-		ComposeFile string `json:"compose_file"`
-		Name        string `json:"name"`
+		Repo        string            `json:"repo" binding:"required"`
+		Branch      string            `json:"branch"`
+		ComposeFile string            `json:"compose_file"`
+		Name        string            `json:"name"`
+		Env         map[string]string `json:"env"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -739,7 +752,12 @@ func handleInstanceDeployGit(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	composeYAML := ensureAutoStart(string(composeData), "", nil)
+	composeYAML, err := prepareDeployCompose(string(composeData), req.Env)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	composeYAML = ensureAutoStart(composeYAML, "", nil)
 
 	// Resolve registry credentials for this instance
 	registryAuths := resolveRegistryAuths(c, composeYAML)
@@ -763,6 +781,18 @@ func handleInstanceDeployGit(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": info})
+}
+
+func prepareDeployCompose(composeYAML string, env map[string]string) (string, error) {
+	for key, value := range env {
+		if err := validator.ValidateEnvVarName(key); err != nil {
+			return "", fmt.Errorf("invalid env var name '%s': %s", key, err.Error())
+		}
+		if err := validator.ValidateEnvVarValue(value); err != nil {
+			return "", fmt.Errorf("invalid env var value for '%s': %s", key, err.Error())
+		}
+	}
+	return docker.ApplyEnvVariables(composeYAML, env)
 }
 
 // resolveRegistryAuths extracts registry credentials for all image domains in a compose file.

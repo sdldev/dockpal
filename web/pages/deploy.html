@@ -98,6 +98,14 @@
                 Compose file: <span class="text-zinc-400" x-text="composeFiles[0]"></span>
               </div>
 
+              <div class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Environment Variables <span class="text-zinc-600">(optional)</span></label>
+                <textarea x-model="gitForm.env_text" rows="4"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-none"
+                  placeholder="APP_ENV=production&#10;DATABASE_URL=postgres://..."></textarea>
+                <p class="text-[11px] text-zinc-600">One <span class="font-mono">KEY=value</span> per line. Values are added to the deployed compose services.</p>
+              </div>
+
               <button @click="deployGit()" :disabled="gitDeploying" class="w-full py-2.5 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">
                 <span x-show="!gitDeploying">Deploy from GitHub</span>
                 <span x-show="gitDeploying" class="flex items-center justify-center gap-2">
@@ -129,6 +137,13 @@
                 <textarea x-model="deployForm.compose" rows="8" required
                   class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-none"
                   placeholder="services:&#10;  nginx:&#10;    image: nginx:alpine&#10;    ports:&#10;      - '8080:80'"></textarea>
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Environment Variables <span class="text-zinc-600">(optional)</span></label>
+                <textarea x-model="deployForm.env_text" rows="4"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-none"
+                  placeholder="APP_ENV=production&#10;DATABASE_URL=postgres://..."></textarea>
+                <p class="text-[11px] text-zinc-600">One <span class="font-mono">KEY=value</span> per line. Values replace matching <span class="font-mono">${KEY}</span> placeholders and are added to services.</p>
               </div>
               <label class="flex items-start gap-2.5 cursor-pointer select-none">
                 <input type="checkbox" x-model="deployForm.auto_start"
@@ -177,6 +192,14 @@
               </div>
               <div x-show="composeFiles.length === 1" class="text-xs text-zinc-500">
                 Compose file: <span class="text-zinc-400" x-text="composeFiles[0]"></span>
+              </div>
+
+              <div class="space-y-1.5">
+                <label class="text-xs text-zinc-400">Environment Variables <span class="text-zinc-600">(optional)</span></label>
+                <textarea x-model="gitForm.env_text" rows="4"
+                  class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent resize-none"
+                  placeholder="APP_ENV=production&#10;DATABASE_URL=postgres://..."></textarea>
+                <p class="text-[11px] text-zinc-600">One <span class="font-mono">KEY=value</span> per line. Values are added to the deployed compose services.</p>
               </div>
 
               <button type="submit" :disabled="gitDeploying" class="w-full py-2.5 bg-white hover:bg-zinc-200 disabled:opacity-50 text-zinc-900 rounded-sm text-sm font-medium transition-all active:scale-[0.98]">
