@@ -84,8 +84,15 @@
                   <td class="px-4 py-3 hidden md:table-cell">
                     <div class="flex flex-wrap gap-1">
                       <template x-for="(p, idx) in c.ports" :key="idx">
-                        <span class="px-1.5 py-0.5 rounded-sm text-xs bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono"
-                          x-text="p.PublicPort ? (p.PublicPort + ':' + p.PrivatePort + '/' + p.Type) : (p.PrivatePort + '/' + p.Type)"></span>
+                        <template x-if="p.PublicPort && c.state === 'running'">
+                          <a :href="'http://' + (selectedInstance?.host || window.location.hostname) + ':' + p.PublicPort" target="_blank" @click.stop
+                            class="px-1.5 py-0.5 rounded-sm text-xs bg-zinc-800 text-blue-400 hover:text-blue-300 hover:bg-zinc-700 border border-zinc-700 font-mono transition-colors"
+                            x-text="p.PublicPort + ':' + p.PrivatePort + '/' + p.Type"></a>
+                        </template>
+                        <template x-if="!p.PublicPort || c.state !== 'running'">
+                          <span class="px-1.5 py-0.5 rounded-sm text-xs bg-zinc-800 text-zinc-300 border border-zinc-700 font-mono"
+                            x-text="p.PublicPort ? (p.PublicPort + ':' + p.PrivatePort + '/' + p.Type) : (p.PrivatePort + '/' + p.Type)"></span>
+                        </template>
                       </template>
                       <span x-show="!c.ports || c.ports.length===0" class="text-xs text-zinc-600">—</span>
                     </div>
