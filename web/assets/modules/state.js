@@ -160,6 +160,13 @@ Dockpal.instances = {
     return this.selectedInstance === 'local';
   },
 
+  // Get the host of the currently selected instance (for linking to ports)
+  get instanceHost() {
+    if (this.selectedInstance === 'local') return window.location.hostname;
+    const inst = this.instances.find(i => i.id === this.selectedInstance);
+    return inst?.host || window.location.hostname;
+  },
+
   // Instance API helper - prepends instance path to resource path
   // Uses the auth.api method for making requests
   async instanceApi(method, path, body) {
