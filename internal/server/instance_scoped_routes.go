@@ -1898,7 +1898,11 @@ func handleInstanceTriggerAppUpdate(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
 			return
 		}
-		internalError(c, err)
+		if strings.Contains(err.Error(), "404 page not found") || strings.Contains(err.Error(), "status 404") {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "Agent is outdated. Please update the agent on the remote host to support app auto-updates."})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("agent trigger failed: %v", err)})
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"attempt_id": attemptID})
@@ -2014,7 +2018,11 @@ func handleInstanceSetAppAutoUpdate(c *gin.Context) {
 
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	if err := client.SetAppAutoUpdate(c.Request.Context(), name, req.Enabled); err != nil {
-		internalError(c, err)
+		if strings.Contains(err.Error(), "404 page not found") || strings.Contains(err.Error(), "status 404") {
+			c.JSON(http.StatusNotImplemented, gin.H{"error": "Agent is outdated. Please update the agent on the remote host to support app auto-updates."})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("agent toggle failed: %v", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
