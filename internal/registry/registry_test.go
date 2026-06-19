@@ -12,7 +12,7 @@ import (
 
 // decodeAuthHeader decodes a base64-encoded Docker auth header back into a DockerAuthConfig.
 func decodeAuthHeader(header string) (*DockerAuthConfig, error) {
-	jsonBytes, err := base64.URLEncoding.DecodeString(header)
+	jsonBytes, err := base64.StdEncoding.DecodeString(header)
 	if err != nil {
 		return nil, err
 	}

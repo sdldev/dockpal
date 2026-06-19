@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -540,6 +541,136 @@ func SetServiceLabel(composeYAML, key, value string) (string, error) {
 		return "", fmt.Errorf("failed to marshal compose YAML: %w", err)
 	}
 	return string(out), nil
+}
+
+// envVarPattern matches ${KEY} and ${KEY:-default} placeholders in compose files.
+var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}`)
+
+// ApplyEnvVariables returns compose YAML with env applied to every service.
+// Placeholders in the form ${KEY} and ${KEY:-default} are replaced before
+// YAML parsing, and the final environment map is written to each service's
+// environment section.
+func ApplyEnvVariables(composeYAML string, env map[string]string) (string, error) {
+	if len(env) == 0 {
+		return composeYAML, nil
+	}
+	composeYAML = envVarPattern.ReplaceAllStringFunc(composeYAML, func(match string) string {
+		parts := envVarPattern.FindStringSubmatch(match)
+		if parts == nil {
+			return match
+		}
+		key := parts[1]
+		if val, ok := env[key]; ok {
+			return val
+		}
+		// If key not in env map but default exists, use the default
+		if len(parts) > 2 && strings.HasPrefix(parts[2], ":-") {
+			return parts[2][2:] // strip ":-" prefix
+		}
+		return match
+	})
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(composeYAML), &root); err != nil {
+		return "", fmt.Errorf("invalid compose YAML: %w", err)
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return "", fmt.Errorf("empty compose YAML")
+	}
+	rootMap := root.Content[0]
+	if rootMap.Kind != yaml.MappingNode {
+		return "", fmt.Errorf("compose root is not a mapping")
+	}
+	servicesNode := findYAMLMapValue(rootMap, "services")
+	if servicesNode == nil || servicesNode.Kind != yaml.MappingNode || len(servicesNode.Content) == 0 {
+		return "", fmt.Errorf("no services defined in compose file")
+	}
+	for i := 0; i+1 < len(servicesNode.Content); i += 2 {
+		svc := servicesNode.Content[i+1]
+		if svc.Kind != yaml.MappingNode {
+			continue
+		}
+		if err := setServiceEnvironmentOnNode(svc, env); err != nil {
+			return "", err
+		}
+	}
+	out, err := yaml.Marshal(&root)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal compose YAML: %w", err)
+	}
+	return string(out), nil
+}
+
+func setServiceEnvironmentOnNode(svc *yaml.Node, env map[string]string) error {
+	envVal := findYAMLMapValue(svc, "environment")
+	if envVal == nil {
+		svc.Content = append(svc.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "environment"},
+			newEnvMappingNode(env),
+		)
+		return nil
+	}
+	switch envVal.Kind {
+	case yaml.MappingNode:
+		for key, value := range env {
+			setYAMLMapString(envVal, key, value)
+		}
+		return nil
+	case yaml.SequenceNode:
+		for key, value := range env {
+			setYAMLSequenceEnv(envVal, key, value)
+		}
+		return nil
+	case yaml.ScalarNode:
+		envVal.Kind = yaml.MappingNode
+		envVal.Tag = "!!map"
+		envVal.Value = ""
+		envVal.Style = 0
+		envVal.Content = newEnvMappingNode(env).Content
+		return nil
+	default:
+		return fmt.Errorf("unsupported environment node kind %d", envVal.Kind)
+	}
+}
+
+func newEnvMappingNode(env map[string]string) *yaml.Node {
+	node := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	for key, value := range env {
+		node.Content = append(node.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+			newEnvStringNode(value),
+		)
+	}
+	return node
+}
+
+func setYAMLMapString(node *yaml.Node, key, value string) {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			node.Content[i+1] = newEnvStringNode(value)
+			return
+		}
+	}
+	node.Content = append(node.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		newEnvStringNode(value),
+	)
+}
+
+func setYAMLSequenceEnv(node *yaml.Node, key, value string) {
+	prefix := key + "="
+	entry := prefix + value
+	for _, item := range node.Content {
+		if item.Kind == yaml.ScalarNode && (item.Value == key || strings.HasPrefix(item.Value, prefix)) {
+			item.Tag = "!!str"
+			item.Value = entry
+			return
+		}
+	}
+	node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: entry})
+}
+
+func newEnvStringNode(value string) *yaml.Node {
+	return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value, Style: yaml.DoubleQuotedStyle}
 }
 
 // setServiceLabelOnNode sets or removes a label on a single service mapping node.

@@ -136,7 +136,7 @@ func TestProperty_MultiRegistryCredentialResolution(t *testing.T) {
 			// If both exist, instance-specific should win
 			if instanceCred != nil && globalCred != nil {
 				auth := auths[domain]
-				decoded, err := base64.URLEncoding.DecodeString(auth)
+				decoded, err := base64.StdEncoding.DecodeString(auth)
 				if err != nil {
 					t.Logf("failed to decode auth for %s: %v", domain, err)
 					return false
@@ -156,7 +156,7 @@ func TestProperty_MultiRegistryCredentialResolution(t *testing.T) {
 			// If only global exists (and no instance-specific), global should be used
 			if instanceCred == nil && globalCred != nil {
 				auth := auths[domain]
-				decoded, err := base64.URLEncoding.DecodeString(auth)
+				decoded, err := base64.StdEncoding.DecodeString(auth)
 				if err != nil {
 					t.Logf("failed to decode auth for %s: %v", domain, err)
 					return false
@@ -442,7 +442,7 @@ func buildAuthHeaderFromCred(cred *db.RegistryCredential, cryptoKey []byte) (str
 		return "", err
 	}
 
-	return base64.URLEncoding.EncodeToString(jsonBytes), nil
+	return base64.StdEncoding.EncodeToString(jsonBytes), nil
 }
 
 func min(a, b int) int {

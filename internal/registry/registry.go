@@ -58,8 +58,9 @@ type TestResult struct {
 
 // DockerAuthConfig is the JSON structure for Docker registry auth headers.
 type DockerAuthConfig struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	ServerAddress string `json:"serveraddress"`
 }
 
 var registryHTTPClient = &http.Client{
@@ -435,15 +436,20 @@ func (m *Manager) GetAuthHeader(imageRef string) (string, error) {
 	defer zeroBytes(token)
 
 	// Build Docker auth config
+	// ServerAddress MUST be the actual image registry domain (e.g. ghcr.io),
+	// not the credential alias domain (e.g. github.com). Docker daemon matches
+	// credentials to registries by serveraddress; without it the auth header
+	// is silently ignored and the pull fails with "denied".
 	authConfig := DockerAuthConfig{
-		Username: cred.Username,
-		Password: string(token),
+		Username:      cred.Username,
+		Password:      string(token),
+		ServerAddress: domain,
 	}
 	jsonBytes, err := json.Marshal(authConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to build auth header")
 	}
-	return base64.URLEncoding.EncodeToString(jsonBytes), nil
+	return base64.StdEncoding.EncodeToString(jsonBytes), nil
 }
 
 // GetTokenForDomain retrieves the decrypted plaintext token for a given registry domain.
