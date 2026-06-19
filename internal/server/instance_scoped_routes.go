@@ -1898,8 +1898,12 @@ func handleInstanceTriggerAppUpdate(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
 			return
 		}
-		if strings.Contains(err.Error(), "404 page not found") || strings.Contains(err.Error(), "status 404") {
+		if strings.Contains(err.Error(), "404 page not found") {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "Agent is outdated. Please update the agent on the remote host to support app auto-updates."})
+			return
+		}
+		if strings.Contains(err.Error(), "status 404") {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("agent trigger failed: %v", err)})
@@ -2018,8 +2022,16 @@ func handleInstanceSetAppAutoUpdate(c *gin.Context) {
 
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	if err := client.SetAppAutoUpdate(c.Request.Context(), name, req.Enabled); err != nil {
-		if strings.Contains(err.Error(), "404 page not found") || strings.Contains(err.Error(), "status 404") {
+		// A missing route from Chi returns "404 page not found". If we see this,
+		// the agent is too old to support the route. A "status 404" with a JSON
+		// error means the route exists but the agent couldn't find the app/compose.
+		if strings.Contains(err.Error(), "404 page not found") {
 			c.JSON(http.StatusNotImplemented, gin.H{"error": "Agent is outdated. Please update the agent on the remote host to support app auto-updates."})
+			return
+		}
+		// If it's a 404 NOT from a missing route, relay the specific error:
+		if strings.Contains(err.Error(), "status 404") {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("agent toggle failed: %v", err)})
