@@ -276,9 +276,6 @@ func (c *DirectClient) ContainerLogs(ctx context.Context, id string, tail string
 			if _, err := pw.Write(msg); err != nil {
 				return
 			}
-			if _, err := pw.Write([]byte("\n")); err != nil {
-				return
-			}
 		}
 	}()
 
