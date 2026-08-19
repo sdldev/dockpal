@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '../../lib/api/client';
-  import { templates, addToast } from '../../lib/store';
+  import { templates, selectedInstance, addToast } from '../../lib/store';
   import type { Template } from '../../lib/types/api';
+  import Modal from '../ui/Modal.svelte';
+  import DeployWizard from '../deploy/DeployWizard.svelte';
 
-  let loading = true;
+  let loading = $state(true);
+  let deployTemplate: Template | null = $state(null);
 
   onMount(async () => {
     try {
@@ -36,7 +39,7 @@
         </div>
         <p class="text-xs text-zinc-400 mb-4">{tpl.description}</p>
         <button
-          on:click={() => addToast(`Deploy ${tpl.name} — wizard comes in Phase 2`, 'info')}
+          onclick={() => { deployTemplate = tpl; }}
           class="w-full py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-xs font-medium transition-colors"
         >
           Deploy
@@ -49,3 +52,18 @@
     {/each}
   </div>
 </div>
+
+<Modal
+  open={deployTemplate !== null}
+  title={deployTemplate ? `Deploy ${deployTemplate.name}` : ''}
+  size="lg"
+  onclose={() => { deployTemplate = null; }}
+>
+  {#if deployTemplate}
+    <DeployWizard
+      template={deployTemplate}
+      instanceId={$selectedInstance}
+      ondone={() => { deployTemplate = null; }}
+    />
+  {/if}
+</Modal>
