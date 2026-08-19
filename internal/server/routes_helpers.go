@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/registry"
+	"gopkg.in/yaml.v3"
 )
 
 // checkOrigin validates WebSocket upgrade requests by comparing
@@ -229,6 +231,93 @@ func ensureAutoStart(composeYAML, override string, autoStart *bool) string {
 		return composeYAML
 	}
 	return out
+}
+
+// applyNetworkMode applies the user's network selection to a compose YAML.
+// "" and "bridge" are no-ops (Docker's default bridge). "host" and "none"
+// set network_mode on every service and strip port bindings (port publishing
+// is incompatible with host networking). "custom" attaches customNetwork to
+// every service and declares it in the top-level networks section. Invalid
+// input returns the original YAML so a deploy is never blocked here.
+func applyNetworkMode(composeYAML, mode, customNetwork string) string {
+	mode = strings.TrimSpace(mode)
+	if mode == "" || mode == "bridge" {
+		return composeYAML
+	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(composeYAML), &doc); err != nil {
+		slog.Warn("network mode apply skipped: invalid compose", "component", "deploy", "error", err)
+		return composeYAML
+	}
+
+	services, _ := doc["services"].(map[string]any)
+	if len(services) == 0 {
+		return composeYAML
+	}
+
+	switch mode {
+	case "host", "none":
+		for _, svc := range services {
+			svcMap, ok := svc.(map[string]any)
+			if !ok {
+				continue
+			}
+			svcMap["network_mode"] = mode
+			delete(svcMap, "ports")
+		}
+	case "custom":
+		customNetwork = strings.TrimSpace(customNetwork)
+		if customNetwork == "" {
+			return composeYAML
+		}
+		for _, svc := range services {
+			svcMap, ok := svc.(map[string]any)
+			if !ok {
+				continue
+			}
+			attachNetwork(svcMap, customNetwork)
+		}
+		networks, _ := doc["networks"].(map[string]any)
+		if networks == nil {
+			networks = map[string]any{}
+		}
+		if _, exists := networks[customNetwork]; !exists {
+			networks[customNetwork] = nil
+		}
+		doc["networks"] = networks
+	default:
+		return composeYAML
+	}
+
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return composeYAML
+	}
+	_ = enc.Close()
+	return buf.String()
+}
+
+// attachNetwork adds name to a service's networks key, preserving the list
+// or map shape already in use and skipping duplicates.
+func attachNetwork(svc map[string]any, name string) {
+	switch existing := svc["networks"].(type) {
+	case []any:
+		for _, n := range existing {
+			if n == name {
+				return
+			}
+		}
+		svc["networks"] = append(existing, name)
+	case map[string]any:
+		if _, ok := existing[name]; !ok {
+			existing[name] = nil
+		}
+	default:
+		svc["networks"] = []any{name}
+	}
 }
 
 // getRegistryAuths extracts registry authentication headers from the registry manager.

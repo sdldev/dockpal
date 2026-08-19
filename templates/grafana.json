@@ -1,15 +1,18 @@
 {
   "id": "grafana",
   "name": "Grafana",
-  "description": "Monitoring \u0026 observability dashboard",
+  "description": "Monitoring & observability platform",
   "category": "monitoring",
   "icon": "📊",
+  "env_required": [
+    "GF_SECURITY_ADMIN_PASSWORD"
+  ],
   "ports": [
     {
-      "label": "Web UI",
+      "label": "Grafana Web",
       "default": 3000,
       "container_port": 3000
     }
   ],
-  "compose": "services:\n  grafana:\n    image: grafana/grafana:latest\n    ports:\n      - '3000:3000'\n    volumes:\n      - grafana-data:/var/lib/grafana\nvolumes:\n  grafana-data:"
+  "compose": "services:\n  grafana:\n    image: grafana/grafana:11.5.2\n    environment:\n      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}\n      GF_USERS_ALLOW_SIGN_UP: false\n    ports:\n      - '3000:3000'\n    volumes:\n      - grafana-data:/var/lib/grafana\nvolumes:\n  grafana-data:"
 }

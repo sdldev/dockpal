@@ -525,6 +525,8 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 		AutoStart     *bool             `json:"auto_start"`
 		AutoRecover   bool              `json:"auto_recover"`
 		Domain        string            `json:"domain"`
+		NetworkMode   string            `json:"network_mode"`
+		CustomNetwork string            `json:"custom_network"`
 	}
 	c.ShouldBindJSON(&req)
 
@@ -550,6 +552,8 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 		newPort := fmt.Sprintf("'%d:%d'", hostPort, p.ContainerPort)
 		compose = strings.ReplaceAll(compose, oldPort, newPort)
 	}
+	// Apply network mode after env and ports substitution (Requirements 13.3–13.4)
+	compose = applyNetworkMode(compose, req.NetworkMode, req.CustomNetwork)
 	// Normalize restart policy so apps come back up after a host reboot.
 	compose = ensureAutoStart(compose, req.RestartPolicy, req.AutoStart)
 	// Add auto-recover label if requested

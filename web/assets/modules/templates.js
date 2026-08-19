@@ -98,8 +98,10 @@ Dockpal.templates = {
     const resp = await this.instanceApi('POST', '/templates/' + tc.template.id + '/deploy/stream', {
       env, ports: portsInt, custom_name: tc.name,
       restart_policy: tc.restartPolicy, auto_recover: tc.autoRecover, domain: tc.domain
+      env, ports: portsInt, custom_name: tc.name,
+      restart_policy: tc.restartPolicy, auto_recover: tc.autoRecover, domain: tc.domain,
+      network_mode: tc.networkMode, custom_network: tc.customNetwork
     });
-    if (!resp || !resp.ok) {
       const data = resp ? await resp.json() : {};
       tc.error = data.error || 'Deploy failed';
       tc.deploying = false;

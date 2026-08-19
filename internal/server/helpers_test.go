@@ -2,6 +2,7 @@ package server
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sdldev/dockpal/internal/db"
@@ -65,4 +66,53 @@ services:
 		}
 	})
 
+}
+
+func TestApplyNetworkMode(t *testing.T) {
+	compose := "services:\n  postgres:\n    image: postgres:17-alpine\n    ports:\n      - '5432:5432'\n    volumes:\n      - pg-data:/var/lib/postgresql/data\nvolumes:\n  pg-data:\n"
+
+	// empty or bridge mode leaves compose untouched (default bridge)
+	if got := applyNetworkMode(compose, "", ""); got != compose {
+		t.Errorf("empty mode: compose modified")
+	}
+	if got := applyNetworkMode(compose, "bridge", ""); got != compose {
+		t.Errorf("bridge mode: compose modified")
+	}
+
+	// host mode sets network_mode and removes ports (mutually exclusive)
+	got := applyNetworkMode(compose, "host", "")
+	if !strings.Contains(got, "network_mode: host") {
+		t.Errorf("host mode: missing network_mode, got:\n%s", got)
+	}
+	if strings.Contains(got, "ports:") {
+		t.Errorf("host mode: ports must be removed, got:\n%s", got)
+	}
+
+	// none mode sets network_mode: none
+	got = applyNetworkMode(compose, "none", "")
+	if !strings.Contains(got, "network_mode: none") {
+		t.Errorf("none mode: missing network_mode, got:\n%s", got)
+	}
+
+	// custom mode attaches the named network to services and top level
+	got = applyNetworkMode(compose, "custom", "my-net")
+	if !strings.Contains(got, "my-net") {
+		t.Errorf("custom mode: network name missing, got:\n%s", got)
+	}
+	if strings.Contains(got, "network_mode") {
+		t.Errorf("custom mode: must not set network_mode, got:\n%s", got)
+	}
+	if !strings.Contains(got, "ports:") {
+		t.Errorf("custom mode: ports must be preserved, got:\n%s", got)
+	}
+
+	// custom mode without a network name is a no-op
+	if got := applyNetworkMode(compose, "custom", ""); got != compose {
+		t.Errorf("custom mode without name: compose modified")
+	}
+
+	// invalid YAML returns the original untouched
+	if got := applyNetworkMode("not yaml: [", "host", ""); got != "not yaml: [" {
+		t.Errorf("invalid YAML: compose modified")
+	}
 }
