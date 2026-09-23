@@ -42,7 +42,7 @@ const (
 	defaultLogPath = "/opt/dockpal/data/dockpal.log"
 )
 
-var version = "0.9.0-dev"
+var version = "2.0.0"
 
 func init() {
 	version = strings.TrimPrefix(version, "v")

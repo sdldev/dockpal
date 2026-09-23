@@ -6,7 +6,7 @@ const SwaggerJSON = `{
   "info": {
     "title": "Dockpal API",
     "description": "Simple & powerful Docker management platform API documentation.",
-    "version": "0.9.0"
+    "version": "2.0.0"
   },
   "servers": [
     {
