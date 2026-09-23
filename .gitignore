@@ -25,9 +25,9 @@ dockpal-linux-amd64
 # Agent / tool state
 .omc/
 
-# Temp compose dirs
-compose/
-repos/
+# Temp compose dirs (runtime scratch space, NOT the svelte components dir)
+/compose/
+/repos/
 
 # Svelte SPA build output (copied in by `make svelte-embed`)
 web/svelteDist/
