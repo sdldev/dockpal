@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -16,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,45 +52,52 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Dockpal — Simple & powerful Docker management platform")
 		fmt.Printf("Version: %s\n", version)
-		fmt.Println()
-		fmt.Println("Usage:")
-		fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
-		fmt.Println("  dockpal backup          Create a database backup")
-		fmt.Println("  dockpal restore         Restore database from a backup")
-		fmt.Println("  dockpal reset-password  Reset admin password")
-		fmt.Println("  dockpal version         Show version")
-		fmt.Println("  dockpal help            Show this help")
-		return
+	fmt.Println()
+			fmt.Println("Usage:")
+			fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
+			fmt.Println("  dockpal backup          Create a database backup")
+			fmt.Println("  dockpal restore         Restore database from a backup")
+			fmt.Println("  dockpal install         Install/Setup (create admin user)")
+			fmt.Println("  dockpal reset-password  Reset admin password")
+			fmt.Println("  dockpal version         Show version")
+			fmt.Println("  dockpal help            Show this help")
+			return
 	}
 
-	switch os.Args[1] {
-	case "server":
-		serverCmd := flag.NewFlagSet("server", flag.ExitOnError)
+		switch os.Args[1] {
+		case "server":
+			serverCmd := flag.NewFlagSet("server", flag.ExitOnError)
 
-		envTLS := os.Getenv("DOCKPAL_TLS") == "true"
-		envTLSCert := os.Getenv("DOCKPAL_TLS_CERT")
-		envTLSKey := os.Getenv("DOCKPAL_TLS_KEY")
-		envTLSDomain := os.Getenv("DOCKPAL_TLS_DOMAIN")
+			envTLS := os.Getenv("DOCKPAL_TLS") == "true"
+			envTLSCert := os.Getenv("DOCKPAL_TLS_CERT")
+			envTLSKey := os.Getenv("DOCKPAL_TLS_KEY")
+			envTLSDomain := os.Getenv("DOCKPAL_TLS_DOMAIN")
 
-		tls := serverCmd.Bool("tls", envTLS, "Enable TLS (HTTPS)")
-		tlsCert := serverCmd.String("tls-cert", envTLSCert, "Path to TLS certificate file")
-		tlsKey := serverCmd.String("tls-key", envTLSKey, "Path to TLS private key file")
-		tlsDomain := serverCmd.String("tls-domain", envTLSDomain, "Domain name for Let's Encrypt autocert")
+			tls := serverCmd.Bool("tls", envTLS, "Enable TLS (HTTPS)")
+			tlsCert := serverCmd.String("tls-cert", envTLSCert, "Path to TLS certificate file")
+			tlsKey := serverCmd.String("tls-key", envTLSKey, "Path to TLS private key file")
+			tlsDomain := serverCmd.String("tls-domain", envTLSDomain, "Domain name for Let's Encrypt autocert")
 
-		serverCmd.Parse(os.Args[2:])
-		runServer(*tls, *tlsCert, *tlsKey, *tlsDomain)
-	case "backup":
-		backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
-		output := backupCmd.String("output", "", "Backup output path (default: <data_dir>/backups/dockpal-<timestamp>.db)")
-		backupCmd.Parse(os.Args[2:])
-		backup(*output)
-	case "restore":
-		restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
-		from := restoreCmd.String("from", "", "Path to backup file to restore from (required)")
-		force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
-		restoreCmd.Parse(os.Args[2:])
-		restore(*from, *force)
-	case "reset-password":
+			serverCmd.Parse(os.Args[2:])
+			runServer(*tls, *tlsCert, *tlsKey, *tlsDomain)
+		case "backup":
+			backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
+			output := backupCmd.String("output", "", "Backup output path (default: <data_dir>/backups/dockpal-<timestamp>.db)")
+			backupCmd.Parse(os.Args[2:])
+			backup(*output)
+		case "restore":
+			restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
+			from := restoreCmd.String("from", "", "Path to backup file to restore from (required)")
+			force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
+			restoreCmd.Parse(os.Args[2:])
+			restore(*from, *force)
+		case "install":
+			installCmd := flag.NewFlagSet("install", flag.ExitOnError)
+			username := installCmd.String("username", "admin", "Username for first-time setup")
+			password := installCmd.String("password", "", "Password (min 8 chars; omit to generate random)")
+			installCmd.Parse(os.Args[2:])
+			runInstall(*username, *password)
+		case "reset-password":
 		resetCmd := flag.NewFlagSet("reset-password", flag.ExitOnError)
 		resetUsername := resetCmd.String("username", "admin", "Username to reset")
 		resetPassword := resetCmd.String("password", "", "New password (min 8 chars); omit to generate a random one")
@@ -98,18 +107,19 @@ func main() {
 		rotateSecrets()
 	case "version":
 		fmt.Printf("Dockpal v%s\n", version)
-	case "help":
-		fmt.Println("Dockpal — Simple & powerful Docker management platform")
-		fmt.Printf("Version: %s\n", version)
-		fmt.Println()
-		fmt.Println("Commands:")
-		fmt.Println("  server          Start the HTTP/HTTPS server")
-		fmt.Println("  backup          Create a database backup")
-		fmt.Println("  restore         Restore database from a backup")
-		fmt.Println("  reset-password  Reset a user's password (--username, --password)")
-		fmt.Println("  rotate-secrets  Rotate JWT/encryption secret")
-		fmt.Println("  version         Show version")
-		fmt.Println("  help            Show this help")
+		case "help":
+			fmt.Println("Dockpal — Simple & powerful Docker management platform")
+			fmt.Printf("Version: %s\n", version)
+			fmt.Println()
+			fmt.Println("Commands:")
+			fmt.Println("  server          Start the HTTP/HTTPS server")
+			fmt.Println("  backup          Create a database backup")
+			fmt.Println("  restore         Restore database from a backup")
+			fmt.Println("  install         Install/Setup (create admin user)")
+			fmt.Println("  reset-password  Reset a user's password (--username, --password)")
+			fmt.Println("  rotate-secrets  Rotate JWT/encryption secret")
+			fmt.Println("  version         Show version")
+			fmt.Println("  help            Show this help")
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -218,30 +228,29 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 	defer database.Close()
 
-	// Ensure default admin user exists
-	generatedAdminPassword := false
-	if adminPassword == "" {
-		var err error
-		adminPassword, err = generatePassword(12)
-		if err != nil {
-			log.Fatalf("Failed to generate initial admin password: %v", err)
+	// Ensure default admin user exists.
+	// The bootstrap password (env or generated) is only APPLIED when the admin
+	// user does not exist yet — existing users keep their password.
+	createdAdmin, err := database.EnsureDefaultAdmin(func() (string, error) {
+		if adminPassword == "" {
+			return generatePassword(12)
 		}
-		generatedAdminPassword = true
-	}
-	if len(adminPassword) < 8 {
-		log.Fatal("DOCKPAL_INITIAL_ADMIN_PASSWORD must be at least 8 characters")
-	}
-	defaultHash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
+		if len(adminPassword) < 8 {
+			return "", errors.New("DOCKPAL_INITIAL_ADMIN_PASSWORD must be at least 8 characters")
+		}
+		return adminPassword, nil
+	})
 	if err != nil {
-		log.Fatalf("Failed to hash default admin password: %v", err)
-	}
-	if err := database.EnsureDefaultAdmin(string(defaultHash)); err != nil {
 		log.Fatalf("Failed to create default admin: %v", err)
 	}
-	if generatedAdminPassword {
-		log.Printf("Generated initial admin password for username admin: %s", adminPassword)
-		fmt.Fprintf(os.Stderr, "Generated initial admin password for username admin: %s\n", adminPassword)
-		log.Printf("Set DOCKPAL_INITIAL_ADMIN_PASSWORD before first startup to choose a bootstrap password")
+	if createdAdmin {
+		if adminPassword == "" {
+			log.Printf("Created admin user with generated password: %s", lastGeneratedPassword())
+			fmt.Fprintf(os.Stderr, "Created admin user with generated password: %s\n", lastGeneratedPassword())
+			log.Printf("Set DOCKPAL_INITIAL_ADMIN_PASSWORD to choose the bootstrap password (first run only)")
+		} else {
+			log.Printf("Created admin user with DOCKPAL_INITIAL_ADMIN_PASSWORD")
+		}
 	}
 
 	// Ensure local instance exists
@@ -297,22 +306,42 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	auditRetention := parseDurationEnv("DOCKPAL_AUDIT_LOG_RETENTION", 2160*time.Hour)
 	startAuditRetentionWorker(appCtx, database, auditRetention)
 
-	// Serve embedded frontend
-	assetsFS, _ := fs.Sub(web.Assets, "assets")
-	srv.Router().StaticFS("/assets", http.FS(assetsFS))
-	// Assemble HTML once at startup (resolves <!--#include --> directives)
-	indexHTML, err := web.AssembleHTML()
-	if err != nil {
-		log.Fatalf("Failed to assemble index.html: %v", err)
+	// Serve embedded Svelte SPA at the root.
+	// The SPA handles its own client-side routes (/dashboard, /fleet,
+	// /containers/:id, ...) via lib/router.ts; the NoRoute handler below
+	// serves index.html for those deep links.
+	var svelteIndex []byte
+	if sub, err := fs.Sub(web.SvelteAssets, "svelteDist"); err == nil {
+		if _, statErr := fs.Stat(sub, "index.html"); statErr == nil {
+			if content, readErr := fs.ReadFile(sub, "index.html"); readErr == nil {
+				svelteIndex = content
+				// Vite emits assets under dist/assets; expose them at /assets.
+				if assetsSub, err := fs.Sub(sub, "assets"); err == nil {
+					srv.Router().StaticFS("/assets", http.FS(assetsSub))
+				}
+				slog.Info("svelte SPA enabled at /", "component", "startup")
+			}
+		} else {
+			slog.Warn("svelte SPA not built; run 'make svelte-embed' to enable /", "component", "startup")
+		}
 	}
-	indexBytes := []byte(indexHTML)
-	srv.Router().GET("/", func(c *gin.Context) {
-		c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
-	})
-	// SPA fallback: serve index.html for client-side routes (/dashboard, /containers, etc.)
+
+	serveIndex := func(c *gin.Context) {
+		if svelteIndex == nil {
+			c.String(http.StatusServiceUnavailable, "frontend not built; run 'make svelte-embed'")
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", svelteIndex)
+	}
+	srv.Router().GET("/", serveIndex)
+
+	// SPA fallback: any non-API GET request that did not match a route
+	// (e.g. /dashboard, /containers/abc) serves index.html so the client
+	// router can resolve it.
 	srv.Router().NoRoute(func(c *gin.Context) {
-		if c.Request.Method == "GET" && !strings.HasPrefix(c.Request.URL.Path, "/api/") {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", indexBytes)
+		path := c.Request.URL.Path
+		if c.Request.Method == "GET" && !strings.HasPrefix(path, "/api/") && svelteIndex != nil {
+			serveIndex(c)
 			return
 		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -562,7 +591,21 @@ func generatePassword(length int) (string, error) {
 		}
 		result[i] = charset[n.Int64()]
 	}
+	lastGen.Store("pw", string(result))
 	return string(result), nil
+}
+
+// lastGen remembers the most recent password produced by generatePassword so
+// the admin-bootstrap log line can show it after EnsureDefaultAdmin decides
+// a user was actually created.
+var lastGen sync.Map // string
+
+func lastGeneratedPassword() string {
+	v, _ := lastGen.Load("pw")
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 func generateSecretHex(length int) (string, error) {
@@ -616,6 +659,67 @@ func runResetPassword(username, password string) {
 	} else {
 		fmt.Printf("Password updated.\n")
 	}
+}
+
+func runInstall(username, password string) {
+	dbPath := os.Getenv("DOCKPAL_DB_PATH")
+	if dbPath == "" {
+		dbPath = defaultDBPath
+	}
+	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
+
+	// Check if user already exists (skip installation)
+	database, err := db.New(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	defer database.Close()
+
+	_, err = database.GetUser(username)
+	if err == nil {
+		log.Printf("User %q already exists. Use 'reset-password' to change password.", username)
+		return
+	}
+
+	generated := false
+	if password == "" {
+		password, err = generatePassword(12)
+		if err != nil {
+			log.Fatalf("Failed to generate password: %v", err)
+		}
+		generated = true
+	}
+
+	if len(password) < 8 {
+		log.Fatalf("Password must be at least 8 characters")
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatalf("Failed to hash password: %v", err)
+	}
+
+	user := db.User{
+		ID:         "admin-001",
+		Username:   username,
+		PasswordHash: string(hash),
+		Role:       "admin",
+		TokenVersion: 0,
+	}
+
+	if err := database.CreateUser(user); err != nil {
+		log.Fatalf("Failed to create user: %v", err)
+	}
+
+	fmt.Printf("Dockpal: installation complete\n")
+	fmt.Printf("Username: %s\n", username)
+	if generated {
+		fmt.Printf("Password (generated): %s\n", password)
+	} else {
+		fmt.Printf("Password set.\n")
+	}
+	fmt.Println("\nYou can now start the server with: dockpal server")
+	fmt.Println("(Or use: DOCKPAL_DATA_DIR=/path/to/data dockpal server)")
 }
 
 // parseDurationEnv reads a duration from an environment variable.

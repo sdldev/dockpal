@@ -5,9 +5,38 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.9.0-dev")
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
-.PHONY: all build build-linux-amd64 dev test lint clean help
+.PHONY: all build build-linux-amd64 dev test lint clean help \
+        svelte-build svelte-dev svelte-check svelte-test svelte-embed prod-build
 
 all: build
+
+## svelte-build: Build the Svelte frontend (output to svelte/dist)
+svelte-build:
+	@echo "Building Svelte frontend..."
+	cd svelte && npm run build
+
+## svelte-embed: Build frontend and copy output into web/svelteDist for go:embed
+svelte-embed: svelte-build
+	@echo "Embedding Svelte build output into web/svelteDist..."
+	rm -rf web/svelteDist/assets
+	mkdir -p web/svelteDist
+	cp -r svelte/dist/. web/svelteDist/
+
+## svelte-dev: Run Svelte dev server on :5173 (proxies /api to :3012)
+svelte-dev:
+	cd svelte && npm run dev
+
+## svelte-check: Type-check the Svelte frontend
+svelte-check:
+	cd svelte && npm run check
+
+## svelte-test: Run Svelte unit tests
+svelte-test:
+	cd svelte && npm run test:unit
+
+## prod-build: Build frontend + Go binary with embedded Svelte SPA
+prod-build: svelte-embed build
+	@echo "Production build complete: ./dockpal (Svelte SPA served at /)"
 
 ## build: Build binary for local OS/Arch
 build:
