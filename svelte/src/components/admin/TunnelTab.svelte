@@ -2,10 +2,12 @@
 	import { api } from '$lib/api/client';
 	import { addToast } from '$lib/store';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let token = $state('');
 	let busy = $state(false);
 	let tearing = $state(false);
+	let showTeardownDialog = $state(false);
 
 	async function setupTunnel() {
 		if (!token.trim()) {
@@ -25,7 +27,6 @@
 	}
 
 	async function teardownTunnel() {
-		if (!confirm('Tear down the Cloudflare tunnel?')) return;
 		tearing = true;
 		try {
 			await api.delete('/tunnel');
@@ -34,6 +35,7 @@
 			addToast(e instanceof Error ? e.message : 'Teardown failed', 'error');
 		} finally {
 			tearing = false;
+			showTeardownDialog = false;
 		}
 	}
 </script>
@@ -59,6 +61,16 @@
 	<div class="bg-zinc-900 border border-red-500/20 rounded-sm p-4">
 		<h3 class="text-sm font-medium text-red-400 mb-1">Danger zone</h3>
 		<p class="text-xs text-zinc-500 mb-3">Stops and removes the cloudflared tunnel container.</p>
-		<Button variant="danger" size="sm" loading={tearing} onclick={teardownTunnel}>Tear down tunnel</Button>
+		<Button variant="danger" size="sm" loading={tearing} onclick={() => (showTeardownDialog = true)}>Tear down tunnel</Button>
 	</div>
 </div>
+
+<ConfirmDialog
+	open={showTeardownDialog}
+	title="Tear down tunnel"
+	message="Stop and remove the cloudflared tunnel container? Dockpal becomes unreachable via the tunnel domain until redeployed. This cannot be undone."
+	confirmLabel="Tear down"
+	busy={tearing}
+	onconfirm={teardownTunnel}
+	onclose={() => (showTeardownDialog = false)}
+/>

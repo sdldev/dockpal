@@ -3,11 +3,13 @@
 	import { addToast } from '$lib/store';
 	import type { Domain } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let domains = $state<Domain[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let busy = $state(false);
+	let pendingDelete = $state<Domain | null>(null);
 
 	let name = $state('');
 	let service = $state('');
@@ -49,13 +51,17 @@
 		}
 	}
 
-	async function deleteDomain(id: string) {
+	async function deleteDomain() {
+		const target = pendingDelete;
+		if (!target) return;
 		try {
-			await api.delete(`/domains/${id}`);
+			await api.delete(`/domains/${target.id}`);
 			addToast('Domain removed', 'success');
 			await load();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			pendingDelete = null;
 		}
 	}
 </script>
@@ -112,7 +118,7 @@
 						<td class="px-4 py-2.5 text-sm text-zinc-400">{domain.service}</td>
 						<td class="px-4 py-2.5 text-sm text-zinc-400 font-mono">{domain.port}</td>
 						<td class="px-4 py-2.5 text-right">
-							<Button variant="danger" size="sm" onclick={() => deleteDomain(domain.id)}>Delete</Button>
+							<Button variant="danger" size="sm" onclick={() => (pendingDelete = domain)}>Delete</Button>
 						</td>
 					</tr>
 				{:else}
@@ -125,4 +131,13 @@
 			</tbody>
 		</table>
 	</div>
+
+	<ConfirmDialog
+		open={pendingDelete !== null}
+		title="Delete domain"
+		message={`Remove domain mapping ${pendingDelete?.domain ?? ''}? Traffic to it will no longer reach ${pendingDelete?.service ?? ''}. This cannot be undone.`}
+		busy={false}
+		onconfirm={deleteDomain}
+		onclose={() => (pendingDelete = null)}
+	/>
 </div>

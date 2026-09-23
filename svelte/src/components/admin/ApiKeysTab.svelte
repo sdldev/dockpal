@@ -3,6 +3,7 @@
 	import { addToast } from '$lib/store';
 	import type { ApiKey, ApiKeyCreated } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let keys = $state<ApiKey[]>([]);
 	let loading = $state(true);
@@ -11,6 +12,7 @@
 	let role = $state('viewer');
 	let creating = $state(false);
 	let newKey = $state<ApiKeyCreated | null>(null);
+	let pendingDelete = $state<ApiKey | null>(null);
 
 	const roles: Array<'admin' | 'operator' | 'viewer'> = ['admin', 'operator', 'viewer'];
 
@@ -45,13 +47,17 @@
 		}
 	}
 
-	async function deleteKey(id: string) {
+	async function deleteKey() {
+		const target = pendingDelete;
+		if (!target) return;
 		try {
-			await api.delete(`/api-keys/${id}`);
+			await api.delete(`/api-keys/${target.id}`);
 			addToast('API key deleted', 'success');
 			await load();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			pendingDelete = null;
 		}
 	}
 
@@ -123,7 +129,7 @@
 					</td>
 					<td class="px-4 py-2.5 text-sm text-zinc-500">{formatTime(key.created_at)}</td>
 					<td class="px-4 py-2.5 text-right">
-						<Button variant="danger" size="sm" onclick={() => deleteKey(key.id)}>Delete</Button>
+						<Button variant="danger" size="sm" onclick={() => (pendingDelete = key)}>Delete</Button>
 					</td>
 				</tr>
 			{:else}
@@ -133,6 +139,15 @@
 					</td>
 				</tr>
 			{/each}
-		</tbody>
-	</table>
-</div>
+			</tbody>
+		</table>
+	</div>
+
+	<ConfirmDialog
+		open={pendingDelete !== null}
+		title="Delete API key"
+		message={`Delete API key ${pendingDelete?.name ?? ''}? Anything using it stops authenticating immediately. This cannot be undone.`}
+		busy={false}
+		onconfirm={deleteKey}
+		onclose={() => (pendingDelete = null)}
+	/>

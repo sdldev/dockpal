@@ -4,6 +4,7 @@
 	import { addToast } from '$lib/store';
 	import type { ImageInfo } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let images = $state<ImageInfo[]>([]);
 	let loading = $state(true);
@@ -11,6 +12,8 @@
 	let pullTarget = $state('');
 	let busy = $state(false);
 	let pruneBusy = $state(false);
+	let pendingDelete = $state<ImageInfo | null>(null);
+	let showPruneDialog = $state(false);
 
 	onMount(load);
 
@@ -41,13 +44,17 @@
 		}
 	}
 
-	async function removeImage(id: string) {
+	async function removeImage() {
+		const target = pendingDelete;
+		if (!target) return;
 		try {
-			await api.delete(`/images/${id}`);
+			await api.delete(`/images/${target.id}`);
 			addToast('Image removed', 'success');
 			await load();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Remove failed', 'error');
+		} finally {
+			pendingDelete = null;
 		}
 	}
 
@@ -111,7 +118,7 @@
 		<h2 class="text-lg font-semibold text-white">Images</h2>
 		<div class="flex gap-2">
 			<Button variant="secondary" size="sm" onclick={checkUpdates}>Refresh</Button>
-			<Button variant="secondary" size="sm" loading={pruneBusy} onclick={pruneImages}>Prune dangling</Button>
+			<Button variant="secondary" size="sm" loading={pruneBusy} onclick={() => (showPruneDialog = true)}>Prune dangling</Button>
 		</div>
 	</div>
 
@@ -162,7 +169,7 @@
 							{#if image.has_update}
 								<Button variant="primary" size="sm" onclick={() => forcePull(image)}>Force pull</Button>
 							{/if}
-							<Button variant="danger" size="sm" onclick={() => removeImage(image.id)}>Delete</Button>
+							<Button variant="danger" size="sm" onclick={() => (pendingDelete = image)}>Delete</Button>
 						</td>
 					</tr>
 				{:else}
@@ -175,4 +182,23 @@
 			</tbody>
 		</table>
 	</div>
+
+	<ConfirmDialog
+		open={pendingDelete !== null}
+		title="Delete image"
+		message={`Delete image ${pendingDelete?.repo ?? ''}:${pendingDelete?.tag ?? ''}? Containers still using it will fail to start. This cannot be undone.`}
+		busy={false}
+		onconfirm={removeImage}
+		onclose={() => (pendingDelete = null)}
+	/>
+
+	<ConfirmDialog
+		open={showPruneDialog}
+		title="Prune dangling images"
+		message="Remove all dangling (untagged) images to reclaim disk space? This cannot be undone."
+		confirmLabel="Prune"
+		busy={pruneBusy}
+		onconfirm={pruneImages}
+		onclose={() => (showPruneDialog = false)}
+	/>
 </div>

@@ -3,11 +3,13 @@
 	import { addToast } from '$lib/store';
 	import type { Webhook } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let webhooks = $state<Webhook[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let busy = $state(false);
+	let pendingDelete = $state<Webhook | null>(null);
 
 	// create form
 	let showForm = $state(false);
@@ -63,13 +65,17 @@
 		}
 	}
 
-	async function deleteWebhook(id: string) {
+	async function deleteWebhook() {
+		const target = pendingDelete;
+		if (!target) return;
 		try {
-			await api.delete(`/webhooks/${id}`);
+			await api.delete(`/webhooks/${target.id}`);
 			addToast('Webhook deleted', 'success');
 			await load();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			pendingDelete = null;
 		}
 	}
 
@@ -166,7 +172,7 @@
 						<td class="px-4 py-2.5 text-xs text-zinc-500">{formatTime(wh.created_at)}</td>
 						<td class="px-4 py-2.5 text-right space-x-2">
 							<Button variant="secondary" size="sm" onclick={() => copyDeployUrl(wh.id)}>Copy URL</Button>
-							<Button variant="danger" size="sm" onclick={() => deleteWebhook(wh.id)}>Delete</Button>
+							<Button variant="danger" size="sm" onclick={() => (pendingDelete = wh)}>Delete</Button>
 						</td>
 					</tr>
 				{:else}
@@ -179,4 +185,13 @@
 			</tbody>
 		</table>
 	</div>
+
+	<ConfirmDialog
+		open={pendingDelete !== null}
+		title="Delete webhook"
+		message={`Delete webhook ${pendingDelete?.name ?? ''}? Its deploy URL stops working immediately. This cannot be undone.`}
+		busy={false}
+		onconfirm={deleteWebhook}
+		onclose={() => (pendingDelete = null)}
+	/>
 </div>

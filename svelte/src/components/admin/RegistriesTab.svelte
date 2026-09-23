@@ -3,6 +3,7 @@
 	import { addToast } from '$lib/store';
 	import type { RegistryCredential, RegistryTestResult } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let creds = $state<RegistryCredential[]>([]);
 	let loading = $state(true);
@@ -13,6 +14,7 @@
 	let username = $state('');
 	let token = $state('');
 	let testResults = $state<Record<string, RegistryTestResult>>({});
+	let pendingDelete = $state<RegistryCredential | null>(null);
 
 	async function load() {
 		loading = true;
@@ -68,13 +70,17 @@
 		}
 	}
 
-	async function deleteRegistry(id: string) {
+	async function deleteRegistry() {
+		const target = pendingDelete;
+		if (!target) return;
 		try {
-			await api.delete(`/registries/${id}`);
+			await api.delete(`/registries/${target.id}`);
 			addToast('Registry removed', 'success');
 			await load();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			pendingDelete = null;
 		}
 	}
 
@@ -138,7 +144,7 @@
 					</td>
 					<td class="px-4 py-2.5 text-right space-x-2">
 						<Button variant="secondary" size="sm" loading={testing === cred.id} onclick={() => testRegistry(cred.id)}>Test</Button>
-						<Button variant="danger" size="sm" onclick={() => deleteRegistry(cred.id)}>Delete</Button>
+						<Button variant="danger" size="sm" onclick={() => (pendingDelete = cred)}>Delete</Button>
 					</td>
 				</tr>
 			{:else}
@@ -151,3 +157,12 @@
 		</tbody>
 	</table>
 </div>
+
+<ConfirmDialog
+	open={pendingDelete !== null}
+	title="Delete registry credential"
+	message={`Delete the credential for ${pendingDelete?.registry ?? ''}? Deploys and pulls from it will fail until re-added. This cannot be undone.`}
+	busy={false}
+	onconfirm={deleteRegistry}
+	onclose={() => (pendingDelete = null)}
+/>

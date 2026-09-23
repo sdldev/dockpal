@@ -4,11 +4,13 @@
 	import { addToast } from '$lib/store';
 	import type { ServiceRecord } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	let serviceList = $state<ServiceRecord[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let busy = $state<string | null>(null);
+	let pendingDelete = $state<ServiceRecord | null>(null);
 
 	onMount(load);
 
@@ -24,16 +26,19 @@
 		}
 	}
 
-	async function deleteService(id: string) {
-		busy = id;
+	async function deleteService() {
+		const target = pendingDelete;
+		if (!target) return;
+		busy = target.id;
 		try {
-			await api.delete(`/services/${id}`);
+			await api.delete(`/services/${target.id}`);
 			addToast('Service deleted', 'success');
 			await load();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
 		} finally {
 			busy = null;
+			pendingDelete = null;
 		}
 	}
 
@@ -74,7 +79,7 @@
 							{svc.type}
 						</span>
 					</div>
-					<Button variant="danger" size="sm" disabled={busy === svc.id} onclick={() => deleteService(svc.id)}>Delete</Button>
+					<Button variant="danger" size="sm" disabled={busy === svc.id} onclick={() => (pendingDelete = svc)}>Delete</Button>
 				</div>
 				{#if svc.domain}
 					<p class="text-xs text-zinc-400 mb-2">
@@ -94,6 +99,15 @@
 			<div class="col-span-full text-center py-12 text-zinc-600 text-sm">
 				{loading ? 'Loading services...' : 'No services'}
 			</div>
-		{/each}
+			{/each}
+		</div>
 	</div>
-</div>
+
+	<ConfirmDialog
+		open={pendingDelete !== null}
+		title="Delete service"
+		message={`Delete service ${pendingDelete?.name ?? ''}? This removes its record. This cannot be undone.`}
+		busy={busy === pendingDelete?.id}
+		onconfirm={deleteService}
+		onclose={() => (pendingDelete = null)}
+	/>

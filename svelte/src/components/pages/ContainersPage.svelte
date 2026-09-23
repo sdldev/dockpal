@@ -7,7 +7,7 @@
 	import StatsChart from '../Container/StatsChart.svelte';
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
-	import Modal from '../ui/Modal.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 	import { addToast } from '$lib/store';
 
 	let containers: ContainerInfo[] = $state([]);
@@ -139,19 +139,12 @@
 	{/if}
 
 	<!-- Delete confirmation -->
-	<Modal
+	<ConfirmDialog
 		open={pendingDelete !== null}
 		title="Delete container"
+		message={`Delete container ${pendingDelete?.name ?? ''}? This stops and removes the container. Its volumes are kept unless you remove them separately. This cannot be undone.`}
+		busy={actionBusy === pendingDelete?.id}
+		onconfirm={confirmDelete}
 		onclose={() => (pendingDelete = null)}
-	>
-		<p class="text-sm text-zinc-300">
-			Delete container <span class="font-semibold text-white">{pendingDelete?.name}</span>?
-			This stops and removes the container. Its volumes are kept unless you remove them separately.
-			This cannot be undone.
-		</p>
-		<div class="mt-4 flex justify-end gap-2">
-			<Button variant="secondary" onclick={() => (pendingDelete = null)}>Cancel</Button>
-			<Button variant="danger" loading={actionBusy === pendingDelete?.id} onclick={confirmDelete}>Delete</Button>
-		</div>
-	</Modal>
+	/>
 </div>

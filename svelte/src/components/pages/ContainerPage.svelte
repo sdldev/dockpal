@@ -6,6 +6,7 @@
 	import { formatPorts } from '$lib/format';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 	import StatsChart from '../Container/StatsChart.svelte';
 
 	// container id from the /containers/:id route (see lib/router.ts)
@@ -15,6 +16,7 @@
 	let loading = $state(true);
 	let error = $state('');
 	let busy = $state<string | null>(null);
+	let showDeleteDialog = $state(false);
 
 	// edit modal
 	let showEditModal = $state(false);
@@ -80,14 +82,17 @@
 	}
 
 	async function deleteContainer() {
-		if (!confirm('Delete container? This cannot be undone.')) return;
+		busy = 'delete';
 		try {
-			await api.delete(`/containers/${containerId}`);
+			await api.delete(`/containers/${containerId}?force=true`);
 			addToast('Container deleted', 'success');
 			// Redirect back to containers list
 			window.history.back();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			busy = null;
+			showDeleteDialog = false;
 		}
 	}
 
@@ -154,7 +159,7 @@
 				<Button variant="primary" size="sm" disabled={busy === 'start' || detail.state?.toLowerCase() !== 'running'} onclick={startContainer}>Start</Button>
 				<Button variant="secondary" size="sm" disabled={busy === 'stop'} onclick={stopContainer}>Stop</Button>
 				<Button variant="danger" size="sm" disabled={busy === 'restart' || busy === 'delete'} onclick={restartContainer}>Restart</Button>
-				<Button variant="danger" size="sm" disabled={busy === 'delete'} onclick={deleteContainer}>Delete</Button>
+				<Button variant="danger" size="sm" disabled={busy === 'delete'} onclick={() => (showDeleteDialog = true)}>Delete</Button>
 			</div>
 		</header>
 
@@ -217,3 +222,12 @@
 		</div>
 	</div>
 </Modal>
+
+<ConfirmDialog
+	open={showDeleteDialog}
+	title="Delete container"
+	message={`Delete container ${detail?.name ?? containerId}? This stops and removes the container. Its volumes are kept unless you remove them separately. This cannot be undone.`}
+	busy={busy === 'delete'}
+	onconfirm={deleteContainer}
+	onclose={() => (showDeleteDialog = false)}
+/>
