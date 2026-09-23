@@ -1,6 +1,7 @@
 # Auto Claude data directory
 .auto-claude/
 .claude
+.devin
 .antigravitycli
 .playwright-mcp
 # Auto Claude generated files
@@ -13,7 +14,7 @@ logs/security/
 dockpal-agent/
 # Local development data
 .data/
-
+.data*
 # Binary builds
 dockpal
 dockpal-linux-amd64
