@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
+	"github.com/sdldev/dockpal/internal/composecli"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/git"
@@ -161,6 +162,10 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	instances := baseProtected.Group("/instances/:instance_id")
 	instances.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
 	RegisterInstanceScopedRoutes(instances)
+
+	// Dockge-style compose stacks (local host only, via docker compose CLI)
+	composecli.Register()
+	registerStackRoutes(viewerGroup, operatorGroup)
 
 	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)

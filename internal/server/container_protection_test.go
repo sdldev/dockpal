@@ -105,6 +105,33 @@ func (f *protectionFakeAgentClient) SetAppAutoUpdate(context.Context, string, bo
 	return nil
 }
 
+// Stack operation stubs (added for the Dockge-style stacks feature). The
+// container-protection tests do not exercise these paths.
+func (f *protectionFakeAgentClient) ListStacks(context.Context) ([]docker.Stack, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) GetStack(context.Context, string) (*docker.Stack, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) SaveStack(context.Context, string, string, string, bool) (*docker.Stack, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) DeleteStack(context.Context, string) error { return nil }
+func (f *protectionFakeAgentClient) StackAction(context.Context, string, string) (*docker.Stack, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) StackServiceAction(context.Context, string, string, string) (*docker.Stack, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) DeployStackStreamed(context.Context, string, string, string, bool, *docker.DeploySession) error {
+	return nil
+}
+func (f *protectionFakeAgentClient) ListDockerNetworks(context.Context) ([]string, error) {
+	return nil, nil
+}
+func (f *protectionFakeAgentClient) GetGlobalEnv(context.Context) (string, error) { return "", nil }
+func (f *protectionFakeAgentClient) SetGlobalEnv(context.Context, string) error   { return nil }
+
 func TestIsProtectedDockpalAgentContainer(t *testing.T) {
 	tests := []struct {
 		name   string

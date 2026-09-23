@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sdldev/dockpal/internal/composecli"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 )
@@ -402,6 +403,98 @@ func (c *LocalClient) Ping(ctx context.Context) error {
 // is managed by main.go.
 func (c *LocalClient) Close() error {
 	return nil
+}
+
+// Dockge-style stack operations (local host).
+
+func (c *LocalClient) ListStacks(ctx context.Context) ([]docker.Stack, error) {
+	stacks, err := docker.ListStacks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]docker.Stack, 0, len(stacks))
+	for _, s := range stacks {
+		out = append(out, *s)
+	}
+	return out, nil
+}
+
+func (c *LocalClient) GetStack(ctx context.Context, name string) (*docker.Stack, error) {
+	return docker.GetStackFull(ctx, name)
+}
+
+func (c *LocalClient) SaveStack(ctx context.Context, name, composeYAML, composeENV string, isAdd bool) (*docker.Stack, error) {
+	if err := docker.SaveStack(name, composeYAML, composeENV, isAdd); err != nil {
+		return nil, err
+	}
+	return docker.GetStack(name)
+}
+
+func (c *LocalClient) DeleteStack(ctx context.Context, name string) error {
+	return docker.StackDelete(ctx, name)
+}
+
+func (c *LocalClient) StackAction(ctx context.Context, name, action string) (*docker.Stack, error) {
+	var err error
+	switch action {
+	case "up", "start":
+		err = docker.StackUp(ctx, name)
+	case "stop":
+		err = docker.StackStop(ctx, name)
+	case "restart":
+		err = docker.StackRestart(ctx, name)
+	case "down":
+		err = docker.StackDown(ctx, name)
+	case "update":
+		err = docker.StackUpdate(ctx, name)
+	default:
+		return nil, fmt.Errorf("unknown action")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return docker.GetStackFull(ctx, name)
+}
+
+func (c *LocalClient) StackServiceAction(ctx context.Context, name, service, action string) (*docker.Stack, error) {
+	var err error
+	switch action {
+	case "up":
+		err = docker.StackServiceUp(ctx, name, service)
+	case "stop":
+		err = docker.StackServiceStop(ctx, name, service)
+	case "restart":
+		err = docker.StackServiceRestart(ctx, name, service)
+	default:
+		return nil, fmt.Errorf("unknown action")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return docker.GetStackFull(ctx, name)
+}
+
+func (c *LocalClient) DeployStackStreamed(ctx context.Context, name, composeYAML, composeENV string, isAdd bool, session *docker.DeploySession) error {
+	if composeYAML != "" {
+		if err := docker.SaveStack(name, composeYAML, composeENV, isAdd); err != nil {
+			return err
+		}
+	} else if _, err := docker.GetStack(name); err != nil {
+		return err
+	}
+	return composecli.StackUpStreamed(ctx, name, session)
+}
+
+func (c *LocalClient) ListDockerNetworks(ctx context.Context) ([]string, error) {
+	return docker.ListDockerNetworks(ctx)
+}
+
+func (c *LocalClient) GetGlobalEnv(ctx context.Context) (string, error) {
+	return docker.GetGlobalEnv()
+}
+
+func (c *LocalClient) SetGlobalEnv(ctx context.Context, content string) error {
+	return docker.SetGlobalEnv(content)
 }
 
 // === Helper functions moved from routes.go ===

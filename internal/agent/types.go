@@ -82,6 +82,18 @@ type AgentClient interface {
 	// Connection
 	Ping(ctx context.Context) error
 	Close() error
+
+	// Dockge-style stack operations (compose.yaml + .env management via docker compose CLI).
+	ListStacks(ctx context.Context) ([]docker.Stack, error)
+	GetStack(ctx context.Context, name string) (*docker.Stack, error)
+	SaveStack(ctx context.Context, name, composeYAML, composeENV string, isAdd bool) (*docker.Stack, error)
+	DeleteStack(ctx context.Context, name string) error
+	StackAction(ctx context.Context, name, action string) (*docker.Stack, error)            // up/start/stop/restart/down/update
+	StackServiceAction(ctx context.Context, name, service, action string) (*docker.Stack, error)
+	DeployStackStreamed(ctx context.Context, name, composeYAML, composeENV string, isAdd bool, session *docker.DeploySession) error
+	ListDockerNetworks(ctx context.Context) ([]string, error)
+	GetGlobalEnv(ctx context.Context) (string, error)
+	SetGlobalEnv(ctx context.Context, content string) error
 }
 
 // AgentRequest represents a request from edge to agent for HTTP-like operations.

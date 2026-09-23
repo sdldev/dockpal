@@ -90,6 +90,10 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.POST("/apps/:name/update", RequireRole(auth.RoleOperator), handleInstanceTriggerAppUpdate)
 	g.PATCH("/apps/:name/auto-update", RequireRole(auth.RoleOperator), handleInstanceSetAppAutoUpdate)
 	g.GET("/apps/updates/stream", RequireRole(auth.RoleViewer), handleInstanceAppUpdatesStream)
+
+	// Dockge-style stacks (compose.yaml + .env via docker compose CLI on the
+	// instance host). Registered in instance_stacks_routes.go.
+	registerInstanceStackRoutes(g)
 }
 
 // handleInstanceListContainers lists all containers for the instance.
