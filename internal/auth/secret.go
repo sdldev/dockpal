@@ -9,18 +9,10 @@ import (
 	"strings"
 )
 
-const defaultSecretFilePath = "/opt/dockpal/data/.secret"
-
-// LoadOrGenerateSecret resolves the JWT signing secret using a priority chain:
+// LoadOrGenerateSecretAt resolves the JWT signing secret using a priority chain:
 // 1. JWT_SECRET environment variable
-// 2. Existing secret file at /opt/dockpal/data/.secret
+// 2. Existing secret file at secretFilePath
 // 3. Generate a new 32-byte cryptographic random secret, hex-encode, and persist to file
-func LoadOrGenerateSecret() (string, error) {
-	return loadOrGenerateSecret(defaultSecretFilePath)
-}
-
-// LoadOrGenerateSecretAt resolves the JWT signing secret using the same priority
-// chain as LoadOrGenerateSecret, but allows specifying a custom secret file path.
 func LoadOrGenerateSecretAt(secretFilePath string) (string, error) {
 	return loadOrGenerateSecret(secretFilePath)
 }

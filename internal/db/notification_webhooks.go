@@ -15,17 +15,6 @@ type NotificationWebhook struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
-// CreateNotificationWebhook saves a new notification webhook to the database.
-func (d *DB) CreateNotificationWebhook(wh NotificationWebhook) error {
-	return d.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketNotificationWebhooks)
-		data, err := json.Marshal(wh)
-		if err != nil {
-			return err
-		}
-		return b.Put([]byte(wh.ID), data)
-	})
-}
 
 // ListNotificationWebhooks returns all notification webhooks in the database.
 func (d *DB) ListNotificationWebhooks() ([]NotificationWebhook, error) {
@@ -50,10 +39,3 @@ func (d *DB) ListNotificationWebhooks() ([]NotificationWebhook, error) {
 	return webhooks, nil
 }
 
-// DeleteNotificationWebhook deletes a notification webhook by its ID.
-func (d *DB) DeleteNotificationWebhook(id string) error {
-	return d.db.Update(func(tx *bbolt.Tx) error {
-		b := tx.Bucket(bucketNotificationWebhooks)
-		return b.Delete([]byte(id))
-	})
-}

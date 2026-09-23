@@ -38,11 +38,6 @@ var agentWebSocketUpgrader = websocket.Upgrader{
 
 var agentAuthRateLimiter = NewRateLimiter()
 
-// RegisterAgentRoutes adds the edge agent WebSocket endpoint.
-func RegisterAgentRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager) {
-	g.GET("/agent/connect", HandleAgentConnect(database, agentMgr))
-}
-
 // HandleAgentConnect handles the WebSocket upgrade for edge-mode agents.
 // It authenticates the agent via token and maintains the connection.
 func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFunc {

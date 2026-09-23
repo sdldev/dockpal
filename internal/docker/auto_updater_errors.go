@@ -49,16 +49,3 @@ const (
 	ErrSkippedWindow = "skipped_window"
 )
 
-// KnownAutoUpdaterErrorCodes lists every error code emitted by the
-// Auto_Update_Worker. It is intended for audit, metrics enumeration, and
-// validation helpers that need the full set in one place.
-var KnownAutoUpdaterErrorCodes = []string{
-	ErrPullError,
-	ErrAuthMissing,
-	ErrComposeError,
-	ErrHealthProbeFailed,
-	ErrRollbackFailed,
-	ErrUpdateAlreadyRunning,
-	ErrSkippedCooldown,
-	ErrSkippedWindow,
-}

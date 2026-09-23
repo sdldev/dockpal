@@ -66,32 +66,6 @@ func Clone(repoURL, branch, token string) (*RepoInfo, error) {
 	}, nil
 }
 
-func Pull(repoPath, token string) error {
-	repo, err := git.PlainOpen(repoPath)
-	if err != nil {
-		return fmt.Errorf("failed to open repository: %w", err)
-	}
-
-	worktree, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("failed to get worktree: %w", err)
-	}
-
-	pullOpts := &git.PullOptions{}
-	if token != "" {
-		pullOpts.Auth = &githttp.BasicAuth{
-			Username: "x-access-token",
-			Password: token,
-		}
-	}
-
-	err = worktree.Pull(pullOpts)
-	if err != nil && err != git.NoErrAlreadyUpToDate {
-		return fmt.Errorf("failed to pull: %w", err)
-	}
-
-	return nil
-}
 
 func extractRepoName(url string) string {
 	url = strings.TrimSuffix(url, ".git")

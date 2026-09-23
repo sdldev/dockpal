@@ -445,25 +445,6 @@ func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML str
 	return nil
 }
 
-// StopCompose stops all containers belonging to a compose project.
-func (c *Client) StopCompose(ctx context.Context, projectName string) error {
-	if _, err := composeProjectDir(projectName); err != nil {
-		return err
-	}
-	f := make(client.Filters)
-	f = f.Add("label", fmt.Sprintf("dockpal.project=%s", projectName))
-	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
-	if err != nil {
-		return err
-	}
-
-	timeout := DefaultStopTimeout
-	for _, ctr := range result.Items {
-		c.cli.ContainerStop(ctx, ctr.ID, client.ContainerStopOptions{Timeout: &timeout})
-	}
-
-	return nil
-}
 
 // RemoveCompose removes all containers and files belonging to a compose project.
 func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {

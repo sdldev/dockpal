@@ -8,7 +8,6 @@ import (
 	"testing/quick"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sdldev/dockpal/internal/db"
 )
 
 // **Validates: Requirements 8.1, 8.4**
@@ -21,19 +20,6 @@ import (
 // that returns consistent mock data. Since we can't easily mock the full interface
 // in a property test without significant complexity, we focus on testing that
 // the routing logic properly delegates to the same client.
-
-// setupTestRouter creates a Gin engine with both existing and instance-scoped routes.
-// This allows us to test that both route paths produce equivalent responses.
-func setupTestRouter(database *db.DB, agentMgr interface{}) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-
-	// Register routes - using actual implementation
-	// Note: In real tests, we need to properly initialize agent manager
-	// For now, we set up the router structure to test route equivalence
-
-	return r
-}
 
 // TestProperty_ContainerListRouteEquivalence tests that GET /api/containers
 // produces the same response structure as GET /api/instances/local/containers.

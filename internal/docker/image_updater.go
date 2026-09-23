@@ -199,29 +199,6 @@ func (m *ImageUpdateMonitor) GetAllStatuses() []ImageUpdateStatus {
 	return results
 }
 
-// CheckNow triggers an immediate check for a specific image and returns the result.
-func (m *ImageUpdateMonitor) CheckNow(ctx context.Context, imageRef string) (*ImageUpdateResult, error) {
-	authHeader := ""
-	if m.getAuth != nil {
-		a, _ := m.getAuth(imageRef)
-		authHeader = a
-	}
-
-	result, err := m.client.CheckImageUpdate(ctx, imageRef, authHeader)
-	if err != nil {
-		return nil, err
-	}
-
-	m.cacheMu.Lock()
-	m.cache[imageRef] = &ImageUpdateStatus{
-		Result:    result,
-		ImageRef:  imageRef,
-		CheckedAt: result.CheckedAt,
-	}
-	m.cacheMu.Unlock()
-
-	return result, nil
-}
 
 // ForcePull triggers an immediate force-pull of an image.
 func (m *ImageUpdateMonitor) ForcePull(ctx context.Context, imageRef string) error {

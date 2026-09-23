@@ -94,47 +94,6 @@ func internalError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 
-type DockerHandlerDeps struct {
-	DockerClient *docker.Client
-}
-
-// DockerHandler exposes transport-agnostic agent-side Docker handlers.
-type DockerHandler struct {
-	deps DockerHandlerDeps
-}
-
-// NewDockerHandler validates and returns an agent-side Docker handler.
-func NewDockerHandler(deps DockerHandlerDeps) (*DockerHandler, error) {
-	if deps.DockerClient == nil {
-		return nil, fmt.Errorf("agent docker handler: DockerClient is required")
-	}
-	return &DockerHandler{deps: deps}, nil
-}
-
-// RegisterDockerRoutes mounts Docker container operations not covered by the
-// app auto-update surface. The caller chooses /agent/docker for direct mode or
-// /docker for edge mode.
-func RegisterDockerRoutes(rg gin.IRoutes, h *DockerHandler) {
-	rg.POST("/containers/:id/update-image", h.HandleUpdateContainerImage)
-}
-
-// HandleUpdateContainerImage force-pulls the current container image and
-// recreates the container using the inspected Docker config. Registry auth is
-// passed as the optional `auth` query parameter by DirectClient/EdgeClient.
-func (h *DockerHandler) HandleUpdateContainerImage(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing container id"})
-		return
-	}
-	detail, err := h.deps.DockerClient.UpdateContainerImage(c.Request.Context(), id, c.Query("auth"))
-	if err != nil {
-		internalError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, detail)
-}
-
 // AppHandler is the request-handling face of AppHandlerDeps. It is
 // constructed once at agent boot and registered against the gin router
 // (and/or used directly by the edge WebSocket dispatcher) for the

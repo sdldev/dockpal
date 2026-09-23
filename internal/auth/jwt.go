@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -72,10 +70,3 @@ func ValidateJWTWithVersionCheck(tokenString, secret string, database *db.DB) (*
 	return claims, nil
 }
 
-func GenerateSecret() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}

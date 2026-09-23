@@ -26,7 +26,6 @@ type ImageInfo struct {
 	Tag          string `json:"tag"`
 	Size         string `json:"size"`
 	Created      string `json:"created"`
-	RepoDigest   string `json:"repo_digest,omitempty"`
 	HasUpdate    bool   `json:"has_update,omitempty"`
 	RemoteDigest string `json:"remote_digest,omitempty"`
 }

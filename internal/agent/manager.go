@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -253,17 +252,3 @@ func (m *Manager) Close() {
 	}
 }
 
-// === Helper functions for decoding ===
-
-// decodeBody is a helper to decode JSON body into a type.
-func decodeBody[T any](body json.RawMessage) (*T, error) {
-	if len(body) == 0 {
-		var zero T
-		return &zero, nil
-	}
-	var result T
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
