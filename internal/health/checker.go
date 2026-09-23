@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,12 +42,14 @@ type CheckResult struct {
 
 // HealthResponse represents the complete health check response
 type HealthResponse struct {
-	Status    Status                 `json:"status"`
-	Timestamp string                 `json:"timestamp"`
-	Uptime    string                 `json:"uptime"`
-	Version   string                 `json:"version"`
-	Checks    map[string]CheckResult `json:"checks"`
-	summary   map[CheckStatus]int    // internal summary
+	Status        Status                 `json:"status"`
+	Timestamp     string                 `json:"timestamp"`
+	Uptime        string                 `json:"uptime"`
+	UptimeSeconds float64                `json:"uptime_seconds"`
+	UptimeSource string                 `json:"uptime_source"`
+	Version       string                 `json:"version"`
+	Checks        map[string]CheckResult `json:"checks"`
+	summary       map[CheckStatus]int    // internal summary
 }
 
 // DBPinger is the interface used by the health checker to verify database connectivity.
@@ -84,16 +89,49 @@ func NewChecker(db DBPinger, dbPath, dataDir string, dockerClient DockerClient, 
 	}
 }
 
+// newHealthResponse builds a fresh response with the current uptime filled in.
+// "Uptime" means how long the *machine* has been up — a "System Status"
+// panel that reported the Go process' own age would read "8 minutes" right
+// after every server restart. We fall back to process uptime only if the
+// host value cannot be read, and record which one we used.
+func (c *Checker) newHealthResponse() *HealthResponse {
+	elapsed := time.Since(c.startTime)
+
+	uptime := readHostUptimeSeconds()
+	uptimeSource := "host"
+	if uptime < 0 {
+		uptime = elapsed.Seconds()
+		uptimeSource = "process"
+	}
+
+	return &HealthResponse{
+		Status:        StatusHealthy,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Uptime:        time.Duration(uptime * float64(time.Second)).Round(time.Second).String(),
+		UptimeSeconds: uptime,
+		UptimeSource:  uptimeSource,
+		Version:       c.version,
+		Checks:        make(map[string]CheckResult),
+		summary:       make(map[CheckStatus]int),
+	}
+}
+
+// readHostUptimeSeconds returns seconds since the machine booted, read from
+// /proc/uptime (Linux). Returns -1 when the figure is unavailable.
+func readHostUptimeSeconds() float64 {
+	if data, err := os.ReadFile("/proc/uptime"); err == nil {
+		if fields := strings.Fields(string(data)); len(fields) > 0 {
+			if secs, err := strconv.ParseFloat(fields[0], 64); err == nil {
+				return secs
+			}
+		}
+	}
+	return -1
+}
+
 // CheckHealth performs all health checks and returns the overall health status
 func (c *Checker) CheckHealth(ctx context.Context) *HealthResponse {
-	response := &HealthResponse{
-		Status:    StatusHealthy,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Uptime:    time.Since(c.startTime).String(),
-		Version:   c.version,
-		Checks:    make(map[string]CheckResult),
-		summary:   make(map[CheckStatus]int),
-	}
+	response := c.newHealthResponse()
 
 	// Perform all health checks
 	checks := map[string]func(context.Context) CheckResult{
@@ -122,14 +160,7 @@ func (c *Checker) CheckHealth(ctx context.Context) *HealthResponse {
 
 // CheckLiveness performs a basic liveness check
 func (c *Checker) CheckLiveness(ctx context.Context) *HealthResponse {
-	response := &HealthResponse{
-		Status:    StatusHealthy,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Uptime:    time.Since(c.startTime).String(),
-		Version:   c.version,
-		Checks:    make(map[string]CheckResult),
-		summary:   make(map[CheckStatus]int),
-	}
+	response := c.newHealthResponse()
 
 	// For liveness, we just check if the application can respond
 	// This is a simple check to ensure the process is running
@@ -145,14 +176,7 @@ func (c *Checker) CheckLiveness(ctx context.Context) *HealthResponse {
 
 // CheckReadiness performs a readiness check to ensure the service can accept traffic
 func (c *Checker) CheckReadiness(ctx context.Context) *HealthResponse {
-	response := &HealthResponse{
-		Status:    StatusHealthy,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Uptime:    time.Since(c.startTime).String(),
-		Version:   c.version,
-		Checks:    make(map[string]CheckResult),
-		summary:   make(map[CheckStatus]int),
-	}
+	response := c.newHealthResponse()
 
 	// For readiness, check critical dependencies
 	checks := map[string]func(context.Context) CheckResult{
@@ -291,27 +315,75 @@ func (c *Checker) checkDiskSpace(ctx context.Context, path string) CheckResult {
 	}
 }
 
-// checkMemory checks available system memory
+// readAvailableMemoryMB reports available system memory in MB and where the
+// figure came from. A container memory ceiling wins over host meminfo, since
+// the process cannot use more than its cgroup allows.
+func readAvailableMemoryMB() (availableMB int64, source string) {
+	// cgroup v2: respect the container's memory ceiling when one is set.
+	if raw, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
+		limit := strings.TrimSpace(string(raw))
+		if limit != "" && limit != "max" {
+			if n, err := strconv.ParseInt(limit, 10, 64); err == nil && n > 0 {
+				if curRaw, err := os.ReadFile("/sys/fs/cgroup/memory.current"); err == nil {
+					if cur, err := strconv.ParseInt(strings.TrimSpace(string(curRaw)), 10, 64); err == nil {
+						return (n - cur) / (1024 * 1024), "cgroup-v2"
+					}
+				}
+			}
+		}
+	}
+
+	// Host memory (also visible inside most containers).
+	if meminfo, err := os.ReadFile("/proc/meminfo"); err == nil {
+		for _, line := range strings.Split(string(meminfo), "\n") {
+			if strings.HasPrefix(line, "MemAvailable:") {
+				fields := strings.Fields(line)
+				if len(fields) == 3 && fields[2] == "kB" {
+					if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+						return kb / 1024, "meminfo"
+					}
+				}
+			}
+		}
+	}
+
+	return 0, "unavailable"
+}
+
+// checkMemory checks available system memory.
+//
+// The health of the process is not the health of the host: runtime.MemStats.Sys
+// is virtual memory the Go runtime reserved from the OS, not the RAM the machine
+// has left. Judging host memory by (Sys - Alloc) made /health report "critically
+// low memory" on a 16 GB host with 6 GB free, because a lightly loaded process
+// reserves only a few dozen MB. Read the real figures instead, and only warn
+// when they genuinely cannot be read.
 func (c *Checker) checkMemory(ctx context.Context) CheckResult {
 	start := time.Now()
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-
-	// Get system memory (this is a simplified approach)
-	// In a production environment, you might want to use more sophisticated methods
-	availableMB := (m.Sys - m.Alloc) / (1024 * 1024)
 	allocMB := m.Alloc / (1024 * 1024)
-	sysMB := m.Sys / (1024 * 1024)
+
+	availableMB, source := readAvailableMemoryMB()
 
 	details := map[string]interface{}{
-		"available_mb": availableMB,
-		"allocated_mb": allocMB,
-		"system_mb":    sysMB,
-		"gc_cycles":    m.NumGC,
+		"available_mb":  availableMB,
+		"allocated_mb":  allocMB,
+		"runtime_sys_mb": m.Sys / (1024 * 1024),
+		"source":        source,
+		"gc_cycles":     m.NumGC,
 	}
 
-	// Determine status based on available memory
+	if source == "unavailable" {
+		return CheckResult{
+			Status:      CheckWarn,
+			Description: "Host memory unavailable; only process allocation is reported",
+			Duration:    time.Since(start).String(),
+			Details:     details,
+		}
+	}
+
 	status := CheckPass
 	description := "Memory usage OK"
 
