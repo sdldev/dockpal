@@ -1,5 +1,12 @@
 # Phase 3: Authentication & Routing
 
+> ⚠️ **DEVIASI IMPLEMENTASI (2026-08-19):** Auth flow selesai — `POST /api/login`,
+> `GET /api/profile`, `POST /api/logout` (terverifikasi lawan routes.go), token di
+> localStorage (`dockpal_token`), guard di `App.svelte`. **Routing BUKAN file-based
+> SvelteKit** (`src/app.route.ts` di bawah tidak ada): routing state-based via store
+> `currentPage` + `{#if}` di `App.svelte`; Sidebar memanggil `currentPage.set(id)`.
+> Struktur `src/routes/` di bawah tidak pernah dibuat.
+
 ## Overview
 Implement authentication flow using Svelte stores and router integration. Replace Alpine.js auth state management with typed store patterns.
 

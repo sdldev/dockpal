@@ -1,5 +1,17 @@
 # Phase 4: Data Integration & Real-time Updates
 
+> ⚠️ **DEVIASI IMPLEMENTASI (2026-08-19):** Phase selesai, bentuk berbeda dari draf:
+> types di `src/lib/types/generated.ts` (match JSON Go: `ContainerStats` =
+> cpu_percent/memory_usage/memory_limit/memory_percent/network_rx/network_tx —
+> tanpa block_io/pids). Stream client: `src/lib/api/stream.ts` (class `StreamClient`,
+> auto-reconnect). Stats: polling component `Container/StatsChart.svelte` + store
+> factory `createStatsStore()`/`createHostStatsStore()` di `lib/store.ts`.
+> Containers page: `pages/ContainersPage.svelte` (list + start/stop/restart + detail
+> panel). Deploy log streaming terintegrasi langsung di `DeployWizard.svelte`
+> (WebSocket `/api/instances/:id/deploy/stream/:deployId`), bukan komponen
+> `LogViewer.svelte` terpisah. Search utils: `filterByQuery`/`debounce` inline di
+> `store.ts`. Catatan: draf WS URL `/api/v1/...` salah — backend pakai `/api/...`.
+
 ## Overview
 Connect Svelte components to Go backend APIs. Implement real-time updates via WebSocket/SSE for containers, logs, and deployment progress.
 

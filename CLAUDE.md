@@ -56,7 +56,7 @@ Key environment variables:
 
 ## Architecture
 
-Dockpal is a single Go binary: Gin HTTP server + embedded Alpine.js/Tailwind UI + BBolt database.
+Dockpal is a single Go binary: Gin HTTP server + embedded Svelte 5 SPA (Vite/Tailwind) + BBolt database.
 
 `main.go` wires: data/log paths → BBolt DB → JWT secret → Docker client → health monitor → agent manager → metrics collector → HTTP routes → backup scheduler → audit retention worker.
 
@@ -109,14 +109,14 @@ New multi-instance features: use the `AgentClient` interface via instance-scoped
 
 ### Frontend
 
-`web/index.html` uses `<!--#include "...">` directives; `web.AssembleHTML()` resolves them at startup.
+The UI is a Svelte 5 SPA (runes mode) in `svelte/`, built by Vite and embedded into the Go binary via `web/svelteDist` (`go:embed`). The SPA is served at `/` by `main.go`; deep links like `/dashboard`, `/fleet`, `/containers/:id` fall back to `index.html` (NoRoute handler) and are resolved client-side.
 
-Alpine modules in `web/assets/modules/` attach to `window.Dockpal.*`. `web/assets/app.js` merges all module descriptors into one `dockpalApp()` object.
+Client-side routing lives in `svelte/src/lib/router.ts`: it syncs the `currentPage` store with `history.pushState`/`popstate`. Navigate programmatically with `navigate(page, params)`, not `currentPage.set(...)` (which would desync the URL). Legacy Alpine paths (`/profile`, `/registry`, `/deploy`, `/instances`, `/add-instance`) are aliased so old bookmarks keep working.
 
-**To add a module:**
-1. Create `web/assets/modules/myfeature.js` → `window.Dockpal.myfeature = { … }`
-2. Add `<script src="/assets/modules/myfeature.js"></script>` in `web/index.html` **before** `app.js`
-3. Add `D.myfeature` to the spread/merge array in `web/assets/app.js`
+**To add a page:**
+1. Create `svelte/src/components/pages/MyFeaturePage.svelte`
+2. Register it in `svelte/src/App.svelte` under a new `$currentPage` branch
+3. Add the page id → path mapping in `svelte/src/lib/router.ts` (`pagePaths`) and a nav entry in `svelte/src/lib/store.ts` if it belongs in the sidebar
 
 Templates (deploy presets) are JSON files in `templates/`. Runtime checks `./templates/` first, then `/opt/dockpal/templates`.
 

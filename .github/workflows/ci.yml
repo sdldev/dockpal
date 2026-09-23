@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  GO_VERSION: '1.25'
+  NODE_VERSION: '20'
+
+jobs:
+  # Backend checks
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build
+        run: make build
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Cover
+        run: |
+          go test -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o coverage.html
+
+  # Frontend checks
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: svelte/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./svelte
+        run: npm ci
+
+      - name: Type check
+        working-directory: ./svelte
+        run: npm run check
+
+      - name: Build
+        working-directory: ./svelte
+        run: npm run build
+
+      - name: Unit tests
+        working-directory: ./svelte
+        run: npm run test:unit
+
+  # Full build (all: svelte embed)
+  prod-build:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build frontend and embed
+        run: |
+          cd svelte && npm ci && npm run build
+
+      - name: Copy to web/svelteDist
+        run: |
+          rm -rf web/svelteDist/assets
+          mkdir -p web/svelteDist
+          cp -r svelte/dist/. web/svelteDist/
+
+      - name: Build final binary
+        run: |
+          VERSION=${{ github.sha }} make build
+          cp dockpal /tmp/dockpal-ci-bin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockpal-ci-binary
+          path: /tmp/dockpal-ci-bin
+          retention-days: 7

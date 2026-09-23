@@ -1,5 +1,14 @@
 # Phase 1: SvelteKit Setup & Scaffolding
 
+> ⚠️ **DEVIASI IMPLEMENTASI (2026-08-19):** Phase ini selesai, tapi bukan sebagai
+> SvelteKit. Aktual: **plain Vite + Svelte 5 SPA** (tanpa `routes/`, `+page.svelte`,
+> adapter, atau `npm create sveltekit`). API client di `svelte/src/lib/api/client.ts`
+> (tanpa retry, tanpa helper `stream()` — stream client terpisah di
+> `lib/api/stream.ts`). Tailwind: **v4 via `@tailwindcss/vite`** + `app.css`
+> (`@import "tailwindcss"`), bukan CDN dan bukan postcss v3. Build output ke
+> `svelte/dist/`, bukan langsung ke `../web` — di-copy ke `web/svelteDist/`
+> oleh `make svelte-embed`. Lihat README.md untuk struktur aktual.
+
 ## Overview
 Initialize SvelteKit monorepo structure alongside existing Go backend. Establish build pipeline for production embedding.
 

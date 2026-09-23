@@ -1,0 +1,24 @@
+[Unit]
+Description=Dockpal - Self-hosted Docker Management Panel
+Documentation=https://github.com/sdldev/dockpal
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=dockpal
+Group=dockpal
+Environment="DOCKPAL_DATA_DIR=/opt/dockpal/data"
+Environment="PORT=3012"
+ExecStart=/usr/local/bin/dockpal server
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+# Resource limits (adjust based on your VPS specs)
+MemoryMax=512M
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target

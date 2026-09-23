@@ -1,5 +1,14 @@
 # Phase 5: Build Pipeline & Production Deployment
 
+> ⚠️ **DEVIASI IMPLEMENTASI (2026-08-19):** Baru sebagian.
+> **Done:** Go embed (`web/embed.go` `SvelteAssets` + `all:svelteDist`), serving
+> `/app` dengan SPA fallback di `main.go`, Makefile targets `svelte-build`,
+> `svelte-embed`, `svelte-dev`, `svelte-check`, `svelte-test`, `prod-build`.
+> Vite `base: '/app/'`. **Belum:** GitHub Actions workflow, docker-compose.dev,
+> Dockerfile.dev, systemd unit, install script, health monitoring widget.
+> `.gitignore` pattern di bawah tidak dipakai apa adanya — svelte/.gitignore
+> sendiri mengabaikan node_modules/dist.
+
 ## Overview
 Establish CI/CD pipeline, bundle Svelte for Go embed, create production-ready deployment configurations, and implement monitoring.
 

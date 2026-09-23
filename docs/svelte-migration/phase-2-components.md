@@ -1,5 +1,13 @@
 # Phase 2: Component Migration - Core UI Elements
 
+> ⚠️ **DEVIASI IMPLEMENTASI (2026-08-19):** Selesai dengan Svelte 5 runes.
+> `computed()` di draf tidak valid di Svelte — diganti fungsi biasa/`$derived`.
+> `on:click` → `onclick`. `<slot>` → snippet `{@render children?.()}` dengan
+> prop `children?: Snippet`. Komponen aktual: `ui/Button.svelte`, `ui/Modal.svelte`,
+> `pages/Dashboard.svelte`, `pages/TemplatesPage.svelte`, `deploy/DeployWizard.svelte`,
+> `layout/ToastContainer.svelte`. Form Input component standalone tidak dibuat
+> (input inline di halaman). Alert/tabs/icon library belum.
+
 ## Overview
 Migrate existing Alpine.js components to Svelte components. Prioritize reusing common patterns from vanilla implementation.
 

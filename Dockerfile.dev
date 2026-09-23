@@ -1,0 +1,35 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /app
+
+# Copy Go modules first for caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source
+COPY . .
+
+# Build with embedded Svelte frontend
+ENV DOCKPAL_DATA_DIR=/opt/dockpal/data
+
+# Build binary
+RUN GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dockpal .
+
+FROM alpine:latest
+
+WORKDIR /opt/dockpal
+
+# Install ca-certificates for TLS (registry auth)
+RUN apk add --no-cache ca-certificates
+
+# Create data directory
+RUN mkdir -p /opt/dockpal/data
+
+# Copy binary from builder
+COPY --from=builder /app/dockpal /opt/dockpal/
+
+# Expose port
+EXPOSE 3012
+
+ENTRYPOINT ["/opt/dockpal/dockpal"]
+CMD ["server"]

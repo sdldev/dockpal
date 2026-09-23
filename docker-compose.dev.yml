@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  # Backend (Go + Svelte built into binary)
+  dockpal:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: dockpal-dev
+    ports:
+      - "3012:3012"
+    volumes:
+      - ./dockpal:/app
+      - ./web:/app/web
+      - ./templates:/opt/dockpal/templates
+      - dockpal-data:/opt/dockpal/data
+    environment:
+      - DOCKPAL_DATA_DIR=/opt/dockpal/data
+      - DOCKPAL_INITIAL_ADMIN_PASSWORD=dev-admin-123
+      - PORT=3012
+    restart: unless-stopped
+
+volumes:
+  dockpal-data:
