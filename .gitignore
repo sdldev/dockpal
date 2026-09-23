@@ -32,6 +32,3 @@ dockpal-linux-amd64
 
 # Svelte SPA build output (copied in by `make svelte-embed`)
 web/svelteDist/
-
-# ZCode workspace state
-.zcode/
