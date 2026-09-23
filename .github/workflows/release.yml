@@ -21,6 +21,18 @@ jobs:
         with:
           go-version: '1.25'
 
+      # The binary embeds the Svelte SPA via go:embed; without this step the
+      # built binary refuses to serve / ("frontend not built").
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: svelte/package-lock.json
+
+      - name: Build and embed frontend
+        run: make svelte-embed
+
       - name: Build binary
         run: |
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
@@ -29,11 +41,15 @@ jobs:
             VERSION="dev-${GITHUB_SHA::7}"
           fi
           echo "Building version: ${VERSION}"
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=${VERSION}" -o dockpal-linux-amd64 .
+          make build-linux-amd64 VERSION="${VERSION}"
 
-      - name: Create GitHub Release
+      - name: Verify binary reports the right version
+        run: ./dockpal-linux-amd64 version
+
+      - name: Attach binary to release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: dockpal-linux-amd64
-          generate_release_notes: true
+          # Keep the release notes written on the tag; do not auto-regenerate.
+          generate_release_notes: false
