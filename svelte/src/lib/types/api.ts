@@ -7,26 +7,14 @@ export interface User {
   created_at: string;
 }
 
-export interface LoginResponse {
-  token: string;
-  user: User;
-}
-
 export interface Service {
   id: string;
   name: string;
   status: 'running' | 'stopped' | 'degraded' | 'error';
   type: 'container' | 'compose' | 'git' | 'template';
   instance_id?: string;
-  ports: ServicePort[];
   domain?: string;
   created_at: string;
-}
-
-export interface ServicePort {
-  label: string;
-  host_port: number;
-  container_port: number;
 }
 
 export interface Template {
@@ -35,6 +23,9 @@ export interface Template {
   description: string;
   category: string;
   icon: string;
+  icon_url?: string;
+  tags?: string[];
+  popular?: boolean;
   env_required: string[];
   ports: TemplatePort[];
   compose: string;
@@ -46,26 +37,47 @@ export interface TemplatePort {
   container_port: number;
 }
 
+// Docker PortSummary as returned by the API (matches Go's
+// github.com/docker/docker/api/types/container.PortSummary JSON tags).
+export interface PortSummary {
+  IP?: string;
+  PrivatePort: number;
+  PublicPort?: number;
+  Type: string;
+}
+
 export interface ContainerInfo {
   id: string;
   name: string;
   image: string;
   status: string;
   state: string;
-  ports: string[];
+  ports: PortSummary[];
   created: string;
   network_mode?: string;
 }
 
-export interface HealthStatus {
-  status: 'healthy' | 'unhealthy';
-  version: string;
-  uptime_seconds: number;
-  components: Record<string, string>;
+// GET /api/instances — summary row per registered Docker host (incl. "local").
+export interface InstanceListItem {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  mode: string;
+  status: string;
+  last_seen: number;
 }
 
-export interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
+// GET /api/instances/:id/system/info — merged HostInfo + HostStats.
+export interface SystemInfo {
+  hostname: string;
+  os: string;
+  cpu_cores: number;
+  docker_version: string;
+  cpu_percent: number;
+  used_ram: number;
+  total_ram: number;
+  used_disk: number;
+  total_disk: number;
 }
+
