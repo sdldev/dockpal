@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^22 || >=24"
+  },
   "scripts": {
     "dev": "vite dev --host --port 5173",
     "build": "vite build",

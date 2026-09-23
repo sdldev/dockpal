@@ -8,7 +8,9 @@ on:
 
 env:
   GO_VERSION: '1.25'
-  NODE_VERSION: '20'
+  # Keep in sync with the local dev toolchain and vitest's supported range
+  # (vitest 4 dropped Node 20).
+  NODE_VERSION: '22'
 
 jobs:
   # Backend checks
