@@ -1,0 +1,22 @@
+{
+  "id": "portainer",
+  "name": "Portainer CE",
+  "description": "Container management UI",
+  "category": "monitoring",
+  "icon": "🐳",
+  "icon_url": "https://cdn.simpleicons.org/portainer/13BEF9",
+  "tags": [
+    "containers",
+    "admin"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 9444,
+      "container_port": 9443
+    }
+  ],
+  "compose": "services:\n  portainer:\n    image: portainer/portainer-ce:2.21.4\n    ports:\n      - '9444:9443'\n    volumes:\n      - portainer-data:/data\n      - /var/run/docker.sock:/var/run/docker.sock"
+}

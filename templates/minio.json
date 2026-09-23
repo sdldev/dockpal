@@ -1,0 +1,29 @@
+{
+  "id": "minio",
+  "name": "MinIO",
+  "description": "S3-compatible object storage",
+  "category": "storage",
+  "icon": "🗄️",
+  "icon_url": "https://cdn.simpleicons.org/minio/CD2C24",
+  "tags": [
+    "s3",
+    "object-storage"
+  ],
+  "popular": true,
+  "env_required": [
+    "MINIO_ROOT_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "API",
+      "default": 9000,
+      "container_port": 9000
+    },
+    {
+      "label": "Console",
+      "default": 9002,
+      "container_port": 9001
+    }
+  ],
+  "compose": "services:\n  minio:\n    image: minio/minio:latest\n    command: server /data --console-address :9001\n    environment:\n      MINIO_ROOT_USER: minioadmin\n      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}\n    ports:\n      - '9000:9000'\n      - '9002:9001'\n    volumes:\n      - minio-data:/data"
+}

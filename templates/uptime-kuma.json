@@ -1,0 +1,22 @@
+{
+  "id": "uptime-kuma",
+  "name": "Uptime Kuma",
+  "description": "Self-hosted uptime monitoring",
+  "category": "monitoring",
+  "icon": "📡",
+  "icon_url": "https://cdn.simpleicons.org/uptimekuma/5CDD8B",
+  "tags": [
+    "uptime",
+    "status"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 3002,
+      "container_port": 3001
+    }
+  ],
+  "compose": "services:\n  uptime-kuma:\n    image: louislam/uptime-kuma:1\n    ports:\n      - '3002:3001'\n    volumes:\n      - uptime-kuma-data:/app/data"
+}

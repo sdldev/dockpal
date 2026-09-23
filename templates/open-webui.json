@@ -1,0 +1,22 @@
+{
+  "id": "open-webui",
+  "name": "Open WebUI",
+  "description": "Chat interface for Ollama LLMs",
+  "category": "ai",
+  "icon": "💬",
+  "icon_url": "https://cdn.simpleicons.org/openai/412991",
+  "tags": [
+    "chat",
+    "llm"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 3004,
+      "container_port": 8080
+    }
+  ],
+  "compose": "services:\n  open-webui:\n    image: ghcr.io/open-webui/open-webui:main\n    ports:\n      - '3004:8080'\n    volumes:\n      - open-webui-data:/app/backend/data"
+}

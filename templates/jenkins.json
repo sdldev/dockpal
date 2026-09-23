@@ -1,0 +1,27 @@
+{
+  "id": "jenkins",
+  "name": "Jenkins",
+  "description": "Automation server for CI/CD",
+  "category": "devtools",
+  "icon": "🧰",
+  "icon_url": "https://cdn.simpleicons.org/jenkins/D24939",
+  "tags": [
+    "ci",
+    "cd"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8089,
+      "container_port": 8080
+    },
+    {
+      "label": "Agents",
+      "default": 50001,
+      "container_port": 50000
+    }
+  ],
+  "compose": "services:\n  jenkins:\n    image: jenkins/jenkins:lts\n    ports:\n      - '8089:8080'\n      - '50001:50000'\n    volumes:\n      - jenkins-data:/var/jenkins_home"
+}

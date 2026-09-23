@@ -1,0 +1,22 @@
+{
+  "id": "wireguard-ui",
+  "name": "WireGuard UI",
+  "description": "Web UI for managing WireGuard peers",
+  "category": "network",
+  "icon": "🔒",
+  "icon_url": "https://cdn.simpleicons.org/wireguard/88171A",
+  "tags": [
+    "vpn",
+    "wireguard"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 5050,
+      "container_port": 5000
+    }
+  ],
+  "compose": "services:\n  wireguard-ui:\n    image: ngoduykhanh/wireguard-ui:latest\n    cap_add:\n      - NET_ADMIN\n    ports:\n      - '5050:5000'\n    volumes:\n      - wgui-db:/app/db\n      - wgui-config:/app/config"
+}

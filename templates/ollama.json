@@ -1,0 +1,22 @@
+{
+  "id": "ollama",
+  "name": "Ollama",
+  "description": "Run large language models locally",
+  "category": "ai",
+  "icon": "🤖",
+  "icon_url": "https://cdn.simpleicons.org/ollama/000000",
+  "tags": [
+    "llm",
+    "ml"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "API",
+      "default": 11435,
+      "container_port": 11434
+    }
+  ],
+  "compose": "services:\n  ollama:\n    image: ollama/ollama:latest\n    ports:\n      - '11435:11434'\n    volumes:\n      - ollama-data:/root/.ollama"
+}

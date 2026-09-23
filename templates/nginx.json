@@ -1,0 +1,22 @@
+{
+  "id": "nginx",
+  "name": "Nginx",
+  "description": "High-performance web server & reverse proxy",
+  "category": "web-server",
+  "icon": "🌐",
+  "icon_url": "https://cdn.simpleicons.org/nginx/009639",
+  "tags": [
+    "http",
+    "proxy"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 8081,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  nginx:\n    image: nginx:1.27-alpine\n    ports:\n      - '8081:80'\n    volumes:\n      - nginx-html:/usr/share/nginx/html"
+}

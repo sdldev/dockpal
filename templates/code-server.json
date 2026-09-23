@@ -1,0 +1,24 @@
+{
+  "id": "code-server",
+  "name": "VS Code Server",
+  "description": "Code editor in your browser",
+  "category": "devtools",
+  "icon": "💻",
+  "icon_url": "https://cdn.simpleicons.org/codeigniter/DE5285",
+  "tags": [
+    "ide",
+    "code"
+  ],
+  "popular": true,
+  "env_required": [
+    "PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8445,
+      "container_port": 8080
+    }
+  ],
+  "compose": "services:\n  code-server:\n    image: codercom/code-server:latest\n    environment:\n      PASSWORD: ${PASSWORD}\n    ports:\n      - '8445:8080'\n    volumes:\n      - code-server-data:/home/coder/.local/share/code-server"
+}

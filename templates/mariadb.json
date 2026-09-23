@@ -4,6 +4,12 @@
   "description": "MySQL-compatible database",
   "category": "database",
   "icon": "🦭",
+  "icon_url": "https://cdn.simpleicons.org/mariadb/003545",
+  "tags": [
+    "sql",
+    "mysql-compatible"
+  ],
+  "popular": true,
   "env_required": [
     "MARIADB_ROOT_PASSWORD",
     "MARIADB_DATABASE"
@@ -15,5 +21,5 @@
       "container_port": 3306
     }
   ],
-  "compose": "services:\n  mariadb:\n    image: mariadb:11.4\n    environment:\n      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}\n      MARIADB_DATABASE: ${MARIADB_DATABASE}\n    ports:\n      - '3306:3306'\n    volumes:\n      - mariadb-data:/var/lib/mysql\nvolumes:\n  mariadb-data:"
+  "compose": "services:\n  mariadb:\n    image: mariadb:11.4\n    environment:\n      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}\n      MARIADB_DATABASE: ${MARIADB_DATABASE}\n    ports:\n      - '3306:3306'\n    volumes:\n      - mariadb-data:/var/lib/mysql"
 }

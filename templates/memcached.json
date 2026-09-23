@@ -1,0 +1,22 @@
+{
+  "id": "memcached",
+  "name": "Memcached 1.6",
+  "description": "Distributed memory object caching",
+  "category": "cache",
+  "icon": "🧩",
+  "icon_url": "https://cdn.simpleicons.org/memcached/000000",
+  "tags": [
+    "kv",
+    "cache"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Memcached",
+      "default": 11212,
+      "container_port": 11211
+    }
+  ],
+  "compose": "services:\n  memcached:\n    image: memcached:1.6-alpine\n    ports:\n      - '11212:11211'"
+}

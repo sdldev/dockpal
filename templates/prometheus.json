@@ -1,0 +1,22 @@
+{
+  "id": "prometheus",
+  "name": "Prometheus",
+  "description": "Open-source metrics & alerting toolkit",
+  "category": "monitoring",
+  "icon": "📈",
+  "icon_url": "https://cdn.simpleicons.org/prometheus/E6522C",
+  "tags": [
+    "metrics",
+    "scrape"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Prometheus",
+      "default": 9091,
+      "container_port": 9090
+    }
+  ],
+  "compose": "services:\n  prometheus:\n    image: prom/prometheus:v2.54.1\n    ports:\n      - '9091:9090'\n    volumes:\n      - prometheus-data:/prometheus"
+}

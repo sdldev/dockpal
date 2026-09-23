@@ -1,0 +1,18 @@
+{
+  "id": "cloudflared",
+  "name": "Cloudflare Tunnel",
+  "description": "Expose services via Cloudflare",
+  "category": "network",
+  "icon": "🌩️",
+  "icon_url": "https://cdn.simpleicons.org/cloudflare/F38020",
+  "tags": [
+    "tunnel",
+    "dns"
+  ],
+  "popular": false,
+  "env_required": [
+    "TUNNEL_TOKEN"
+  ],
+  "ports": [],
+  "compose": "services:\n  cloudflared:\n    image: cloudflare/cloudflared:latest\n    command: tunnel run --token ${TUNNEL_TOKEN}"
+}

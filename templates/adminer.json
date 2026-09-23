@@ -4,6 +4,13 @@
   "description": "Database management UI",
   "category": "devtools",
   "icon": "🛠️",
+  "icon_url": "https://cdn.simpleicons.org/adminer/34567C",
+  "tags": [
+    "sql",
+    "admin"
+  ],
+  "popular": false,
+  "env_required": [],
   "ports": [
     {
       "label": "Web",

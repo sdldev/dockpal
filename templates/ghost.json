@@ -1,0 +1,24 @@
+{
+  "id": "ghost",
+  "name": "Ghost",
+  "description": "Professional publishing platform",
+  "category": "cms",
+  "icon": "👻",
+  "icon_url": "https://cdn.simpleicons.org/ghost/738A94",
+  "tags": [
+    "blog",
+    "node"
+  ],
+  "popular": false,
+  "env_required": [
+    "GHOST_URL"
+  ],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8085,
+      "container_port": 2368
+    }
+  ],
+  "compose": "services:\n  ghost:\n    image: ghost:5\n    environment:\n      url: ${GHOST_URL}\n    ports:\n      - '8085:2368'\n    volumes:\n      - ghost-data:/var/lib/ghost/content"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "netdata",
+  "name": "Netdata",
+  "description": "Real-time system & container monitoring",
+  "category": "monitoring",
+  "icon": "🖥️",
+  "icon_url": "https://cdn.simpleicons.org/netdata/00D9FF",
+  "tags": [
+    "real-time",
+    "metrics"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 19999,
+      "container_port": 19999
+    }
+  ],
+  "compose": "services:\n  netdata:\n    image: netdata/netdata:latest\n    ports:\n      - '19999:19999'"
+}

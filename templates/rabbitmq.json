@@ -1,0 +1,27 @@
+{
+  "id": "rabbitmq",
+  "name": "RabbitMQ",
+  "description": "Message broker with management UI",
+  "category": "messaging",
+  "icon": "🐇",
+  "icon_url": "https://cdn.simpleicons.org/rabbitmq/FF6600",
+  "tags": [
+    "queue",
+    "amqp"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "AMQP",
+      "default": 5673,
+      "container_port": 5672
+    },
+    {
+      "label": "Management",
+      "default": 15673,
+      "container_port": 15672
+    }
+  ],
+  "compose": "services:\n  rabbitmq:\n    image: rabbitmq:3.13-management\n    ports:\n      - '5673:5672'\n      - '15673:15672'\n    volumes:\n      - rabbitmq-data:/var/lib/rabbitmq"
+}

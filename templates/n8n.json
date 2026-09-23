@@ -1,0 +1,22 @@
+{
+  "id": "n8n",
+  "name": "n8n",
+  "description": "Workflow automation platform",
+  "category": "automation",
+  "icon": "🔀",
+  "icon_url": "https://cdn.simpleicons.org/n8n/EA4B71",
+  "tags": [
+    "workflow",
+    "automation"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 5679,
+      "container_port": 5678
+    }
+  ],
+  "compose": "services:\n  n8n:\n    image: n8nio/n8n:latest\n    environment:\n      GENERIC_TIMEZONE: UTC\n    ports:\n      - '5679:5678'\n    volumes:\n      - n8n-data:/home/node/.n8n"
+}

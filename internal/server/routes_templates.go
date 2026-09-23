@@ -22,6 +22,9 @@ type Template struct {
 	Description string         `json:"description"`
 	Category    string         `json:"category"`
 	Icon        string         `json:"icon"`
+	IconURL     string         `json:"icon_url,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
+	Popular     bool           `json:"popular,omitempty"`
 	EnvRequired []string       `json:"env_required,omitempty"`
 	Ports       []TemplatePort `json:"ports,omitempty"`
 	Compose     string         `json:"compose"`

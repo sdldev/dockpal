@@ -1,0 +1,27 @@
+{
+  "id": "gitea",
+  "name": "Gitea",
+  "description": "Lightweight self-hosted Git service",
+  "category": "devtools",
+  "icon": "🍵",
+  "icon_url": "https://cdn.simpleicons.org/gitea/609926",
+  "tags": [
+    "git",
+    "scm"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 3003,
+      "container_port": 3000
+    },
+    {
+      "label": "SSH",
+      "default": 2223,
+      "container_port": 22
+    }
+  ],
+  "compose": "services:\n  gitea:\n    image: gitea/gitea:1.22\n    ports:\n      - '3003:3000'\n      - '2223:22'\n    volumes:\n      - gitea-data:/data"
+}

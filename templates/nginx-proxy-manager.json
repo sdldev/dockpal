@@ -1,0 +1,32 @@
+{
+  "id": "nginx-proxy-manager",
+  "name": "Nginx Proxy Manager",
+  "description": "Reverse proxy with easy SSL management",
+  "category": "proxy",
+  "icon": "🔐",
+  "icon_url": "https://cdn.simpleicons.org/nginxproxymanager/F15833",
+  "tags": [
+    "proxy",
+    "ssl"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Admin",
+      "default": 8093,
+      "container_port": 81
+    },
+    {
+      "label": "HTTP",
+      "default": 8094,
+      "container_port": 80
+    },
+    {
+      "label": "HTTPS",
+      "default": 8444,
+      "container_port": 443
+    }
+  ],
+  "compose": "services:\n  npm:\n    image: jc21/nginx-proxy-manager:latest\n    ports:\n      - '8093:81'\n      - '8094:80'\n      - '8444:443'\n    volumes:\n      - npm-data:/data\n      - npm-ssl:/etc/letsencrypt"
+}

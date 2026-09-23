@@ -1,0 +1,22 @@
+{
+  "id": "dockge",
+  "name": "Dockge",
+  "description": "Manage compose stacks with style",
+  "category": "devtools",
+  "icon": "🧱",
+  "icon_url": "https://cdn.simpleicons.org/dockge/4CC0E2",
+  "tags": [
+    "compose",
+    "stacks"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 5002,
+      "container_port": 5001
+    }
+  ],
+  "compose": "services:\n  dockge:\n    image: louislam/dockge:1\n    ports:\n      - '5002:5001'\n    volumes:\n      - dockge-data:/app/data\n      - /var/run/docker.sock:/var/run/docker.sock\n      - dockge-stacks:/opt/stacks"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "filebrowser",
+  "name": "File Browser",
+  "description": "Web-based file manager",
+  "category": "storage",
+  "icon": "📁",
+  "icon_url": "https://cdn.simpleicons.org/filebrowser/41A4FF",
+  "tags": [
+    "files",
+    "manager"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8088,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  filebrowser:\n    image: filebrowser/filebrowser:latest\n    ports:\n      - '8088:80'\n    volumes:\n      - filebrowser-data:/database\n      - filebrowser-files:/srv"
+}

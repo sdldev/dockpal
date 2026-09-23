@@ -1,0 +1,24 @@
+{
+  "id": "wordpress",
+  "name": "WordPress",
+  "description": "Popular CMS for websites and blogs",
+  "category": "cms",
+  "icon": "📝",
+  "icon_url": "https://cdn.simpleicons.org/wordpress/21759B",
+  "tags": [
+    "blog",
+    "php"
+  ],
+  "popular": true,
+  "env_required": [
+    "WORDPRESS_DB_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8084,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  wordpress:\n    image: wordpress:6.7-php8.3-apache\n    depends_on:\n      - db\n    environment:\n      WORDPRESS_DB_HOST: db\n      WORDPRESS_DB_USER: wordpress\n      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}\n      WORDPRESS_DB_NAME: wordpress\n    ports:\n      - '8084:80'\n    volumes:\n      - wp-data:/var/www/html\n  db:\n    image: mariadb:11.4\n    environment:\n      MARIADB_DATABASE: wordpress\n      MARIADB_USER: wordpress\n      MARIADB_PASSWORD: ${WORDPRESS_DB_PASSWORD}\n      MARIADB_ROOT_PASSWORD: ${WORDPRESS_DB_PASSWORD}\n    volumes:\n      - wp-db:/var/lib/mysql"
+}

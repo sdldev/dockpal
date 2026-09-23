@@ -1,0 +1,24 @@
+{
+  "id": "clickhouse",
+  "name": "ClickHouse",
+  "description": "Column-oriented analytics database",
+  "category": "database",
+  "icon": "🛢️",
+  "icon_url": "https://cdn.simpleicons.org/clickhouse/FFCC01",
+  "tags": [
+    "analytics",
+    "columnar"
+  ],
+  "popular": false,
+  "env_required": [
+    "CLICKHOUSE_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 8123,
+      "container_port": 8123
+    }
+  ],
+  "compose": "services:\n  clickhouse:\n    image: clickhouse/clickhouse-server:24.10\n    environment:\n      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}\n      CLICKHOUSE_DB: default\n    ports:\n      - '8123:8123'\n    volumes:\n      - clickhouse-data:/var/lib/clickhouse"
+}

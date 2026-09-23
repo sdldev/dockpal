@@ -1,0 +1,27 @@
+{
+  "id": "traefik",
+  "name": "Traefik",
+  "description": "Cloud-native reverse proxy & load balancer",
+  "category": "proxy",
+  "icon": "🛡️",
+  "icon_url": "https://cdn.simpleicons.org/traefikproxy/24A1C1",
+  "tags": [
+    "proxy",
+    "load-balancer"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Dashboard",
+      "default": 8091,
+      "container_port": 8080
+    },
+    {
+      "label": "HTTP",
+      "default": 8092,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  traefik:\n    image: traefik:v3.1\n    command: --api.insecure=true --providers.docker=true --providers.docker.exposedbydefault=false\n    ports:\n      - '8091:8080'\n      - '8092:80'\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro"
+}

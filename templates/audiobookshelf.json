@@ -1,0 +1,22 @@
+{
+  "id": "audiobookshelf",
+  "name": "Audiobookshelf",
+  "description": "Self-hosted audiobook & podcast server",
+  "category": "media",
+  "icon": "🎧",
+  "icon_url": "https://cdn.simpleicons.org/audiobookshelf/82612C",
+  "tags": [
+    "audiobooks",
+    "podcasts"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 13378,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  audiobookshelf:\n    image: advplyr/audiobookshelf:latest\n    ports:\n      - '13378:80'\n    volumes:\n      - abs-audio:/audiobooks\n      - abs-podcasts:/podcasts\n      - abs-config:/config\n      - abs-meta:/metadata"
+}

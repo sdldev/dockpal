@@ -1,0 +1,22 @@
+{
+  "id": "nextcloud",
+  "name": "Nextcloud",
+  "description": "Self-hosted file sync & share",
+  "category": "storage",
+  "icon": "☁️",
+  "icon_url": "https://cdn.simpleicons.org/nextcloud/0082C9",
+  "tags": [
+    "files",
+    "sync"
+  ],
+  "popular": true,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8087,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  nextcloud:\n    image: nextcloud:30-apache\n    ports:\n      - '8087:80'\n    volumes:\n      - nextcloud-data:/var/www/html"
+}

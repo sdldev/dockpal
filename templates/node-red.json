@@ -1,0 +1,22 @@
+{
+  "id": "node-red",
+  "name": "Node-RED",
+  "description": "Flow-based programming for IoT & automation",
+  "category": "automation",
+  "icon": "🔴",
+  "icon_url": "https://cdn.simpleicons.org/nodered/8F0000",
+  "tags": [
+    "iot",
+    "flows"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 1881,
+      "container_port": 1880
+    }
+  ],
+  "compose": "services:\n  node-red:\n    image: nodered/node-red:latest\n    ports:\n      - '1881:1880'\n    volumes:\n      - nodered-data:/data"
+}

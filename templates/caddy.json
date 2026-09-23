@@ -1,0 +1,27 @@
+{
+  "id": "caddy",
+  "name": "Caddy 2",
+  "description": "Web server with automatic HTTPS",
+  "category": "web-server",
+  "icon": "🟩",
+  "icon_url": "https://cdn.simpleicons.org/caddy/1F6FEB",
+  "tags": [
+    "http",
+    "tls"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 8090,
+      "container_port": 80
+    },
+    {
+      "label": "HTTPS",
+      "default": 8443,
+      "container_port": 443
+    }
+  ],
+  "compose": "services:\n  caddy:\n    image: caddy:2\n    ports:\n      - '8090:80'\n      - '8443:443'\n    volumes:\n      - caddy-data:/data\n      - caddy-config:/config"
+}

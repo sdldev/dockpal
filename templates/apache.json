@@ -1,0 +1,21 @@
+{
+  "id": "apache",
+  "name": "Apache HTTP Server",
+  "description": "Classic open-source web server",
+  "category": "web-server",
+  "icon": "🐍",
+  "icon_url": "https://cdn.simpleicons.org/apache/D22128",
+  "tags": [
+    "http"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "HTTP",
+      "default": 8083,
+      "container_port": 80
+    }
+  ],
+  "compose": "services:\n  apache:\n    image: httpd:2.4-alpine\n    ports:\n      - '8083:80'"
+}

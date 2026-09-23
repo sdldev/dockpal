@@ -1,0 +1,22 @@
+{
+  "id": "dozzle",
+  "name": "Dozzle",
+  "description": "Real-time container log viewer",
+  "category": "monitoring",
+  "icon": "📜",
+  "icon_url": "https://cdn.simpleicons.org/dozzle/4DABF7",
+  "tags": [
+    "logs",
+    "containers"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8086,
+      "container_port": 8080
+    }
+  ],
+  "compose": "services:\n  dozzle:\n    image: amir20/dozzle:latest\n    ports:\n      - '8086:8080'\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock:ro"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "mysql8",
+  "name": "MySQL 8.4",
+  "description": "Popular relational database",
+  "category": "database",
+  "icon": "🐬",
+  "icon_url": "https://cdn.simpleicons.org/mysql/4479A1",
+  "tags": [
+    "sql",
+    "relational"
+  ],
+  "popular": true,
+  "env_required": [
+    "MYSQL_ROOT_PASSWORD",
+    "MYSQL_DATABASE"
+  ],
+  "ports": [
+    {
+      "label": "MySQL",
+      "default": 3307,
+      "container_port": 3306
+    }
+  ],
+  "compose": "services:\n  mysql:\n    image: mysql:8.4\n    environment:\n      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}\n      MYSQL_DATABASE: ${MYSQL_DATABASE}\n    ports:\n      - '3307:3306'\n    volumes:\n      - mysql-data:/var/lib/mysql"
+}

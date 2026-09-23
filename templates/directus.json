@@ -1,0 +1,26 @@
+{
+  "id": "directus",
+  "name": "Directus",
+  "description": "Headless CMS & data platform",
+  "category": "cms",
+  "icon": "🔲",
+  "icon_url": "https://cdn.simpleicons.org/directus/64F",
+  "tags": [
+    "headless",
+    "api"
+  ],
+  "popular": false,
+  "env_required": [
+    "SECRET",
+    "ADMIN_EMAIL",
+    "ADMIN_PASSWORD"
+  ],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8056,
+      "container_port": 8055
+    }
+  ],
+  "compose": "services:\n  directus:\n    image: directus/directus:11\n    environment:\n      SECRET: ${SECRET}\n      ADMIN_EMAIL: ${ADMIN_EMAIL}\n      ADMIN_PASSWORD: ${ADMIN_PASSWORD}\n      DB_CLIENT: sqlite3\n    ports:\n      - '8056:8055'\n    volumes:\n      - directus-data:/directus/database"
+}

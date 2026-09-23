@@ -1,0 +1,22 @@
+{
+  "id": "jellyfin",
+  "name": "Jellyfin",
+  "description": "Self-hosted media server",
+  "category": "media",
+  "icon": "🎬",
+  "icon_url": "https://cdn.simpleicons.org/jellyfin/00A4DC",
+  "tags": [
+    "media",
+    "streaming"
+  ],
+  "popular": false,
+  "env_required": [],
+  "ports": [
+    {
+      "label": "Web",
+      "default": 8097,
+      "container_port": 8096
+    }
+  ],
+  "compose": "services:\n  jellyfin:\n    image: jellyfin/jellyfin:10.10\n    ports:\n      - '8097:8096'\n    volumes:\n      - jellyfin-config:/config\n      - jellyfin-cache:/cache\n      - jellyfin-media:/media"
+}

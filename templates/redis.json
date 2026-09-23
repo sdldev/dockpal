@@ -4,6 +4,13 @@
   "description": "In-memory data store & cache",
   "category": "cache",
   "icon": "⚡",
+  "icon_url": "https://cdn.simpleicons.org/redis/DC382D",
+  "tags": [
+    "kv",
+    "cache"
+  ],
+  "popular": true,
+  "env_required": [],
   "ports": [
     {
       "label": "Redis",
@@ -11,5 +18,5 @@
       "container_port": 6379
     }
   ],
-  "compose": "services:\n  redis:\n    image: redis:7.4-alpine\n    ports:\n      - '6379:6379'\n    volumes:\n      - redis-data:/data\nvolumes:\n  redis-data:"
+  "compose": "services:\n  redis:\n    image: redis:7.4-alpine\n    ports:\n      - '6379:6379'\n    volumes:\n      - redis-data:/data"
 }
