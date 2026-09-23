@@ -8,6 +8,7 @@
     loading?: boolean;
     type?: 'button' | 'submit' | 'reset';
     class?: string;
+    title?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
   }
@@ -19,6 +20,7 @@
     loading = false,
     type = 'button',
     class: extraClass = '',
+    title,
     onclick,
     children
   }: Props = $props();
@@ -47,7 +49,7 @@
       .join(' ');
 </script>
 
-<button {type} class={classes()} disabled={disabled || loading} {onclick}>
+<button {type} class={classes()} {title} disabled={disabled || loading} {onclick}>
   {#if loading}
     <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
       <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

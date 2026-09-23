@@ -6,12 +6,16 @@
 	import { navigate } from '$lib/router';
 	import StatsChart from '../Container/StatsChart.svelte';
 	import Button from '../ui/Button.svelte';
+	import Icon from '../ui/Icon.svelte';
+	import Modal from '../ui/Modal.svelte';
+	import { addToast } from '$lib/store';
 
 	let containers: ContainerInfo[] = $state([]);
 	let selectedContainerId: string | null = $state(null);
 	let loading = $state(true);
 	let error = $state('');
 	let actionBusy = $state<string | null>(null);
+	let pendingDelete: ContainerInfo | null = $state(null);
 
 	onMount(async () => {
 		try {
@@ -33,9 +37,26 @@
 			const updated = await api.get<ContainerInfo[]>(`/containers`);
 			containers = updated.map(c => c.id === id ? { ...c, state: action === 'stop' ? 'exited' : 'running' } : c);
 		} catch (e) {
-			console.error(`Failed to ${action}:`, e);
+			addToast(e instanceof Error ? e.message : `Failed to ${action}`, 'error');
 		} finally {
 			actionBusy = null;
+		}
+	}
+
+	async function confirmDelete() {
+		const target = pendingDelete;
+		if (!target) return;
+		actionBusy = target.id;
+		try {
+			await api.delete(`/containers/${target.id}?force=true`);
+			containers = containers.filter((c) => c.id !== target.id);
+			if (selectedContainerId === target.id) selectedContainerId = null;
+			addToast(`Container ${target.name} deleted`, 'success');
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			actionBusy = null;
+			pendingDelete = null;
 		}
 	}
 
@@ -83,13 +104,24 @@
 							<span class="text-zinc-600 text-xs">No ports</span>
 						{/if}
 					</td>
-					<td class="px-4 py-2.5 space-x-2">
-						<Button variant="secondary" size="sm" onclick={() => toggleDetail(container.id)}>
-							{selectedContainerId === container.id ? 'Close' : 'Details'}
-						</Button>
-						<Button variant="primary" size="sm" disabled={actionBusy === container.id} onclick={() => runAction('start', container.id)}>Start</Button>
-						<Button variant="danger" size="sm" disabled={actionBusy === container.id} onclick={() => runAction('stop', container.id)}>Stop</Button>
-						<Button variant="secondary" size="sm" disabled={actionBusy === container.id} onclick={() => runAction('restart', container.id)}>Restart</Button>
+					<td class="px-4 py-2.5">
+						<div class="flex items-center gap-1.5">
+							<Button variant="secondary" size="sm" title={selectedContainerId === container.id ? 'Close details' : 'Details'} disabled={actionBusy === container.id} onclick={() => toggleDetail(container.id)}>
+								<Icon name="info" />
+							</Button>
+							<Button variant="primary" size="sm" title="Start" disabled={actionBusy === container.id || container.state === 'running'} onclick={() => runAction('start', container.id)}>
+								<Icon name="play" />
+							</Button>
+							<Button variant="danger" size="sm" title="Stop" disabled={actionBusy === container.id || container.state !== 'running'} onclick={() => runAction('stop', container.id)}>
+								<Icon name="stop" />
+							</Button>
+							<Button variant="secondary" size="sm" title="Restart" disabled={actionBusy === container.id || container.state !== 'running'} onclick={() => runAction('restart', container.id)}>
+								<Icon name="restart" />
+							</Button>
+							<Button variant="danger" size="sm" title="Delete" disabled={actionBusy === container.id} onclick={() => (pendingDelete = container)}>
+								<Icon name="trash" />
+							</Button>
+						</div>
 					</td>
 				</tr>
 			{:else}
@@ -105,4 +137,21 @@
 			<StatsChart containerId={selectedContainerId} />
 		</div>
 	{/if}
+
+	<!-- Delete confirmation -->
+	<Modal
+		open={pendingDelete !== null}
+		title="Delete container"
+		onclose={() => (pendingDelete = null)}
+	>
+		<p class="text-sm text-zinc-300">
+			Delete container <span class="font-semibold text-white">{pendingDelete?.name}</span>?
+			This stops and removes the container. Its volumes are kept unless you remove them separately.
+			This cannot be undone.
+		</p>
+		<div class="mt-4 flex justify-end gap-2">
+			<Button variant="secondary" onclick={() => (pendingDelete = null)}>Cancel</Button>
+			<Button variant="danger" loading={actionBusy === pendingDelete?.id} onclick={confirmDelete}>Delete</Button>
+		</div>
+	</Modal>
 </div>
