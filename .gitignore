@@ -28,3 +28,6 @@ dockpal-linux-amd64
 # Temp compose dirs
 compose/
 repos/
+
+# Svelte SPA build output (copied in by `make svelte-embed`)
+web/svelteDist/
