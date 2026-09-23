@@ -31,3 +31,6 @@ repos/
 
 # Svelte SPA build output (copied in by `make svelte-embed`)
 web/svelteDist/
+
+# ZCode workspace state
+.zcode/
