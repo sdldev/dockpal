@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.etcd.io/bbolt"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type User struct {
@@ -296,18 +297,33 @@ func (d *DB) UpdateUserRole(username, role string) error {
 	})
 }
 
-func (d *DB) EnsureDefaultAdmin(passwordHash string) error {
+// EnsureDefaultAdmin creates the default admin user when it does not exist.
+// The password function is called at most once and only when the user is
+// actually created — so a generated bootstrap password is never logged for
+// an admin that already exists. Returns true when the user was created.
+func (d *DB) EnsureDefaultAdmin(password func() (string, error)) (bool, error) {
 	_, err := d.GetUser("admin")
-	if err != nil {
-		return d.CreateUser(User{
-			ID:           "admin-001",
-			Username:     "admin",
-			PasswordHash: passwordHash,
-			Role:         "admin",
-			CreatedAt:    time.Now().Unix(),
-		})
+	if err == nil {
+		return false, nil // already exists — keep its password
 	}
-	return nil
+	if !errors.Is(err, ErrUserNotFound) {
+		return false, err
+	}
+	plain, err := password()
+	if err != nil {
+		return false, err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	if err != nil {
+		return false, err
+	}
+	return true, d.CreateUser(User{
+		ID:           "admin-001",
+		Username:     "admin",
+		PasswordHash: string(hash),
+		Role:         "admin",
+		CreatedAt:    time.Now().Unix(),
+	})
 }
 
 // API Keys

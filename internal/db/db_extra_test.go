@@ -8,10 +8,27 @@ import (
 func TestUserCRUD(t *testing.T) {
 	db := setupTestDB(t)
 
-	// Test EnsureDefaultAdmin
-	err := db.EnsureDefaultAdmin("admin-password-hash")
+	// Test EnsureDefaultAdmin — creates the user and calls the password fn once
+	called := 0
+	created, err := db.EnsureDefaultAdmin(func() (string, error) {
+		called++
+		return "admin-password-hash", nil
+	})
 	if err != nil {
 		t.Fatalf("EnsureDefaultAdmin failed: %v", err)
+	}
+	if !created || called != 1 {
+		t.Fatalf("expected created=true, called=1; got created=%v called=%d", created, called)
+	}
+
+	// Second call must be a no-op: user exists, password fn not invoked again
+	called2 := 0
+	created2, err := db.EnsureDefaultAdmin(func() (string, error) {
+		called2++
+		return "should-not-be-used", nil
+	})
+	if err != nil || created2 || called2 != 0 {
+		t.Fatalf("expected idempotent no-op; got created=%v called=%d err=%v", created2, called2, err)
 	}
 
 	admin, err := db.GetUser("admin")
