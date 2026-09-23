@@ -264,3 +264,62 @@ services:
 		t.Fatalf("expected 2 services in order, got %d", len(order))
 	}
 }
+
+// TestBuildBinds_NamedVolumeScopedToProject verifies that a bare-name volume
+// like "pg-data" is prefixed with the project name, matching `docker compose`.
+// Without the prefix, two unrelated projects declaring "pg-data" would mount
+// the same global Docker volume — the collision that made a fresh postgres
+// stack inherit PG16 data files from an older project and crash-loop.
+func TestBuildBinds_NamedVolumeScopedToProject(t *testing.T) {
+	binds, err := buildBinds("postgres16-376157", []string{"pg-data:/var/lib/postgresql/data"})
+	if err != nil {
+		t.Fatalf("buildBinds error: %v", err)
+	}
+	if len(binds) != 1 {
+		t.Fatalf("expected 1 bind, got %d: %v", len(binds), binds)
+	}
+	want := "postgres16-376157_pg-data:/var/lib/postgresql/data"
+	if binds[0] != want {
+		t.Fatalf("named volume not project-scoped: got %q, want %q", binds[0], want)
+	}
+}
+
+// TestBuildBinds_AbsolutePathIsHostMount verifies absolute sources are passed
+// through untouched rather than being treated as project-scoped volumes.
+func TestBuildBinds_AbsolutePathIsHostMount(t *testing.T) {
+	specs := map[string]string{
+		"socket":   "/var/run/docker.sock:/var/run/docker.sock",
+		"socket-ro": "/var/run/docker.sock:/var/run/docker.sock:ro",
+	}
+	for name, spec := range specs {
+		binds, err := buildBinds("anyproject", []string{spec})
+		if err != nil {
+			t.Fatalf("%s: buildBinds error: %v", name, err)
+		}
+		if binds[0] != spec {
+			t.Fatalf("%s: absolute path should be unchanged: got %q, want %q", name, binds[0], spec)
+		}
+	}
+}
+
+// TestBuildBinds_DistinctProjectsGetDistinctVolumes is the regression guard
+// for the actual bug: same template, two projects, no shared volume.
+func TestBuildBinds_DistinctProjectsGetDistinctVolumes(t *testing.T) {
+	a, _ := buildBinds("postgres-A", []string{"pg-data:/var/lib/postgresql/data"})
+	b, _ := buildBinds("postgres-B", []string{"pg-data:/var/lib/postgresql/data"})
+	if a[0] == b[0] {
+		t.Fatalf("distinct projects must not share a volume: both resolved to %q", a[0])
+	}
+}
+
+// TestBuildBinds_AnonymousVolumeYieldsNoBind verifies a source-less spec
+// (anonymous volume) contributes no bind rather than a malformed one.
+func TestBuildBinds_AnonymousVolumeYieldsNoBind(t *testing.T) {
+	binds, err := buildBinds("proj", []string{"/var/lib/postgresql/data"})
+	if err != nil {
+		t.Fatalf("buildBinds error: %v", err)
+	}
+	if len(binds) != 0 {
+		t.Fatalf("anonymous volume must not produce a bind, got %v", binds)
+	}
+}

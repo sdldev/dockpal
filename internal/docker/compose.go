@@ -283,6 +283,43 @@ func composeProjectDir(projectName string) (string, error) {
 	return composeDir, nil
 }
 
+// buildBinds converts a service's volume specs into Docker bind strings,
+// mirroring `docker compose` volume resolution.
+//
+// A relative or bare-name source (e.g. "pg-data") is a *named volume* and is
+// scoped to the project as "<project>_<name>". Without this prefix every
+// project that declares a volume with the same name would share one global
+// Docker volume and silently mount another project's data — that collision
+// was enough to crash a postgres stack that inherited PG16 data files left
+// behind by an unrelated older project.
+//
+// An absolute source (e.g. "/var/run/docker.sock") is a host bind mount and
+// is passed through unchanged. A spec with no source (anonymous volume,
+// "/var/lib/postgresql/data") yields no bind; Docker creates an anonymous
+// volume for it.
+func buildBinds(projectName string, volumes []string) ([]string, error) {
+	binds := make([]string, 0, len(volumes))
+	for _, spec := range volumes {
+		vm, err := ParseVolume(spec)
+		if err != nil {
+			return nil, err
+		}
+		if vm.HostPath == "" {
+			continue
+		}
+		source := vm.HostPath
+		if !filepath.IsAbs(source) {
+			source = projectName + "_" + source
+		}
+		bind := source + ":" + vm.ContainerPath
+		if vm.ReadOnly {
+			bind += ":ro"
+		}
+		binds = append(binds, bind)
+	}
+	return binds, nil
+}
+
 // writeComposeFile saves the compose YAML to disk.
 func writeComposeFile(projectName, composeYAML string) error {
 	composeDir, err := composeProjectDir(projectName)
@@ -338,19 +375,9 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 		})
 	}
 
-	var binds []string
-	for _, volSpec := range svc.Volumes {
-		vm, err := ParseVolume(volSpec)
-		if err != nil {
-			return fmt.Errorf("service %s: %w", svcName, err)
-		}
-		bind := vm.HostPath + ":" + vm.ContainerPath
-		if vm.ReadOnly {
-			bind += ":ro"
-		}
-		if vm.HostPath != "" {
-			binds = append(binds, bind)
-		}
+	binds, err := buildBinds(projectName, svc.Volumes)
+	if err != nil {
+		return fmt.Errorf("service %s: %w", svcName, err)
 	}
 
 	// Default empty/unknown to unless-stopped so the app survives a host
