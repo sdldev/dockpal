@@ -51,6 +51,12 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   });
 
   if (!response.ok) {
+    // Token expired or revoked: clear session so the app falls back to login.
+    // App.svelte listens for this event to reset currentUser.
+    if (response.status === 401 && auth) {
+      clearToken();
+      window.dispatchEvent(new Event('dockpal:unauthorized'));
+    }
     let message = `HTTP ${response.status}`;
     try {
       const errorBody = (await response.json()) as { error?: string };
@@ -71,5 +77,6 @@ export const api = {
   get: <T>(endpoint: string) => request<T>(endpoint, { method: 'GET' }),
   post: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: 'POST', body }),
   put: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: 'PUT', body }),
+  patch: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, { method: 'PATCH', body }),
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' })
 };

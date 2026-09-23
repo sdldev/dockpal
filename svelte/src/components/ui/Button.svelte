@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   interface Props {
     variant?: 'primary' | 'secondary' | 'danger';
     size?: 'sm' | 'md' | 'lg';
@@ -7,6 +9,7 @@
     type?: 'button' | 'submit' | 'reset';
     class?: string;
     onclick?: (event: MouseEvent) => void;
+    children?: Snippet;
   }
 
   let {
@@ -16,7 +19,8 @@
     loading = false,
     type = 'button',
     class: extraClass = '',
-    onclick
+    onclick,
+    children
   }: Props = $props();
 
   const variantClasses: Record<string, string> = {
@@ -50,5 +54,5 @@
       <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
     </svg>
   {/if}
-  <slot />
+  {@render children?.()}
 </button>

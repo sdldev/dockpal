@@ -17,7 +17,7 @@
   {#each $toasts as toast (toast.id)}
     <div class="px-4 py-3 rounded-sm border shadow-lg text-sm text-white flex items-center gap-3 {typeClasses(toast.type)}">
       <span>{toast.message}</span>
-      <button on:click={() => removeToast(toast.id)} class="opacity-70 hover:opacity-100">✕</button>
+      <button onclick={() => removeToast(toast.id)} class="opacity-70 hover:opacity-100">✕</button>
     </div>
   {/each}
 </div>

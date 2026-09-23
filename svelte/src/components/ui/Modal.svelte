@@ -1,12 +1,15 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   interface Props {
     open: boolean;
     title: string;
     size?: 'sm' | 'md' | 'lg' | 'xl';
     onclose: () => void;
+    children?: Snippet;
   }
 
-  let { open, title, size = 'md', onclose }: Props = $props();
+  let { open, title, size = 'md', onclose, children }: Props = $props();
 
   const sizeClasses: Record<string, string> = {
     sm: 'max-w-md',
@@ -42,7 +45,7 @@
         </button>
       </div>
       <div class="p-4">
-        <slot />
+        {@render children?.()}
       </div>
     </div>
   </div>
