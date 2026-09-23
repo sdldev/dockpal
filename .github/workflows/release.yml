@@ -30,6 +30,10 @@ jobs:
           cache: 'npm'
           cache-dependency-path: svelte/package-lock.json
 
+      - name: Install frontend dependencies
+        working-directory: ./svelte
+        run: npm ci
+
       - name: Build and embed frontend
         run: make svelte-embed
 
