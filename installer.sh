@@ -333,17 +333,19 @@ verify_installation() {
 # Returns the password on stdout, or empty string if not found.
 fetch_admin_password() {
     local log_line
+    # Must match the line main.go emits: "Created admin user with generated password: <pw>".
+    local pattern="Created admin user with generated password:"
     # Try journalctl first (stderr output captured by systemd)
-    log_line=$(journalctl -u dockpal --no-pager 2>/dev/null | grep "Generated initial admin password for username admin:" | tail -1 || true)
+    log_line=$(journalctl -u dockpal --no-pager 2>/dev/null | grep "$pattern" | tail -1 || true)
     if [[ -z "$log_line" ]]; then
         # Fallback: read from the log file
         local log_file="/opt/dockpal/data/dockpal.log"
         if [[ -f "$log_file" ]]; then
-            log_line=$(grep "Generated initial admin password for username admin:" "$log_file" | tail -1 || true)
+            log_line=$(grep "$pattern" "$log_file" | tail -1 || true)
         fi
     fi
     if [[ -n "$log_line" ]]; then
-        echo "$log_line" | sed -n 's/.*admin: //p'
+        echo "$log_line" | sed -n 's/.*generated password: //p'
     fi
 }
 

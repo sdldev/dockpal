@@ -46,6 +46,11 @@ func New(tls bool, tlsCert, tlsKey, tlsDomain, dataDir string) *Server {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	// Gin trusts every proxy by default, which makes c.ClientIP() reflect a
+	// client-supplied X-Forwarded-For. That would let anyone spoof their IP to
+	// bypass the per-IP rate limits and to forge audit-log attribution, so trust
+	// no proxy: ClientIP falls back to the immediate peer's RemoteAddr.
+	router.SetTrustedProxies(nil)
 	router.Use(maxRequestBodyMiddleware(resolveMaxRequestBodyBytes()))
 	router.Use(gin.Recovery())
 
@@ -121,17 +126,21 @@ func (s *Server) Router() *gin.Engine {
 }
 
 func (s *Server) newHTTPServer() *http.Server {
-	// Use the configured shutdown timeout for read/write/idle to keep behavior
-	// consistent during long-running production operations.
+	// ReadTimeout and WriteTimeout are absolute connection deadlines. They are
+	// harmless for the hijacked WebSocket endpoints — net/http's Hijack clears
+	// both deadlines at upgrade time — but as absolute deadlines they would
+	// also cap the two non-hijacking SSE streams, which instead clear the write
+	// deadline per handler (see clearWriteDeadline). ReadTimeout is kept because
+	// it is the only bound on a slowly-trickled request body: ReadHeaderTimeout
+	// covers headers only and IdleTimeout applies only between requests.
 	rwTimeout := s.shutdownTimeout
-	idleTimeout := s.shutdownTimeout * 4
 	return &http.Server{
 		Addr:              fmt.Sprintf(":%s", s.port),
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       rwTimeout,
 		WriteTimeout:      rwTimeout * 2,
-		IdleTimeout:       idleTimeout,
+		IdleTimeout:       rwTimeout * 4,
 	}
 }
 

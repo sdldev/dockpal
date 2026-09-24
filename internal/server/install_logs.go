@@ -50,9 +50,9 @@ func (m *InstallLogsManager) WriteLog(instanceID string, message string) {
 	session.Logs = append(session.Logs, message)
 	listeners := make([]chan string, len(session.Listeners))
 	copy(listeners, session.Listeners)
-	session.mu.Unlock()
-
-	// Broadcast to all active listeners
+	// Broadcast while holding the lock: deregister removes a channel and closes
+	// it under this same mutex, so sending outside the lock can panic on a
+	// channel that is being closed concurrently.
 	for _, ch := range listeners {
 		select {
 		case ch <- message:
@@ -60,6 +60,7 @@ func (m *InstallLogsManager) WriteLog(instanceID string, message string) {
 			// listener channel full or blocked, skip
 		}
 	}
+	session.mu.Unlock()
 }
 
 // WriteLogf formatting helper for WriteLog.

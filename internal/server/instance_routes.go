@@ -218,9 +218,12 @@ func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// Generate install command if token is available
+		// The install command embeds the plaintext agent token, which is a bearer
+		// credential for that instance's Docker API. Handing it to a read-only
+		// viewer would let them escalate to full control of the remote host, so
+		// only admins receive it. (Nothing in the SPA reads this field today.)
 		var installCmd string
-		if len(inst.AgentTokenEncrypted) > 0 {
+		if role, exists := c.Get("role"); exists && role == auth.RoleAdmin && len(inst.AgentTokenEncrypted) > 0 {
 			cryptoKey, err := registry.DeriveKey(jwtSecret)
 			if err == nil {
 				token, err := registry.Decrypt(inst.AgentTokenEncrypted, cryptoKey)

@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { getHealthStatus, startHealthMonitoring } from '$lib/api/health';
 
-	let healthy = $state(true);
+	let healthy = $state(false);
 	let version = $state('');
 	let uptime = $state(0);
 	let loading = $state(true);
@@ -40,7 +40,9 @@
 <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 flex items-center justify-between">
 	<div>
 		<h3 class="text-sm font-medium text-white mb-1">System Status</h3>
-		{#if healthy}
+		{#if loading}
+			<span class="text-xs text-zinc-500">Checking…</span>
+		{:else if healthy}
 			<span class="text-xs text-emerald-400">✓ Healthy • Version {version}</span>
 			<div class="text-xs text-zinc-500 mt-1">Uptime {uptimeFormatted()}</div>
 		{:else}
@@ -53,6 +55,7 @@
 
 	<div class="w-4 h-4 rounded-full animate-pulse transition-colors"
 		class:bg-emerald-400={healthy && !loading}
-		class:red-400={!healthy || (loading && !healthy)}>
+		class:bg-red-400={!healthy && !loading}
+		class:bg-zinc-600={loading}>
 	</div>
 </div>

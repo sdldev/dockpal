@@ -167,6 +167,16 @@ func generateID(prefix string) string {
 	return fmt.Sprintf("%s-%x", prefix, b)
 }
 
+// clearWriteDeadline removes the absolute write deadline net/http installs on
+// every connection from http.Server.WriteTimeout. Hijacked (WebSocket)
+// handlers are unaffected because Hijack clears it, but a long-lived SSE
+// response that never hijacks would otherwise be cut off at WriteTimeout
+// regardless of how actively it is writing. The stream's own liveness is
+// bounded by the request context, which fires when the client goes away.
+func clearWriteDeadline(c *gin.Context) {
+	_ = http.NewResponseController(c.Writer).SetWriteDeadline(time.Time{})
+}
+
 // internalError returns a generic error message to the client while logging
 // the real error. This prevents leaking internal details (file paths, DB
 // errors, etc.) in API responses.

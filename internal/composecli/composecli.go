@@ -71,6 +71,12 @@ func Unlock(stackName string) {
 	l := v.(*stackLock)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Guard the close: Unlock can run on an error path before a successful
+	// TryLock (heldC is then nil) or twice after one lock, and close() panics
+	// in both cases — taking the whole process down from a request goroutine.
+	if !l.held {
+		return
+	}
 	l.held = false
 	close(l.heldC)
 }

@@ -31,7 +31,8 @@
 	async function runAction(action: 'start' | 'stop' | 'restart', id: string) {
 		actionBusy = id;
 		try {
-			const endpoint = `/api/containers/${id}/${action}`;
+			// api.post already prepends /api — a leading /api here would request /api/api/...
+			const endpoint = `/containers/${id}/${action}`;
 			await api.post(endpoint);
 			// Refresh list
 			const updated = await api.get<ContainerInfo[]>(`/containers`);

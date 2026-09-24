@@ -11,10 +11,11 @@ Manage containers, deploy compose stacks, monitor resources, control multiple re
 ### Production Install (Debian/Ubuntu)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/installer.sh | sudo bash
 ```
 
-Installs systemd service at `/etc/systemd/system/dockpal.service`.
+Installs Docker (if missing), provisions `/opt/dockpal`, and sets up the systemd
+service at `/etc/systemd/system/dockpal.service`.
 
 #### Post-install
 
@@ -26,34 +27,53 @@ systemctl status dockpal
 journalctl -u dockpal -f
 
 # Get admin password (first run only)
-journalctl -u dockpal | grep "admin password"
+journalctl -u dockpal | grep "generated password"
 
-# Set custom password for next restart
-DOCKPAL_INITIAL_ADMIN_PASSWORD=mypassword systemctl restart dockpal
+# Set a custom admin password (only before the first start)
+systemctl set-environment DOCKPAL_INITIAL_ADMIN_PASSWORD=mypassword
+systemctl start dockpal
 ```
 
-Update command: same as install.
+The `DOCKPAL_INITIAL_ADMIN_PASSWORD` variable is only read when the `admin` user
+does not exist yet — it has no effect on later restarts. To change the password
+on an existing install, run:
+
+```bash
+dockpal reset-password --username admin --password mypassword
+```
+
+Update an existing installation with `update.sh`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
+```
 
 ---
 
 ## Update
 
-Auto-update via `update.sh` script. Runs manually or via cron.
+Update an existing installation with `update.sh`. It resolves the release,
+verifies the download, backs up the current binary and templates, and rolls back
+automatically if the updated panel fails its health check.
 
-**Daily update (cron):**
+**Manual update:**
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
+```
+
+**Daily update (cron):** save the script once, then schedule it.
+
+```bash
+# Download the updater (one-time)
+sudo curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh \
+  -o /opt/dockpal/update.sh && sudo chmod +x /opt/dockpal/update.sh
+
 # Edit crontab
 crontab -e
 
 # Add line (daily at 2 AM)
 0 2 * * * /opt/dockpal/update.sh >> /var/log/dockpal-update.log 2>&1
-```
-
-Manual update:
-
-```bash
-/opt/dockpal/update.sh
 ```
 
 Optional environment variables:

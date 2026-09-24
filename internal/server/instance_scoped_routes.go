@@ -2070,6 +2070,12 @@ func handleInstanceAppUpdatesStream(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 
+	// This SSE response never hijacks (the local path streams frames directly
+	// and the remote path proxies a body through c.Writer), so the server-wide
+	// WriteTimeout would otherwise cut the stream off 60s in regardless of
+	// activity.
+	clearWriteDeadline(c)
+
 	if instanceID == "local" {
 		if globalAppUpdateFeed == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "feed not configured"})

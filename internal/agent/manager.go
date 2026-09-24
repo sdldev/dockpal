@@ -130,24 +130,56 @@ func (m *Manager) WaitForDisconnect(instanceID string) {
 	<-ec.done
 }
 
-// UnregisterEdgeConnection removes an edge connection and marks instance offline in the database.
+// UnregisterEdgeConnection removes an instance's edge connection and marks the
+// instance offline. Used by the admin delete-instance path.
 func (m *Manager) UnregisterEdgeConnection(instanceID string) {
+	// Look up and tear down under a single m.mu hold so a reconnect landing in
+	// the gap between the lookup and the teardown cannot leave the new
+	// connection registered for an instance that no longer exists.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if ec, ok := m.edge[instanceID]; ok {
-		select {
-		case <-ec.done:
-		default:
-			close(ec.done)
-		}
-		ec.conn.Close()
-		delete(m.edge, instanceID)
+	ec, ok := m.edge[instanceID]
+	if ok && ec != nil {
+		m.teardownEdgeConnectionLocked(ec)
+		m.mu.Unlock()
+		return
 	}
+	m.mu.Unlock()
 
-	// Update instance status to offline in database
 	if m.db != nil {
 		m.db.UpdateInstanceStatus(instanceID, "offline")
+	}
+}
+
+// unregisterEdgeConnection tears down a specific edge connection, but only when
+// it is still the registered connection for its instance. This keeps a
+// reconnect (which stores a fresh connection under the same instance ID) from
+// being destroyed by the superseded connection's cleanup.
+func (m *Manager) unregisterEdgeConnection(ec *EdgeConnection) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.teardownEdgeConnectionLocked(ec)
+}
+
+// teardownEdgeConnectionLocked closes ec and removes it from the edge map when
+// it is still the registered connection for its instance, and reflects the
+// offline status in the database. Callers must hold m.mu.
+func (m *Manager) teardownEdgeConnectionLocked(ec *EdgeConnection) {
+	if current, ok := m.edge[ec.instanceID]; !ok || current != ec {
+		// Not the live connection (e.g. it was superseded by a reconnect); its
+		// successor must not be torn down or marked offline.
+		return
+	}
+
+	select {
+	case <-ec.done:
+	default:
+		close(ec.done)
+	}
+	ec.conn.Close()
+	delete(m.edge, ec.instanceID)
+
+	if m.db != nil {
+		m.db.UpdateInstanceStatus(ec.instanceID, "offline")
 	}
 }
 
@@ -194,9 +226,13 @@ func (m *Manager) SendEdgeRequest(instanceID string, req *AgentRequest) (*AgentR
 }
 
 // edgeReadLoop reads messages from an edge WebSocket and routes them to pending requests.
-// It handles disconnection by calling UnregisterEdgeConnection.
+// It handles disconnection by unregistering its own connection.
 func (m *Manager) edgeReadLoop(ec *EdgeConnection) {
-	defer m.UnregisterEdgeConnection(ec.instanceID)
+	// Key the cleanup on this connection, not on the instance ID: when the agent
+	// reconnects, RegisterEdgeConnection supersedes this connection and stores a
+	// new one under the same instance ID. Unregistering by ID would then tear
+	// down the healthy new connection and flip the instance offline.
+	defer m.unregisterEdgeConnection(ec)
 
 	for {
 		// Read JSON message from WebSocket

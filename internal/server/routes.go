@@ -622,6 +622,10 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		c.Header("Connection", "keep-alive")
 		c.Header("X-Accel-Buffering", "no")
 
+		// This SSE response never hijacks, so the server-wide WriteTimeout would
+		// otherwise cut the stream off 60s in regardless of activity.
+		clearWriteDeadline(c)
+
 		ch, unsubscribe := globalAppUpdateFeed.Subscribe()
 		defer unsubscribe()
 
