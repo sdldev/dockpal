@@ -91,7 +91,11 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("X-XSS-Protection", "0")
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
-		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:")
+		// script-src is 'self' only: the Vite production build emits external
+		// hashed chunks (no inline scripts), so 'unsafe-inline'/'unsafe-eval'
+		// are not needed. style-src keeps 'unsafe-inline' because the SPA uses
+		// dynamic inline style attributes (e.g. width gauges on the Dashboard).
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:")
 		c.Next()
 	}
 }
