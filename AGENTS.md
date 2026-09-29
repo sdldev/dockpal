@@ -7,7 +7,8 @@ guide for editors/AIs. Facts below were verified against the repo, not inherited
 
 Self-hosted Docker management panel: a **single Go binary** = Gin HTTP server + embedded
 Svelte 5 SPA + BBolt database. Module `github.com/sdldev/dockpal`. Go 1.26 in `go.mod`
-(CI pins 1.25 — keep both working).
+(CI and releases pin 1.26 to match — pinning CI below go.mod's toolchain breaks cover
+builds with "version does not match go tool version").
 
 Layout:
 

@@ -19,7 +19,8 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          # Must match go.mod's toolchain (1.26), same as CI.
+          go-version: '1.26'
 
       # The binary embeds the Svelte SPA via go:embed; without this step the
       # built binary refuses to serve / ("frontend not built").

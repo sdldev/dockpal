@@ -7,7 +7,9 @@ on:
     branches: [ main ]
 
 env:
-  GO_VERSION: '1.25'
+  # Pinned to go.mod's toolchain (1.26). Pinning CI below go.mod's version
+  # mixes the downloaded toolchain with setup-go's and breaks cover builds.
+  GO_VERSION: '1.26'
   # Keep in sync with the local dev toolchain and vitest's supported range
   # (vitest 4 dropped Node 20).
   NODE_VERSION: '22'
