@@ -32,6 +32,10 @@
 	let sshAuthType = $state<'password' | 'key'>('password');
 	let sshSecret = $state('');
 	let installDocker = $state(true);
+	// Address the agent should use to reach this panel (edge mode). Empty =
+	// use the browser's current host, which is wrong when the panel is
+	// opened via localhost — the VPS would dial its own localhost.
+	let panelAddress = $state('');
 	let installing = $state(false);
 	let logs = $state<string[]>([]);
 	let showManualCommand = $state(false);
@@ -131,7 +135,8 @@
 				ssh_user: sshUser.trim() || 'root',
 				ssh_auth_type: sshAuthType,
 				ssh_secret: sshSecret,
-				install_docker: installDocker
+				install_docker: installDocker,
+				panel_address: panelAddress.trim() || undefined
 			});
 			openLogStream();
 		} catch (e) {
@@ -323,6 +328,24 @@
 					<input type="checkbox" bind:checked={installDocker} class="accent-blue-600" />
 					Install Docker if missing (via get.docker.com)
 				</label>
+				{#if mode === 'edge'}
+					<div>
+						<label for="panel-address" class="block text-xs font-medium text-zinc-400 mb-1">
+							Panel address as agents see it <span class="text-zinc-600">(optional)</span>
+						</label>
+						<input
+							id="panel-address"
+							type="text"
+							bind:value={panelAddress}
+							placeholder={location.host}
+							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+						/>
+						<p class="text-xs text-zinc-600 mt-1">
+							Leave empty to use "{location.host}". Must be reachable from the remote server —
+							"localhost" only works when the agent runs on this same machine.
+						</p>
+					</div>
+				{/if}
 				<div class="flex justify-end gap-2">
 					<Button
 						variant="primary"

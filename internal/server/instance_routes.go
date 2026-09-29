@@ -509,8 +509,10 @@ func generateInstallCommand(mode, serverHost, token string) string {
 			agentImg,
 		)
 	case "edge":
-		// For edge mode: include server WebSocket URL, token, no port mapping
-		wsURL := fmt.Sprintf("wss://%s/api/agent/connect", serverHost)
+		// For edge mode: agent builds the full WS URL from the scheme://host
+		// base itself (appends /api/agent/connect + token). Passing the path
+		// here double-appended it, making the handshake always 404.
+		wsURL := fmt.Sprintf("wss://%s", serverHost)
 		runCmd = fmt.Sprintf(
 			"docker rm -f dockpal-agent 2>/dev/null || true\n"+
 				"docker run -d --name dockpal-agent --restart unless-stopped \\\n  -e DOCKPAL_MODE=edge \\\n  -e DOCKPAL_SERVER=%s \\\n  -e DOCKPAL_TOKEN=%s \\\n  -v /var/run/docker.sock:/var/run/docker.sock \\\n  -v /opt/dockpal-agent:/opt/dockpal-agent \\\n  %s",
@@ -535,6 +537,11 @@ type InstallAgentRequest struct {
 	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key"`
 	SSHSecret     string `json:"ssh_secret" binding:"required"`
 	InstallDocker bool   `json:"install_docker"`
+	// PanelAddress overrides the address embedded in the agent's edge-mode
+	// server URL. Defaults to the HTTP request's Host, which is wrong when
+	// the panel is accessed via localhost/IP aliases that don't resolve from
+	// the remote host ("localhost" on the VPS is the VPS itself).
+	PanelAddress string `json:"panel_address"`
 }
 
 type logWriter struct {
@@ -585,7 +592,10 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt agent token"})
 			return
 		}
-		token := hex.EncodeToString(tokenBytes)
+		// The stored plaintext is already the hex string that handleCreateInstance
+		// hashed with bcrypt — hex-encoding it again would hand the agent a
+		// 128-char token that can never match, breaking every edge install.
+		token := string(tokenBytes)
 
 		// Encrypt SSH Secret (password or key)
 		encryptedSecret, err := registry.Encrypt([]byte(req.SSHSecret), cryptoKey)
@@ -624,8 +634,14 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 		// Clear/Reset logs for this session
 		logsManager.RemoveSession(id)
 
-		// Capture parameters for the background goroutine
-		host := c.Request.Host
+		// Capture parameters for the background goroutine. The agent's edge
+		// URL must use an address reachable FROM the remote host; the request
+		// Host is only a default (wrong for localhost access — the browser's
+		// host is not the panel's host from the VPS's perspective).
+		host := req.PanelAddress
+		if host == "" {
+			host = c.Request.Host
+		}
 		isSecureWS := c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https"
 
 		go func() {

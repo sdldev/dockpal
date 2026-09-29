@@ -180,7 +180,7 @@
 	<!-- Page Header -->
 	<div class="flex items-center justify-between">
 		<div>
-			<h2 class="text-xl font-semibold text-white">Fleet Dashboard</h2>
+			<h2 class="text-xl font-semibold text-white">Servers</h2>
 			<p class="text-sm text-zinc-500 mt-0.5">Real-time status and deployment management across all Docker hosts</p>
 		</div>
 		<div class="flex gap-2">
@@ -198,7 +198,7 @@
 	</div>
 
 	{#if $fleet.loading}
-		<div class="text-zinc-500 text-sm">Loading fleet...</div>
+		<div class="text-zinc-500 text-sm">Loading servers...</div>
 	{:else if fleetTab === 'overview'}
 		<!-- Fleet Overview Tab -->
 		<div class="space-y-6">
@@ -217,12 +217,12 @@
 				<div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
 					<div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total CPU Cores</div>
 					<div class="text-3xl font-bold text-blue-400">{totalCpuCores}</div>
-					<div class="text-[10px] text-zinc-500 mt-1">Fleet CPU capacity</div>
+					<div class="text-[10px] text-zinc-500 mt-1">Total CPU capacity</div>
 				</div>
 				<div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
 					<div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Memory Capacity</div>
 					<div class="text-3xl font-bold text-violet-400">{formatBytes(totalMemory)}</div>
-					<div class="text-[10px] text-zinc-500 mt-1">Fleet RAM capacity</div>
+					<div class="text-[10px] text-zinc-500 mt-1">Total RAM capacity</div>
 				</div>
 			</div>
 
@@ -395,7 +395,7 @@
 		<!-- Fleet Containers Tab -->
 		<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
 			<div class="p-4 border-b border-zinc-800 flex items-center justify-between">
-				<h3 class="text-sm font-semibold text-white">All Running Containers Across Fleet</h3>
+				<h3 class="text-sm font-semibold text-white">All Running Containers Across Servers</h3>
 				<div class="flex gap-2">
 					<input
 						type="text"
@@ -437,7 +437,7 @@
 					{:else}
 						<tr>
 							<td colspan="5" class="text-center py-10 text-zinc-600 text-sm">
-								{containerSearch ? 'No containers match your search.' : 'No containers found across the fleet.'}
+								{containerSearch ? 'No containers match your search.' : 'No containers found across servers.'}
 							</td>
 						</tr>
 					{/each}
@@ -544,7 +544,7 @@
 									/>
 								</svg>
 							{/if}
-							<span>{bulkDeploying ? 'Deploying to Fleet...' : 'Deploy to Selected Targets'}</span>
+							<span>{bulkDeploying ? 'Deploying to servers...' : 'Deploy to Selected Servers'}</span>
 						</button>
 					</div>
 				</form>
@@ -585,7 +585,7 @@
 		<div class="space-y-4">
 			<p class="text-sm text-zinc-500">
 				Register a remote Docker host and install the dockpal-agent on it. Once the agent
-				connects, the server appears in the selector and the fleet overview.
+				connects, the server appears in the selector and this page.
 			</p>
 			<AddServerPanel />
 		</div>

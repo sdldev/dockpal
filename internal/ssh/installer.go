@@ -205,12 +205,15 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 			params.AgentImage,
 		)
 	} else {
-		// Edge mode
+		// Edge mode. The current agent image builds the full WebSocket URL
+		// itself from DOCKPAL_EDGE_SERVER as a bare scheme://host:port base,
+		// appending /api/agent/connect and its token. Passing the full path
+		// here produced .../api/agent/connect/api/agent/connect — always 404.
 		scheme := "ws"
 		if params.IsSecureWS {
 			scheme = "wss"
 		}
-		wsURL := fmt.Sprintf("%s://%s/api/agent/connect", scheme, params.ServerHost)
+		wsURL := fmt.Sprintf("%s://%s", scheme, params.ServerHost)
 		// We set both DOCKPAL_EDGE_SERVER and DOCKPAL_SERVER to prevent mismatch issues
 		runCmd = fmt.Sprintf(
 			"docker run -d --name dockpal-agent --restart unless-stopped -v /var/run/docker.sock:/var/run/docker.sock -e DOCKPAL_MODE=edge -e DOCKPAL_EDGE_SERVER=%s -e DOCKPAL_SERVER=%s -e DOCKPAL_TOKEN=%s %s",

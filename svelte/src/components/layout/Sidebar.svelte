@@ -14,7 +14,7 @@
 
   let { currentRoute = 'dashboard', logout }: Props = $props();
 
-  // Instance list for the server selector — also drives Fleet visibility:
+  // Instance list for the server selector — also drives Servers visibility:
   // single-server users (the majority) never need it, so the item only
   // appears once a second instance exists.
   let instances = $state<InstanceListItem[]>([]);
@@ -66,7 +66,7 @@
 
   const nav: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { id: 'fleet', label: 'Fleet', icon: 'fleet', visible: () => showFleet },
+    { id: 'fleet', label: 'Servers', icon: 'fleet', visible: () => showFleet },
     { id: 'stacks', label: 'Stacks', icon: 'stacks' },
     { id: 'containers', label: 'Containers', icon: 'containers' },
     { id: 'images', label: 'Images', icon: 'images' },
@@ -77,7 +77,7 @@
     { id: 'admin', label: 'Admin', icon: 'admin', role: 'admin' }
   ];
 
-  // Recomputed whenever instances/roles change so Fleet appears/disappears
+  // Recomputed whenever instances/roles change so Servers appears/disappears
   // live as remote instances are added or removed.
   const visibleNav = $derived(
     nav.filter((item) => {
@@ -101,7 +101,7 @@
   </div>
 
   <!-- Instance / server selector (legacy sidebar parity). The "+ Add Server"
-       link only shows to admins while the Fleet item is hidden (single
+       link only shows to admins while the Servers item is hidden (single
        instance) — it is the discoverable entry point to the multi-server
        flow before a second instance exists. -->
   <div class="px-1 pb-4 mb-2 border-b border-zinc-800">

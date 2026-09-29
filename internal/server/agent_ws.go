@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,13 +31,18 @@ type hostInfoUpdate struct {
 }
 
 // agentWebSocketUpgrader is configured with specific buffer sizes as per requirements.
+// Unlike browser-facing WS endpoints, the agent connect endpoint must accept
+// origin-less upgrades: non-browser clients (the dockpal-agent itself) do not
+// send an Origin header, and browser-origin checks are meaningless here —
+// the agent authenticates with its token in the first WebSocket message,
+// enforced by HandleAgentConnect after the upgrade.
 var agentWebSocketUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin:     checkOrigin,
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-var agentAuthRateLimiter = NewRateLimiter()
+var agentAuthRateLimiter = NewRateLimiterWithPolicy(AgentRateLimit)
 
 // HandleAgentConnect handles the WebSocket upgrade for edge-mode agents.
 // It authenticates the agent via token and maintains the connection.
@@ -62,23 +68,28 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 		conn.SetReadDeadline(deadline)
 		conn.SetWriteDeadline(deadline)
 
-		// Read initial auth message
-		var msg agentMessage
-		_, rawMsg, err := conn.ReadMessage()
-		if err != nil {
-			log.Printf("Agent WebSocket: failed to read auth message: %v", err)
-			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication timeout"))
-			return
-		}
+		// Auth token: current agent images send it as ?token= on the WS URL;
+		// older images send it as a {token} first message. Accept both.
+		token := c.Query("token")
+		if token == "" {
+			var msg agentMessage
+			_, rawMsg, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("Agent WebSocket: failed to read auth message: %v", err)
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication timeout"))
+				return
+			}
 
-		if err := json.Unmarshal(rawMsg, &msg); err != nil {
-			log.Printf("Agent WebSocket: invalid auth message format: %v", err)
-			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
-			return
+			if err := json.Unmarshal(rawMsg, &msg); err != nil {
+				log.Printf("Agent WebSocket: invalid auth message format: %v", err)
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+				return
+			}
+			token = msg.Token
 		}
 
 		// Verify token against stored hashes
-		instance, err := verifyAgentToken(database, msg.Token)
+		instance, err := verifyAgentToken(database, token)
 		if err != nil {
 			log.Printf("Agent WebSocket: authentication failed for token: %v", err)
 			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))

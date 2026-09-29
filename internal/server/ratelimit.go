@@ -20,6 +20,11 @@ var (
 	WebhookRateLimit  = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 10}
 	ReadRateLimit     = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 60}
 	MutationRateLimit = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 10}
+	// Agent connect: edge agents retry every ~5s while reconnecting (12
+	// attempts/min), so the login-level limit would permanently throttle
+	// exactly the hosts that most need to reconnect. Tokens still gate
+	// authentication after the upgrade; this only smooths floods.
+	AgentRateLimit = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 60}
 )
 
 type RateLimitPolicy struct {
