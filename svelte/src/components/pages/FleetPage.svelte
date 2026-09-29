@@ -5,6 +5,8 @@
 	import { formatBytes } from '../../lib/stats-history';
 	import { formatPorts } from '../../lib/format';
 	import AddServerPanel from '../fleet/AddServerPanel.svelte';
+	import Icon from '../ui/Icon.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	const fleet = createFleetStore();
 
@@ -12,6 +14,47 @@
 	let fleetTab = $state<Tab>('overview');
 
 	let containerSearch = $state('');
+
+	// Instance card actions (admin-only): remove + test connection.
+	let instanceMenuOpen = $state<string | null>(null);
+	let removeTarget = $state<{ id: string; name: string } | null>(null);
+	let removing = $state(false);
+	let testingId = $state<string | null>(null);
+	let testResult = $state<{ id: string; ok: boolean; message: string } | null>(null);
+
+	function canManage(id: string): boolean {
+		return $isAdmin && id !== 'local';
+	}
+
+	async function removeInstance() {
+		if (!removeTarget) return;
+		removing = true;
+		try {
+			await api.delete(`/instances/${removeTarget.id}`);
+			addToast(`Server "${removeTarget.name}" removed`, 'success');
+			removeTarget = null;
+			instanceMenuOpen = null;
+			await fleet.fetchMetrics();
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Failed to remove server', 'error');
+		} finally {
+			removing = false;
+		}
+	}
+
+	async function testInstance(id: string) {
+		testingId = id;
+		testResult = null;
+		try {
+			const res = await api.post<{ status: string; message: string }>(`/instances/${id}/test`);
+			testResult = { id, ok: res.status === 'ok', message: res.message };
+		} catch (e) {
+			testResult = { id, ok: false, message: e instanceof Error ? e.message : 'Test failed' };
+		} finally {
+			testingId = null;
+			instanceMenuOpen = null;
+		}
+	}
 
 	// Bulk deploy form + logs (operator-only tab)
 	let bulkDeployForm = $state({ name: '', compose: '', targets: [] as string[] });
@@ -208,14 +251,59 @@
 								</p>
 							</div>
 
-							<div class="text-right">
+							<div class="flex items-center gap-2">
 								<span
 									class={`text-xs font-semibold px-2 py-0.5 rounded ${fleet.isOnline(inst) ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}
 								>
 									{fleet.isOnline(inst) ? 'ONLINE' : 'OFFLINE'}
 								</span>
+								{#if canManage(inst.id)}
+									<div class="relative">
+										<button
+											class="p-1.5 rounded-sm text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+											title="Server actions"
+											aria-label="Server actions for {inst.id === 'local' ? 'This Server' : inst.name}"
+											onclick={() => (instanceMenuOpen = instanceMenuOpen === inst.id ? null : inst.id)}
+										>
+											<Icon name="settings" class="w-4 h-4" />
+										</button>
+										{#if instanceMenuOpen === inst.id}
+											<!-- Backdrop to close the menu -->
+											<button
+												class="fixed inset-0 z-40 cursor-default"
+												aria-label="Close menu"
+												onclick={() => (instanceMenuOpen = null)}
+											></button>
+											<div class="absolute right-0 top-9 z-50 w-44 bg-zinc-900 border border-zinc-700 rounded-sm shadow-lg py-1">
+												<button
+													class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
+													disabled={testingId === inst.id}
+													onclick={() => testInstance(inst.id)}
+												>
+													<Icon name="restart" class="w-4 h-4" />
+													{testingId === inst.id ? 'Testing…' : 'Test connection'}
+												</button>
+												<button
+													class="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 hover:text-red-300 flex items-center gap-2"
+													onclick={() => { removeTarget = { id: inst.id, name: inst.id === 'local' ? 'This Server' : inst.name }; }}
+												>
+													<Icon name="trash" class="w-4 h-4" />
+													Remove server
+												</button>
+											</div>
+										{/if}
+									</div>
+								{/if}
 							</div>
 						</div>
+
+						{#if testResult && testResult.id === inst.id}
+							<div
+								class={`mt-3 px-3 py-2 rounded-sm text-xs border ${testResult.ok ? 'bg-emerald-400/10 border-emerald-400/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}
+							>
+								{testResult.ok ? '✓' : '✕'} {testResult.message}
+							</div>
+						{/if}
 
 						<!-- Gauges (only if online) -->
 						{#if fleet.isOnline(inst)}
@@ -503,3 +591,13 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDialog
+	open={removeTarget !== null}
+	title="Remove server"
+	message={`Remove server "${removeTarget?.name ?? ''}" from Dockpal? This disconnects the agent and deletes the instance record. Containers on that server keep running, but it will no longer be managed or monitored from here. This cannot be undone.`}
+	confirmLabel="Remove"
+	busy={removing}
+	onconfirm={removeInstance}
+	onclose={() => (removeTarget = null)}
+/>
