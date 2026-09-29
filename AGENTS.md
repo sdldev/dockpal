@@ -42,7 +42,7 @@ make dev                # build + run on :3012, data in .data/
 make dev-watch          # same, hot-reload on *.go via reflex (frontend still needs a rebuild)
 make test               # go test -v ./...
 make lint               # go vet ./...
-make install-hooks      # pre-commit hook running vet + tests
+make install-hooks      # pre-commit hook: vet+build+test on staged *.go, svelte-check on staged svelte/**
 
 make svelte-dev         # Vite on :5173, proxies /api (incl. WS) to :3012 — use this for SPA work
 make svelte-build       # vite build → svelte/dist

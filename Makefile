@@ -72,19 +72,35 @@ lint:
 install-hooks:
 	@echo "Installing pre-commit hook..."
 	@mkdir -p .git/hooks
-	@echo '#!/bin/sh' > .git/hooks/pre-commit
-	@echo 'echo "🔍 Running pre-commit verification..."' >> .git/hooks/pre-commit
-	@echo 'go vet ./...' >> .git/hooks/pre-commit
-	@echo 'if [ $$? -ne 0 ]; then' >> .git/hooks/pre-commit
-	@echo '    echo "❌ [Pre-Commit] Go vet failed. Commit aborted."' >> .git/hooks/pre-commit
-	@echo '    exit 1' >> .git/hooks/pre-commit
-	@echo 'fi' >> .git/hooks/pre-commit
-	@echo 'go test ./...' >> .git/hooks/pre-commit
-	@echo 'if [ $$? -ne 0 ]; then' >> .git/hooks/pre-commit
-	@echo '    echo "❌ [Pre-Commit] Go tests failed. Commit aborted."' >> .git/hooks/pre-commit
-	@echo '    exit 1' >> .git/hooks/pre-commit
-	@echo 'fi' >> .git/hooks/pre-commit
-	@echo 'echo "✅ [Pre-Commit] All verification passed. Committing..."' >> .git/hooks/pre-commit
+	@{ \
+	  echo '#!/bin/sh'; \
+	  echo '# Pre-commit verification mirroring CI (see .github/workflows/ci.yml).'; \
+	  echo '# Bypass in emergencies with: git commit --no-verify'; \
+	  echo 'set -e'; \
+	  echo 'echo "🔍 Running pre-commit verification..."'; \
+	  echo ''; \
+	  echo '# Go files staged -> vet, build, test'; \
+	  echo 'if git diff --cached --name-only --diff-filter=ACM | grep -q "\.go$$"; then'; \
+	  echo '    echo "▶ go vet..."'; \
+	  echo '    go vet ./... || { echo "❌ [Pre-Commit] Go vet failed. Commit aborted."; exit 1; }'; \
+	  echo '    echo "▶ go build (catches go:embed issues like web/svelteDist)..."'; \
+	  echo '    go build -o /dev/null . || { echo "❌ [Pre-Commit] Go build failed. Commit aborted."; exit 1; }'; \
+	  echo '    echo "▶ go test..."'; \
+	  echo '    go test ./... || { echo "❌ [Pre-Commit] Go tests failed. Commit aborted."; exit 1; }'; \
+	  echo 'fi'; \
+	  echo ''; \
+	  echo '# Svelte files staged -> type check (skip silently if deps not installed)'; \
+	  echo 'if git diff --cached --name-only --diff-filter=ACM | grep -q "^svelte/"; then'; \
+	  echo '    if [ -d svelte/node_modules ]; then'; \
+	  echo '        echo "▶ svelte-check..."'; \
+	  echo '        (cd svelte && npm run check) || { echo "❌ [Pre-Commit] svelte-check failed. Commit aborted."; exit 1; }'; \
+	  echo '    else'; \
+	  echo '        echo "⚠️  [Pre-Commit] svelte/node_modules missing; skipping svelte-check (run: cd svelte && npm ci)"'; \
+	  echo '    fi'; \
+	  echo 'fi'; \
+	  echo ''; \
+	  echo 'echo "✅ [Pre-Commit] All verification passed. Committing..."'; \
+	} > .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 	@echo "Pre-commit hook installed successfully."
 
