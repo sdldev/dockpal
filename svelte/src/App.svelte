@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, getToken, clearToken } from './lib/api/client';
-  import { currentUser, currentPage, selectedInstance } from './lib/store';
+  import { currentUser, currentPage, selectedInstance, sidebarOpen, navTitle } from './lib/store';
   import { initRouter, navigate } from './lib/router';
   import type { User } from './lib/types/api';
   import Login from './components/pages/Login.svelte';
@@ -15,8 +15,9 @@
   import StacksPage from './components/pages/StacksPage.svelte';
   import ComposePage from './components/pages/ComposePage.svelte';
   import FleetPage from './components/pages/FleetPage.svelte';
+  import NavHeader from './components/layout/NavHeader.svelte';
 
-  let initialized = false;
+  let initialized = $state(false);
 
   async function loadUser() {
     const token = getToken();
@@ -42,6 +43,30 @@
     navigate('dashboard', {}, true);
   }
 
+  // Sidebar: open by default on desktop, closed on mobile (evaluated once
+  // at app start so innerWidth is measured after hydration, not at import).
+  $effect.pre(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      sidebarOpen.set(false);
+    }
+  });
+
+  // Navheader title follows the active page (pages keep their own internal
+  // sub-headings; the top-level title/description now lives only here).
+  const pageTitles: Record<string, string> = {
+    dashboard: 'Dashboard',
+    fleet: 'Servers',
+    stacks: 'Stacks',
+    compose: 'Compose',
+    containers: 'Containers',
+    'container-detail': 'Container',
+    integrations: 'Integrations',
+    settings: 'Settings'
+  };
+  $effect(() => {
+    navTitle.set(pageTitles[$currentPage] ?? 'Dashboard');
+  });
+
   onMount(() => {
     loadUser();
     initRouter();
@@ -62,33 +87,51 @@
   <Login />
 {:else}
   <div class="flex min-h-screen">
-    <Sidebar currentRoute={$currentPage} logout={logout} />
-    <main class="flex-1 p-6 overflow-auto">
-      <!-- Remount the current page when the selected instance changes so
-           instance-scoped pages (Dashboard, Stacks, Compose...) re-fetch
-           instead of showing stale data from the previous server. -->
-      {#key $selectedInstance}
-        {#if $currentPage === 'dashboard'}
-          <Dashboard />
-        {:else if $currentPage === 'fleet'}
-          <FleetPage />
-        {:else if $currentPage === 'containers'}
-          <ContainersPage />
-        {:else if $currentPage === 'settings'}
-          <SettingsPage />
-        {:else if $currentPage === 'integrations'}
-          <IntegrationsPage />
-        {:else if $currentPage === 'stacks'}
-          <StacksPage />
-        {:else if $currentPage === 'compose'}
-          <ComposePage />
-        {:else if $currentPage === 'container-detail'}
-          <ContainerPage />
-        {:else}
-          <div class="text-zinc-500">Page not found</div>
-        {/if}
-      {/key}
-    </main>
+    <!-- Sidebar: overlay on all breakpoints when open; toggled from the
+         hamburger in the navheader (fully off-screen when closed). -->
+    {#if $sidebarOpen}
+      <!-- Backdrop (mobile only; desktop content stays behind the sidebar) -->
+      <button
+        class="fixed inset-0 z-40 bg-black/60 lg:hidden"
+        aria-label="Close sidebar"
+        onclick={() => sidebarOpen.set(false)}
+      ></button>
+      <div
+        class="fixed inset-y-0 left-0 z-50 w-64 lg:static lg:z-0 lg:h-screen lg:sticky lg:top-0 transition-transform duration-200"
+      >
+        <Sidebar currentRoute={$currentPage} logout={logout} />
+      </div>
+    {/if}
+
+    <div class="flex-1 flex flex-col min-w-0 min-h-screen">
+      <NavHeader />
+      <main class="flex-1 p-4 sm:p-6 overflow-auto">
+        <!-- Remount the current page when the selected instance changes so
+             instance-scoped pages (Dashboard, Stacks, Compose...) re-fetch
+             instead of showing stale data from the previous server. -->
+        {#key $selectedInstance}
+          {#if $currentPage === 'dashboard'}
+            <Dashboard />
+          {:else if $currentPage === 'fleet'}
+            <FleetPage />
+          {:else if $currentPage === 'containers'}
+            <ContainersPage />
+          {:else if $currentPage === 'settings'}
+            <SettingsPage />
+          {:else if $currentPage === 'integrations'}
+            <IntegrationsPage />
+          {:else if $currentPage === 'stacks'}
+            <StacksPage />
+          {:else if $currentPage === 'compose'}
+            <ComposePage />
+          {:else if $currentPage === 'container-detail'}
+            <ContainerPage />
+          {:else}
+            <div class="text-zinc-500">Page not found</div>
+          {/if}
+        {/key}
+      </main>
+    </div>
   </div>
 {/if}
 

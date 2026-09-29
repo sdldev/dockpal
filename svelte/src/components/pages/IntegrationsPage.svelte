@@ -10,11 +10,6 @@
 </script>
 
 <div class="space-y-4">
-	<div>
-		<h2 class="text-lg font-semibold text-white">Integrations</h2>
-		<p class="text-sm text-zinc-500">Webhooks and domain routing for your services</p>
-	</div>
-
 	<div class="flex gap-1 border-b border-zinc-800">
 		{#each tabs as tab}
 			<button

@@ -124,30 +124,20 @@
 </script>
 
 <div class="space-y-6">
-  <div>
-    <h2 class="text-lg font-semibold text-white">Dashboard</h2>
-    <p class="text-sm text-zinc-500">
-      {#if sysInfo}
-        Server: {sysInfo.hostname} • Docker {sysInfo.docker_version} • {sysInfo.cpu_cores} cores
-      {:else}
-        Overview of containers and services
-      {/if}
-    </p>
-    {#if stale}
-      <div
-        class="mt-3 inline-flex items-center gap-2 px-3 py-1.5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-sm"
-        role="status"
-        aria-live="polite"
-      >
-        <span aria-hidden="true">⚠</span>
-        <span>
-          Live data unavailable — showing last known values{lastSuccessAt
-            ? ` (updated ${staleAgeLabel} ago)`
-            : ''}. Polling will resume automatically when the server responds.
-        </span>
-      </div>
-    {/if}
-  </div>
+  {#if stale}
+    <div
+      class="inline-flex items-center gap-2 px-3 py-1.5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-sm"
+      role="status"
+      aria-live="polite"
+    >
+      <span aria-hidden="true">⚠</span>
+      <span>
+        Live data unavailable — showing last known values{lastSuccessAt
+          ? ` (updated ${staleAgeLabel} ago)`
+          : ''}. Polling will resume automatically when the server responds.
+      </span>
+    </div>
+  {/if}
 
   <div class="grid gap-4 md:grid-cols-2">
     <HealthWidget />

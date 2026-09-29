@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { ComponentProps } from 'svelte';
-  import { currentUser, isAdmin, isOperator, selectedInstance } from '../../lib/store';
+  import { currentUser, isAdmin, isOperator, selectedInstance, sidebarOpen } from '../../lib/store';
   import { navigate } from '../../lib/router';
   import { listInstances } from '$lib/api/stacks';
   import type { InstanceListItem } from '$lib/types/api';
@@ -88,6 +88,14 @@
   async function handleLogout() {
     logout?.();
   }
+
+  // On mobile the sidebar is an overlay; navigate should close it.
+  function handleNavigate(id: string) {
+    navigate(id);
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      sidebarOpen.set(false);
+    }
+  }
 </script>
 
 <aside class="w-60 border-r border-zinc-800 bg-zinc-900 p-4 flex flex-col min-h-screen">
@@ -128,7 +136,7 @@
     {#each visibleNav as item (item.id)}
       {#if currentRoute === item.id}
         <button
-          onclick={() => navigate(item.id)}
+          onclick={() => handleNavigate(item.id)}
           class="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm transition-colors bg-zinc-800 text-white"
           aria-current={currentRoute === item.id ? 'page' : undefined}
         >
@@ -137,7 +145,7 @@
         </button>
       {:else}
         <button
-          onclick={() => navigate(item.id)}
+          onclick={() => handleNavigate(item.id)}
           class="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm transition-colors text-zinc-400 hover:text-white hover:bg-zinc-800"
         >
           <span class="shrink-0"><Icon name={item.icon} class="w-4.5 h-4.5" /></span>

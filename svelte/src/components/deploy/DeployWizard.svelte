@@ -23,7 +23,11 @@
   type Tab = (typeof tabs)[number];
 
   let activeTab = $state<Tab>('environment');
-  let mode = $state<'template' | 'custom'>(custom ? 'custom' : 'template');
+  let mode = $state<'template' | 'custom'>('template');
+  $effect.pre(() => {
+    // Derive initial mode once from the prop; later changes stay manual.
+    if (mode === 'template' && custom) mode = 'custom';
+  });
 
   // Shared
   let serviceName = $state('');
@@ -319,7 +323,7 @@
 
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-medium text-zinc-400">Environment Variables</label>
+            <span id="env-vars-label" class="block text-xs font-medium text-zinc-400">Environment Variables</span>
             <button onclick={addEnvRow} class="text-xs text-blue-400 hover:text-blue-300">+ Add</button>
           </div>
           <div class="space-y-2">
@@ -345,7 +349,7 @@
 
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-medium text-zinc-400">Volumes</label>
+            <span class="block text-xs font-medium text-zinc-400">Volumes</span>
             <button onclick={addVolumeRow} class="text-xs text-blue-400 hover:text-blue-300">+ Add</button>
           </div>
           <div class="space-y-2">
@@ -394,7 +398,7 @@
       {#if mode === 'custom'}
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label class="block text-xs font-medium text-zinc-400">Port Mappings</label>
+            <span class="block text-xs font-medium text-zinc-400">Port Mappings</span>
             <button onclick={addPortRow} class="text-xs text-blue-400 hover:text-blue-300">+ Add</button>
           </div>
           <div class="space-y-2">

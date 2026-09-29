@@ -30,6 +30,26 @@ export const currentPage = writable<string>('dashboard');
 // Selected compose stack name (stacks ↔ compose page navigation)
 export const currentStackName = writable<string | null>(null);
 
+// Sidebar visibility. Desktop toggles it fully off (hamburger brings it
+// back); on mobile it slides in as an overlay from the hamburger button.
+// Default open on desktop (window.innerWidth evaluated once at app start,
+// not at module import, so the measurement happens after hydration).
+export const sidebarOpen = writable<boolean>(true);
+
+// Current page title shown in the navheader (set by each page, or derived
+// from the route id when a page doesn't set one).
+export const navTitle = writable<string>('Dashboard');
+
+// Server status summary for the navheader right side (instance + docker).
+export interface NavServerStatus {
+	hostname: string;
+	os: string;
+	dockerVersion: string;
+	cpuCores: number;
+	online: boolean;
+}
+export const navServerStatus = writable<NavServerStatus | null>(null);
+
 // Template staged for a new stack (Stacks → Catalog → "New stack from this").
 // ComposePage consumes and clears it in add-mode.
 export const pendingTemplate = writable<Template | null>(null);

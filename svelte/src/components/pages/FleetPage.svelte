@@ -177,12 +177,8 @@
 </script>
 
 <div class="space-y-6">
-	<!-- Page Header -->
-	<div class="flex items-center justify-between">
-		<div>
-			<h2 class="text-xl font-semibold text-white">Servers</h2>
-			<p class="text-sm text-zinc-500 mt-0.5">Real-time status and deployment management across all Docker hosts</p>
-		</div>
+	<!-- Tabs (page title lives in the navheader now) -->
+	<div class="flex items-center justify-end">
 		<div class="flex gap-2">
 			{#each tabs as tab}
 				{#if (!tab.operatorOnly || $isOperator) && (!tab.adminOnly || $isAdmin)}

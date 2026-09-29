@@ -73,10 +73,6 @@
 </script>
 
 <div class="space-y-4">
-	<div>
-		<h2 class="text-lg font-semibold text-white">Containers</h2>
-	</div>
-
 	<div class="flex gap-1 border-b border-zinc-800">
 		{#each tabs as tab}
 			<button

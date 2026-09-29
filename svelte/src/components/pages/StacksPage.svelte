@@ -80,34 +80,28 @@
 </script>
 
 <div class="max-w-6xl">
-  <div class="mb-6 flex items-center justify-between">
-    <div>
-      <h1 class="text-2xl font-bold text-white">Stacks</h1>
-      <p class="mt-1 text-sm text-zinc-400">Compose.yaml stacks and one-click app catalog</p>
-    </div>
-    <div class="flex items-center gap-3">
-      <label class="flex items-center gap-2 text-sm text-zinc-400">
-        Instance
-        <select
-          class="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
-          value={$selectedInstance}
-          onchange={onInstanceChange}
-        >
-          <option value="local">local (this host)</option>
-          {#each instances as inst (inst.id)}
-            <option value={inst.id} disabled={inst.status === 'offline'}>
-              {inst.name} ({inst.status})
-            </option>
-          {/each}
-        </select>
-      </label>
-      <button
-        class="rounded-sm bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        onclick={createStack}
+  <div class="mb-6 flex items-center justify-end gap-3">
+    <label class="flex items-center gap-2 text-sm text-zinc-400">
+      Instance
+      <select
+        class="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+        value={$selectedInstance}
+        onchange={onInstanceChange}
       >
-        + Create Stack
-      </button>
-    </div>
+        <option value="local">local (this host)</option>
+        {#each instances as inst (inst.id)}
+          <option value={inst.id} disabled={inst.status === 'offline'}>
+            {inst.name} ({inst.status})
+          </option>
+        {/each}
+      </select>
+    </label>
+    <button
+      class="rounded-sm bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+      onclick={createStack}
+    >
+      + Create Stack
+    </button>
   </div>
 
   <div class="mb-4 flex gap-1 border-b border-zinc-800">

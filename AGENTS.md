@@ -108,13 +108,30 @@ To add a page:
 1. Create `svelte/src/components/pages/MyFeaturePage.svelte`
 2. Import it and add a `$currentPage` branch in `svelte/src/App.svelte`
 3. Add the page-id → path entry to `pagePaths` in `svelte/src/lib/router.ts`
-4. Add a sidebar entry in `svelte/src/lib/store.ts` if it belongs in navigation
+4. Add a sidebar entry in `svelte/src/components/layout/Sidebar.svelte` (`nav` array) if it
+   belongs in navigation
+
+Current sidebar IA (post-simplification, see commit `fa1a045`): **6 items** —
+Dashboard, Servers (multi-instance only, was "Fleet"), Stacks, Containers,
+Integrations, Settings. Features consolidated as **tabs inside pages** rather
+than top-level entries: Stacks hosts My Stacks + Catalog + Updates; Containers
+hosts Containers + Images; Integrations hosts Webhooks + Domains; Settings
+hosts Profile + Administration (admin-only). Pages embedded as tabs accept a
+`hideHeader` prop so their own heading doesn't duplicate the navheader.
 
 Navigate programmatically with `navigate(page, params)` from `lib/router.ts` — **not**
 `currentPage.set(...)`, which desyncs the URL. Legacy Alpine paths (`/profile`,
 `/registry`, `/deploy`, `/instances`, `/add-instance`) are aliased in `router.ts` so old
 bookmarks keep working. The `$lib` alias must stay in sync between `vite.config.ts` and
 `tsconfig.json`.
+
+Layout (post-navheader, commit TBD): `App.svelte` renders a **collapsible
+sidebar** (store `sidebarOpen` in `lib/store.ts`; toggled by the hamburger in
+`NavHeader`, off-canvas overlay on mobile) plus a sticky `NavHeader.svelte`
+showing the page title (store `navTitle`, derived from `currentPage`) and
+live server status (store `navServerStatus`, polled from
+`/system/info` or `/instances/:id/system/info`). Page-level title/description
+should **not** be re-added inside pages — the navheader owns it.
 
 Reusable UI lives in `svelte/src/components/ui/` (`Button`, `Modal`, `ConfirmDialog`,
 `Icon`) — prefer these over re-implementing; destructive actions go through
