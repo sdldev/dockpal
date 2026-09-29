@@ -19,20 +19,23 @@ const pagePaths: Record<string, string> = {
 	containers: '/containers',
 	'container-detail': '/containers', // dynamic: /containers/:id (see pageToPath)
 	images: '/images',
-	services: '/services',
-	templates: '/templates',
-	webhooks: '/webhooks',
 	apps: '/apps',
+	webhooks: '/webhooks',
 	domains: '/domains',
 	settings: '/settings',
 	admin: '/admin'
 };
 
 // Legacy Alpine paths that map onto SPA pages, so old bookmarks keep working.
+// /services and /templates are IA consolidation aliases: Services merged into
+// the Installed Apps page (Service Records tab), App Installer into the
+// Stacks page (Catalog tab).
 const legacyAliases: Record<string, string> = {
 	'/profile': 'settings',
 	'/registry': 'admin',
-	'/deploy': 'templates',
+	'/deploy': 'stacks',
+	'/templates': 'stacks',
+	'/services': 'apps',
 	'/instances': 'fleet',
 	'/add-instance': 'fleet'
 };

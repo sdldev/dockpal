@@ -1,34 +1,37 @@
 <script lang="ts">
+  // Catalog tab of the Stacks page — one-click app templates plus raw
+  // Compose/Git deploys (the former standalone "App Installer" page).
+  // "Install" runs the DeployWizard directly; "→ Editor" stages the
+  // template's YAML as a new editable stack (pendingTemplate store).
   import { onMount } from 'svelte';
   import { api } from '$lib/api/client';
-  import { templates, selectedInstance, addToast } from '$lib/store';
+  import { templates, selectedInstance, addToast, pendingTemplate, currentStackName } from '$lib/store';
   import type { Template } from '$lib/types/api';
   import Modal from '../ui/Modal.svelte';
   import DeployWizard from '../deploy/DeployWizard.svelte';
   import Button from '../ui/Button.svelte';
+  import { navigate } from '$lib/router';
 
   let loading = $state(true);
   let deployTemplate = $state<Template | null>(null);
   let deployCustom = $state(false);
 
-  // Batch C: add compose/git deployment tabs
-  const tabs = ['templates', 'compose', 'git'] as const;
+  // Deployment sources besides the catalog
+  const tabs = ['catalog', 'compose', 'git'] as const;
   type Tab = (typeof tabs)[number];
-  let activeTab = $state<Tab>('templates');
+  let activeTab = $state<Tab>('catalog');
 
   // Catalog browsing
   let search = $state('');
   let category = $state('all');
 
   // Compose mode form
-  let showComposeForm = $state(false);
   let composeName = $state('');
   let composeDomain = $state('');
   let composeYaml = $state('');
   let composing = $state(false);
 
   // Git mode form
-  let showGitForm = $state(false);
   let gitRepo = $state('');
   let gitBranch = $state('main');
   let gitPath = $state('.');
@@ -72,6 +75,13 @@
     deployCustom = true;
   }
 
+  // Stage the template's compose YAML as a new editable stack.
+  function openInEditor(tpl: Template) {
+    pendingTemplate.set(tpl);
+    currentStackName.set(null);
+    navigate('compose');
+  }
+
   async function submitCompose() {
     if (!composeName.trim()) {
       addToast('Compose name required', 'error');
@@ -89,7 +99,6 @@
         compose: composeYaml.trim()
       });
       addToast('Compose deployed', 'success');
-      showComposeForm = false;
       composeName = '';
       composeYaml = '';
     } catch (e) {
@@ -112,7 +121,6 @@
         path: gitPath.trim()
       });
       addToast('Git deployment triggered', 'success');
-      showGitForm = false;
       gitRepo = '';
       gitBranch = 'main';
       gitPath = '.';
@@ -125,13 +133,6 @@
 </script>
 
 <div class="space-y-4">
-  <div class="flex items-center justify-between">
-    <div>
-      <h2 class="text-lg font-semibold text-white">App Installer</h2>
-      <p class="text-sm text-zinc-500">Deploy from the app catalog, a custom image, Compose YAML, or Git repo</p>
-    </div>
-  </div>
-
   <div class="flex gap-1 border-b border-zinc-800">
     {#each tabs as tab}
       <button
@@ -143,12 +144,12 @@
         class:text-zinc-500={activeTab !== tab}
         class:hover:text-zinc-300={activeTab !== tab}
       >
-        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+        {tab === 'catalog' ? 'Catalog' : tab === 'compose' ? 'Compose YAML' : 'Git Repo'}
       </button>
     {/each}
   </div>
 
-  {#if activeTab === 'templates'}
+  {#if activeTab === 'catalog'}
     <!-- Hero -->
     <div class="bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-purple-600/10 border border-zinc-800 rounded-sm p-5 flex items-center justify-between gap-4">
       <div>
@@ -220,12 +221,21 @@
               {/if}
             </div>
           {/if}
-          <button
-            onclick={() => startDeploy(tpl)}
-            class="w-full py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-xs font-medium transition-colors"
-          >
-            Install
-          </button>
+          <div class="flex gap-2">
+            <button
+              onclick={() => startDeploy(tpl)}
+              class="flex-1 py-2 bg-white hover:bg-zinc-200 text-zinc-900 rounded-sm text-xs font-medium transition-colors"
+            >
+              Install
+            </button>
+            <button
+              onclick={() => openInEditor(tpl)}
+              title="Open this template's compose.yaml in the stack editor"
+              class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 rounded-sm text-xs font-medium transition-colors"
+            >
+              → Editor
+            </button>
+          </div>
         </div>
       {:else}
         <div class="col-span-full text-center py-12 text-zinc-600 text-sm">
@@ -250,13 +260,16 @@
           <label for="compose-yaml" class="block text-xs font-medium text-zinc-400 mb-1">Docker Compose YAML</label>
           <textarea
             bind:value={composeYaml}
-            placeholder="services:\n  web:\n    image: nginx:latest\n    ports:\n      - '80:80'"
+            placeholder="services:
+  web:
+    image: nginx:latest
+    ports:
+      - '80:80'"
             rows="12"
             class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono"
           ></textarea>
         </div>
         <div class="flex justify-end gap-2">
-          <Button variant="secondary" onclick={() => { showComposeForm = !showComposeForm; }}>Cancel</Button>
           <Button type="submit" loading={composing}>Deploy Compose</Button>
         </div>
       </form>
@@ -282,7 +295,6 @@
           </div>
         </div>
         <div class="flex justify-end gap-2">
-          <Button variant="secondary" onclick={() => { showGitForm = !showGitForm; }}>Cancel</Button>
           <Button type="submit" loading={deployingGit}>Deploy Git</Button>
         </div>
       </form>

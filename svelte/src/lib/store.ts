@@ -30,6 +30,10 @@ export const currentPage = writable<string>('dashboard');
 // Selected compose stack name (stacks ↔ compose page navigation)
 export const currentStackName = writable<string | null>(null);
 
+// Template staged for a new stack (Stacks → Catalog → "New stack from this").
+// ComposePage consumes and clears it in add-mode.
+export const pendingTemplate = writable<Template | null>(null);
+
 // Templates cache
 export const templates = writable<Template[]>([]);
 

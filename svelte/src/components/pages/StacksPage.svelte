@@ -1,16 +1,23 @@
 <script lang="ts">
   // Stack list — Dockge-style overview of compose projects with status pills.
   // Instance-aware: the picker targets local or a remote agent instance.
+  // The Catalog tab hosts the former "App Installer" (one-click templates +
+  // raw Compose/Git deploys) so "create something" has one home.
   import { onMount } from 'svelte';
   import { listStacks, listInstances, type Stack, type InstanceListItem } from '$lib/api/stacks';
   import { stackStatusColor } from '$lib/stack-utils';
   import { currentStackName, selectedInstance } from '$lib/store';
   import { navigate } from '$lib/router';
+  import CatalogTab from '../stacks/CatalogTab.svelte';
 
   let stacks = $state<Stack[]>([]);
   let instances = $state<InstanceListItem[]>([]);
   let loading = $state(true);
   let error = $state('');
+
+  const tabs = ['stacks', 'catalog'] as const;
+  type Tab = (typeof tabs)[number];
+  let activeTab = $state<Tab>('stacks');
 
   async function refresh() {
     loading = true;
@@ -71,11 +78,11 @@
   });
 </script>
 
-<div class="max-w-5xl">
+<div class="max-w-6xl">
   <div class="mb-6 flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold text-white">Compose Stacks</h1>
-      <p class="mt-1 text-sm text-zinc-400">Dockge-style compose.yaml + .env stacks</p>
+      <h1 class="text-2xl font-bold text-white">Stacks</h1>
+      <p class="mt-1 text-sm text-zinc-400">Compose.yaml stacks and one-click app catalog</p>
     </div>
     <div class="flex items-center gap-3">
       <label class="flex items-center gap-2 text-sm text-zinc-400">
@@ -102,33 +109,53 @@
     </div>
   </div>
 
-  {#if loading}
-    <div class="text-zinc-500">Loading…</div>
-  {:else if error}
-    <div class="rounded-md border border-red-800 bg-red-900/30 p-4 text-sm text-red-300">{error}</div>
-  {:else if stacks.length === 0}
-    <div class="rounded-md border border-zinc-800 bg-zinc-900 p-8 text-center text-zinc-500">
-      No stacks on this instance yet. Create one to get started.
-    </div>
+  <div class="mb-4 flex gap-1 border-b border-zinc-800">
+    {#each tabs as tab}
+      <button
+        onclick={() => { activeTab = tab; }}
+        class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
+        class:border-white={activeTab === tab}
+        class:text-white={activeTab === tab}
+        class:border-transparent={activeTab !== tab}
+        class:text-zinc-500={activeTab !== tab}
+        class:hover:text-zinc-300={activeTab !== tab}
+      >
+        {tab === 'stacks' ? 'My Stacks' : 'Catalog'}
+      </button>
+    {/each}
+  </div>
+
+  {#if activeTab === 'stacks'}
+    {#if loading}
+      <div class="text-zinc-500">Loading…</div>
+    {:else if error}
+      <div class="rounded-md border border-red-800 bg-red-900/30 p-4 text-sm text-red-300">{error}</div>
+    {:else if stacks.length === 0}
+      <div class="rounded-md border border-zinc-800 bg-zinc-900 p-8 text-center text-zinc-500">
+        No stacks on this instance yet. <button class="text-emerald-400 hover:underline" onclick={createStack}>Create one</button> or browse the Catalog.
+      </div>
+    {:else}
+      <div class="space-y-2">
+        {#each stacks as stack (stack.name)}
+          <button
+            class="flex w-full items-center justify-between rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3 text-left transition-colors hover:border-zinc-600"
+            onclick={() => openStack(stack.name)}
+          >
+            <div class="flex items-center gap-3">
+              <span class="rounded px-2 py-0.5 text-xs font-medium {stackStatusColor(stack.status)}">
+                {stack.status}
+              </span>
+              <span class="font-medium text-white">{stack.name}</span>
+              {#if !stack.managed}
+                <span class="text-xs text-zinc-500">(external)</span>
+              {/if}
+            </div>
+            <span class="text-sm text-zinc-500">{stack.statusText}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
   {:else}
-    <div class="space-y-2">
-      {#each stacks as stack (stack.name)}
-        <button
-          class="flex w-full items-center justify-between rounded-md border border-zinc-800 bg-zinc-900 px-4 py-3 text-left transition-colors hover:border-zinc-600"
-          onclick={() => openStack(stack.name)}
-        >
-          <div class="flex items-center gap-3">
-            <span class="rounded px-2 py-0.5 text-xs font-medium {stackStatusColor(stack.status)}">
-              {stack.status}
-            </span>
-            <span class="font-medium text-white">{stack.name}</span>
-            {#if !stack.managed}
-              <span class="text-xs text-zinc-500">(external)</span>
-            {/if}
-          </div>
-          <span class="text-sm text-zinc-500">{stack.statusText}</span>
-        </button>
-      {/each}
-    </div>
+    <CatalogTab />
   {/if}
 </div>

@@ -1,10 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, clearToken } from '$lib/api/client';
-	import { currentUser, addToast } from '$lib/store';
+	import { currentUser, isAdmin, addToast } from '$lib/store';
 	import { navigate } from '$lib/router';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
+	import AdminPage from './AdminPage.svelte';
+
+	// Administration (the former standalone Admin page) lives here as an
+	// admin-only tab, shrinking the sidebar to user-facing destinations.
+	const tabs = ['profile', 'admin'] as const;
+	type Tab = (typeof tabs)[number];
+	let activeTab = $state<Tab>('profile');
 
 	let user = $state<{ username: string; role: string; created_at: number } | null>(null);
 	let loading = $state(true);
@@ -105,9 +112,32 @@
 
 <div class="space-y-6">
 	<div>
-		<h2 class="text-lg font-semibold text-white">Profile</h2>
+		<h2 class="text-lg font-semibold text-white">Settings</h2>
 		<p class="text-sm text-zinc-500">Manage your account and security settings</p>
 	</div>
+
+	{#if $isAdmin}
+		<div class="flex gap-1 border-b border-zinc-800">
+			{#each tabs as tab}
+				<button
+					onclick={() => { activeTab = tab; }}
+					class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
+					class:border-white={activeTab === tab}
+					class:text-white={activeTab === tab}
+					class:border-transparent={activeTab !== tab}
+					class:text-zinc-500={activeTab !== tab}
+					class:hover:text-zinc-300={activeTab !== tab}
+				>
+					{tab === 'profile' ? 'Profile' : 'Administration'}
+				</button>
+			{/each}
+		</div>
+	{/if}
+
+	{#if activeTab === 'admin' && $isAdmin}
+		<AdminPage />
+	{:else}
+	<div class="space-y-6">
 
 	{#if error && !user}
 		<div class="p-3 bg-red-500/10 border border-red-500/20 rounded-sm">
@@ -205,4 +235,6 @@
 			</div>
 		</div>
 	</Modal>
+	</div>
+	{/if}
 </div>

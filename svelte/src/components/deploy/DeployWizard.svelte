@@ -12,9 +12,12 @@
     custom?: boolean;
     instanceId: string;
     ondone: () => void;
+    // Where the Cancel button returns to (App Installer used to live on its
+    // own page; it is now the Stacks page's Catalog tab).
+    cancelPage?: string;
   }
 
-  let { template = null, custom = false, instanceId, ondone }: Props = $props();
+  let { template = null, custom = false, instanceId, ondone, cancelPage = 'stacks' }: Props = $props();
 
   const tabs = ['environment', 'ports', 'network', 'advanced', 'logs'] as const;
   type Tab = (typeof tabs)[number];
@@ -558,7 +561,7 @@
       variant="secondary"
       onclick={() => {
         cleanup();
-        navigate('templates');
+        navigate(cancelPage);
         ondone();
       }}
     >

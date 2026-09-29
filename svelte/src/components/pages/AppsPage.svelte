@@ -1,10 +1,17 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import { addToast } from '$lib/store';
-	import type { AppSummary, AppUpdateRecord } from '$lib/types/generated';
+	import type { AppSummary, AppUpdateRecord, ServiceRecord } from '$lib/types/generated';
 	import type { Service } from '$lib/types/api';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
+	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+
+	// Installed Apps absorbed the old Services page (same underlying reality:
+	// deployed apps) as a secondary tab, so "what have I deployed?" has one home.
+	const tabs = ['apps', 'services'] as const;
+	type Tab = (typeof tabs)[number];
+	let activeTab = $state<Tab>('apps');
 
 	let apps = $state<AppSummary[]>([]);
 	let loading = $state(true);
@@ -14,9 +21,21 @@
 	let history = $state<AppUpdateRecord[]>([]);
 	let historyLoading = $state(false);
 
+	// Service records (legacy /services bucket, former Services page)
+	let serviceList = $state<ServiceRecord[]>([]);
+	let servicesLoading = $state(false);
+	let servicesLoaded = $state(false);
+	let serviceBusy = $state<string | null>(null);
+	let pendingDelete = $state<ServiceRecord | null>(null);
+
 	// Uninstall
 	let uninstallTarget = $state<string | null>(null);
 	let uninstalling = $state(false);
+
+	function switchTab(tab: Tab) {
+		activeTab = tab;
+		if (tab === 'services' && !servicesLoaded) loadServices();
+	}
 
 	async function load() {
 		loading = true;
@@ -27,6 +46,18 @@
 			error = e instanceof Error ? e.message : 'Failed to load apps';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadServices() {
+		servicesLoading = true;
+		try {
+			serviceList = await api.get<ServiceRecord[]>('/services');
+			servicesLoaded = true;
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Failed to load services', 'error');
+		} finally {
+			servicesLoading = false;
 		}
 	}
 
@@ -112,6 +143,32 @@
 		return state;
 	}
 
+	async function deleteService() {
+		const target = pendingDelete;
+		if (!target) return;
+		serviceBusy = target.id;
+		try {
+			await api.delete(`/services/${target.id}`);
+			addToast('Service deleted', 'success');
+			await loadServices();
+		} catch (e) {
+			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
+		} finally {
+			serviceBusy = null;
+			pendingDelete = null;
+		}
+	}
+
+	function serviceTypeBadge(type: string) {
+		switch (type.toLowerCase()) {
+			case 'running': return 'bg-emerald-400/10 text-emerald-400';
+			case 'stopped': return 'bg-zinc-400/10 text-zinc-400';
+			case 'degraded': return 'bg-amber-400/10 text-amber-400';
+			case 'error': return 'bg-red-400/10 text-red-400';
+			default: return 'bg-blue-400/10 text-blue-400';
+		}
+	}
+
 	function formatTime(ts: number) {
 		return new Date(ts * 1000).toLocaleString('en-US', { hour12: false });
 	}
@@ -129,6 +186,23 @@
 		<p class="text-sm text-zinc-500">Compose projects deployed through the panel</p>
 	</div>
 
+	<div class="flex gap-1 border-b border-zinc-800">
+		{#each tabs as tab}
+			<button
+				onclick={() => switchTab(tab)}
+				class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
+				class:border-white={activeTab === tab}
+				class:text-white={activeTab === tab}
+				class:border-transparent={activeTab !== tab}
+				class:text-zinc-500={activeTab !== tab}
+				class:hover:text-zinc-300={activeTab !== tab}
+			>
+				{tab === 'apps' ? 'Apps' : 'Service Records'}
+			</button>
+		{/each}
+	</div>
+
+	{#if activeTab === 'apps'}
 	<!-- Summary cards -->
 	<div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
 		<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
@@ -218,11 +292,63 @@
 			</div>
 		{:else}
 			<div class="text-center py-12 text-zinc-600 text-sm bg-zinc-900 border border-zinc-800 rounded-sm">
-				{loading ? 'Loading apps...' : 'No installed apps yet — deploy from the App Installer'}
+				{loading ? 'Loading apps...' : 'No installed apps yet — deploy from the Stacks page'}
 			</div>
 		{/each}
 	</div>
+	{:else if activeTab === 'services'}
+	<!-- Service records (former Services page) -->
+	<div class="flex items-center justify-end">
+		<Button variant="secondary" size="sm" onclick={loadServices}>Refresh</Button>
+	</div>
+
+	{#if servicesLoading && !servicesLoaded}
+		<div class="text-center py-12 text-zinc-600 text-sm">Loading services...</div>
+	{:else}
+		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+			{#each serviceList as svc (svc.id)}
+				<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+					<div class="flex items-start justify-between mb-2">
+						<div>
+							<h3 class="text-sm font-semibold text-white">{svc.name}</h3>
+							<span class={`px-2 py-0.5 rounded text-xs font-medium ${serviceTypeBadge(svc.type)}`}>
+								{svc.type}
+							</span>
+						</div>
+						<Button variant="danger" size="sm" disabled={serviceBusy === svc.id} onclick={() => (pendingDelete = svc)}>Delete</Button>
+					</div>
+					{#if svc.domain}
+						<p class="text-xs text-zinc-400 mb-2">
+							Domain: <code class="text-blue-400">{svc.domain}</code>
+						</p>
+					{/if}
+					{#if svc.repo}
+						<p class="text-xs text-zinc-400 mb-2">
+							Repo: <code class="text-blue-400 font-mono">{svc.repo}</code>
+						</p>
+					{/if}
+					<div class="text-xs text-zinc-500 mt-2">
+						Created: {formatTime(svc.created_at)}
+					</div>
+				</div>
+			{:else}
+				<div class="col-span-full text-center py-12 text-zinc-600 text-sm bg-zinc-900 border border-zinc-800 rounded-sm">
+					{servicesLoaded ? 'No service records' : 'Loading services...'}
+				</div>
+			{/each}
+		</div>
+	{/if}
+	{/if}
 </div>
+
+<ConfirmDialog
+	open={pendingDelete !== null}
+	title="Delete service"
+	message={`Delete service ${pendingDelete?.name ?? ''}? This removes its record. This cannot be undone.`}
+	busy={serviceBusy === pendingDelete?.id}
+	onconfirm={deleteService}
+	onclose={() => (pendingDelete = null)}
+/>
 
 <Modal open={historyApp !== null} title={`Update history — ${historyApp ?? ''}`} size="lg" onclose={() => { historyApp = null; }}>
 	{#if historyLoading}

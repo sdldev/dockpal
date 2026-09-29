@@ -24,22 +24,20 @@
   } from '$lib/api/stacks';
   import { yamlToJson, jsonToYaml, envsubstYAML } from '$lib/yaml-sync';
   import { parseEnvFile } from '$lib/stack-utils';
-  import { currentStackName, addToast, isOperator, selectedInstance } from '$lib/store';
+  import { currentStackName, addToast, isOperator, selectedInstance, pendingTemplate } from '$lib/store';
   import { navigate } from '$lib/router';
   import { get } from 'svelte/store';
 
   // Instance this compose page targets (set on the Stacks page picker).
   const instanceId = get(selectedInstance) || 'local';
 
-  const YAML_TEMPLATE = `
-services:
-  nginx:
-    image: nginx:latest
-    restart: unless-stopped
-    ports:
-      - "8080:80"
-`;
-  const ENV_DEFAULT = '# VARIABLE=value #comment';
+  // New stacks start empty: a pre-filled demo service (Dockge's nginx
+  // template) assumed an intent the user almost never had. The editor
+  // shows a hint placeholder instead; templates live in the Stacks →
+  // Catalog tab.
+  const YAML_PLACEHOLDER =
+    '# Write your compose.yaml here — or pick an app from the Catalog tab on the Stacks page';
+  const ENV_PLACEHOLDER = '# VARIABLE=value #comment';
 
   // --- stack state ---
   let stack = $state<Stack & { composeYAML: string; composeENV: string }>({
@@ -203,15 +201,19 @@ services:
     });
     const name = get(currentStackName);
     if (!name) {
-      // Add mode
+      // Add mode — stage a catalog template if one was handed over from the
+      // Stacks → Catalog tab, otherwise start from an empty editor.
+      const tpl = get(pendingTemplate);
+      pendingTemplate.set(null);
       isAdd = true;
       isEditMode = true;
       processing = false;
       stack = {
         name: '', status: 'unknown', statusText: '', managed: true,
-        composeYAML: YAML_TEMPLATE, composeENV: ENV_DEFAULT
+        composeYAML: tpl?.compose ?? '', composeENV: ''
       };
-      yamlCodeChange();
+      yamlCodeChange(); // populate jsonConfig first…
+      if (tpl) fillDefaultStackName(); // …so the default name can be derived
     } else {
       loadStack(name);
     }
@@ -599,6 +601,7 @@ services:
           <CodeMirrorEditor
             value={stack.composeYAML}
             disabled={!isEditMode}
+            placeholder={isAdd ? YAML_PLACEHOLDER : ''}
             onchange={onEditorChange}
             onfocuschange={onFocusChange}
           />
@@ -619,6 +622,7 @@ services:
             <CodeMirrorEditor
               value={stack.composeENV}
               disabled={!isEditMode}
+              placeholder={ENV_PLACEHOLDER}
               onchange={onEnvChange}
               onfocuschange={onFocusChange}
             />

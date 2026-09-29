@@ -8,10 +8,8 @@
   import Sidebar from './components/layout/Sidebar.svelte';
   import ToastContainer from './components/layout/ToastContainer.svelte';
   import Dashboard from './components/pages/Dashboard.svelte';
-  import TemplatesPage from './components/pages/TemplatesPage.svelte';
   import ContainersPage from './components/pages/ContainersPage.svelte';
   import ImagesPage from './components/pages/ImagesPage.svelte';
-  import ServicesPage from './components/pages/ServicesPage.svelte';
   import SettingsPage from './components/pages/SettingsPage.svelte';
   import AdminPage from './components/pages/AdminPage.svelte';
   import WebhooksPage from './components/pages/WebhooksPage.svelte';
@@ -78,14 +76,10 @@
           <Dashboard />
         {:else if $currentPage === 'fleet'}
           <FleetPage />
-        {:else if $currentPage === 'templates'}
-          <TemplatesPage />
         {:else if $currentPage === 'containers'}
           <ContainersPage />
         {:else if $currentPage === 'images'}
           <ImagesPage />
-        {:else if $currentPage === 'services'}
-          <ServicesPage />
         {:else if $currentPage === 'settings'}
           <SettingsPage />
         {:else if $currentPage === 'admin'}

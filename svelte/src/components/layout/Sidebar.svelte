@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { ComponentProps } from 'svelte';
   import { currentUser, isAdmin, isOperator, selectedInstance } from '../../lib/store';
   import { navigate } from '../../lib/router';
   import { listInstances } from '$lib/api/stacks';
   import type { InstanceListItem } from '$lib/types/api';
+  import Icon from '../ui/Icon.svelte';
 
   interface Props {
     currentRoute?: string;
@@ -12,7 +14,9 @@
 
   let { currentRoute = 'dashboard', logout }: Props = $props();
 
-  // Instance list for the server selector (legacy sidebar parity)
+  // Instance list for the server selector — also drives Fleet visibility:
+  // single-server users (the majority) never need it, so the item only
+  // appears once a second instance exists.
   let instances = $state<InstanceListItem[]>([]);
 
   onMount(async () => {
@@ -31,6 +35,8 @@
       instances = [];
     }
   });
+
+  const showFleet = $derived(instances.length > 1);
 
   function onInstanceChange(e: Event) {
     const id = (e.target as HTMLSelectElement).value;
@@ -53,31 +59,35 @@
   interface NavItem {
     id: string;
     label: string;
-    icon: string;
+    icon: ComponentProps<typeof Icon>['name'];
     role?: MinRole; // undefined = everyone (viewer+)
+    visible?: () => boolean; // undefined = always visible
   }
 
   const nav: NavItem[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'fleet', label: 'Fleet', icon: '🛰️' },
-    { id: 'stacks', label: 'Compose Stacks', icon: '🗂' },
-    { id: 'containers', label: 'Containers', icon: '🐳' },
-    { id: 'images', label: 'Images', icon: '🗄️' },
-    { id: 'services', label: 'Services', icon: '🧩' },
-    { id: 'templates', label: 'App Installer', icon: '📦' },
-    { id: 'webhooks', label: 'Webhooks', icon: '🪝', role: 'operator' },
-    { id: 'domains', label: 'Domains', icon: '🌐', role: 'operator' },
-    { id: 'apps', label: 'Installed Apps', icon: '🚀', role: 'viewer' },
-    { id: 'settings', label: 'Settings', icon: '⚙️' },
-    { id: 'admin', label: 'Admin', icon: '🛡️', role: 'admin' }
+    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { id: 'fleet', label: 'Fleet', icon: 'fleet', visible: () => showFleet },
+    { id: 'stacks', label: 'Stacks', icon: 'stacks' },
+    { id: 'containers', label: 'Containers', icon: 'containers' },
+    { id: 'images', label: 'Images', icon: 'images' },
+    { id: 'apps', label: 'Installed Apps', icon: 'apps' },
+    { id: 'webhooks', label: 'Webhooks', icon: 'webhooks', role: 'operator' },
+    { id: 'domains', label: 'Domains', icon: 'domains', role: 'operator' },
+    { id: 'settings', label: 'Settings', icon: 'settings' },
+    { id: 'admin', label: 'Admin', icon: 'admin', role: 'admin' }
   ];
 
-  function canSee(item: NavItem, admin: boolean, operator: boolean): boolean {
-    if (!item.role) return true;
-    if (item.role === 'admin') return admin;
-    if (item.role === 'operator') return operator;
-    return true;
-  }
+  // Recomputed whenever instances/roles change so Fleet appears/disappears
+  // live as remote instances are added or removed.
+  const visibleNav = $derived(
+    nav.filter((item) => {
+      if (item.visible && !item.visible()) return false;
+      if (!item.role) return true;
+      if (item.role === 'admin') return $isAdmin;
+      if (item.role === 'operator') return $isOperator;
+      return true;
+    })
+  );
 
   async function handleLogout() {
     logout?.();
@@ -107,13 +117,14 @@
   </div>
 
   <nav class="flex-1 space-y-1">
-    {#each nav.filter((item) => canSee(item, $isAdmin, $isOperator)) as item}
+    {#each visibleNav as item (item.id)}
       {#if currentRoute === item.id}
         <button
           onclick={() => navigate(item.id)}
           class="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm transition-colors bg-zinc-800 text-white"
+          aria-current={currentRoute === item.id ? 'page' : undefined}
         >
-          <span>{item.icon}</span>
+          <span class="shrink-0"><Icon name={item.icon} class="w-4.5 h-4.5" /></span>
           <span>{item.label}</span>
         </button>
       {:else}
@@ -121,7 +132,7 @@
           onclick={() => navigate(item.id)}
           class="w-full flex items-center gap-3 px-3 py-2 rounded-sm text-sm transition-colors text-zinc-400 hover:text-white hover:bg-zinc-800"
         >
-          <span>{item.icon}</span>
+          <span class="shrink-0"><Icon name={item.icon} class="w-4.5 h-4.5" /></span>
           <span>{item.label}</span>
         </button>
       {/if}
@@ -136,9 +147,10 @@
       </div>
       <button
         onclick={handleLogout}
-        class="w-full px-3 py-2 text-left text-sm text-zinc-400 hover:text-white rounded-sm hover:bg-zinc-800 transition-colors"
+        class="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-zinc-400 hover:text-white rounded-sm hover:bg-zinc-800 transition-colors"
       >
-        Logout
+        <span class="shrink-0"><Icon name="logout" class="w-4.5 h-4.5" /></span>
+        <span>Logout</span>
       </button>
     {:else}
       <a href="/login" class="block text-center px-3 py-2 rounded-sm bg-white text-zinc-900 hover:bg-zinc-200 transition-colors mt-4">
