@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { createFleetStore, isOperator, addToast } from '../../lib/store';
+	import { createFleetStore, isAdmin, isOperator, addToast } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
 	import { formatBytes } from '../../lib/stats-history';
 	import { formatPorts } from '../../lib/format';
+	import AddServerPanel from '../fleet/AddServerPanel.svelte';
 
 	const fleet = createFleetStore();
 
-	type Tab = 'overview' | 'containers' | 'bulk-deploy';
+	type Tab = 'overview' | 'containers' | 'bulk-deploy' | 'add-server';
 	let fleetTab = $state<Tab>('overview');
 
 	let containerSearch = $state('');
@@ -124,10 +125,11 @@
 		return total > 0 ? (value / total) * 100 : 0;
 	}
 
-	const tabs: Array<{ id: Tab; label: string; operatorOnly?: boolean }> = [
+	const tabs: Array<{ id: Tab; label: string; operatorOnly?: boolean; adminOnly?: boolean }> = [
 		{ id: 'overview', label: 'Overview' },
 		{ id: 'containers', label: 'All Containers' },
-		{ id: 'bulk-deploy', label: 'Bulk Deploy', operatorOnly: true }
+		{ id: 'bulk-deploy', label: 'Bulk Deploy', operatorOnly: true },
+		{ id: 'add-server', label: '+ Add Server', adminOnly: true }
 	];
 </script>
 
@@ -140,7 +142,7 @@
 		</div>
 		<div class="flex gap-2">
 			{#each tabs as tab}
-				{#if !tab.operatorOnly || $isOperator}
+				{#if (!tab.operatorOnly || $isOperator) && (!tab.adminOnly || $isAdmin)}
 					<button
 						onclick={() => (fleetTab = tab.id)}
 						class={`px-4 py-2 rounded-sm text-sm font-medium transition-all ${fleetTab === tab.id ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'}`}
@@ -490,5 +492,14 @@
 				<p class="text-sm text-zinc-500">Bulk deployment requires an operator or admin role.</p>
 			</div>
 		{/if}
+	{:else if fleetTab === 'add-server'}
+		<!-- Add Server Tab (admin only) -->
+		<div class="space-y-4">
+			<p class="text-sm text-zinc-500">
+				Register a remote Docker host and install the dockpal-agent on it. Once the agent
+				connects, the server appears in the selector and the fleet overview.
+			</p>
+			<AddServerPanel />
+		</div>
 	{/if}
 </div>

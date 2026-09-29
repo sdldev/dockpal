@@ -40,6 +40,25 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
+			// Browser WebSocket handshakes cannot send custom headers, so
+			// browser WS clients pass the JWT as a ?token= query param
+			// (documented contract; see the deploy/install WS routes). Only
+			// honored for actual upgrade requests so normal API calls can't
+			// leak tokens into URLs.
+			if isWebSocketUpgrade(c.Request) {
+				if q := c.Query("token"); q != "" {
+					if claims, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database); err == nil {
+						c.Set("user_id", claims.UserID)
+						c.Set("username", claims.Username)
+						c.Set("role", claims.Role)
+						c.Next()
+						return
+					}
+					c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+					c.Abort()
+					return
+				}
+			}
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
 			c.Abort()
 			return
@@ -65,6 +84,20 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 		c.Set("role", claims.Role)
 		c.Next()
 	}
+}
+
+// isWebSocketUpgrade reports whether the request is a WebSocket handshake
+// (Connection: Upgrade + Upgrade: websocket), case-insensitively per RFC 6455.
+func isWebSocketUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, v := range strings.Split(r.Header.Get("Connection"), ",") {
+		if strings.EqualFold(strings.TrimSpace(v), "upgrade") {
+			return true
+		}
+	}
+	return false
 }
 
 func RequireRole(requiredRole string) gin.HandlerFunc {

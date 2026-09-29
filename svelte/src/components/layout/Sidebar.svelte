@@ -100,7 +100,10 @@
     <p class="text-xs text-zinc-500 mt-0.5">Docker Management</p>
   </div>
 
-  <!-- Instance / server selector (legacy sidebar parity) -->
+  <!-- Instance / server selector (legacy sidebar parity). The "+ Add Server"
+       link only shows to admins while the Fleet item is hidden (single
+       instance) — it is the discoverable entry point to the multi-server
+       flow before a second instance exists. -->
   <div class="px-1 pb-4 mb-2 border-b border-zinc-800">
     <select
       aria-label="Select server"
@@ -114,6 +117,14 @@
         <option value="local">⚙️ This Server</option>
       {/each}
     </select>
+    {#if $isAdmin && !showFleet}
+      <button
+        onclick={() => navigate('fleet')}
+        class="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm text-xs text-zinc-500 hover:text-white hover:bg-zinc-800 border border-dashed border-zinc-800 hover:border-zinc-600 transition-colors"
+      >
+        <span class="text-sm leading-none">+</span> Add Server
+      </button>
+    {/if}
   </div>
 
   <nav class="flex-1 space-y-1">

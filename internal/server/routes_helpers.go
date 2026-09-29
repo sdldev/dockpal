@@ -409,7 +409,14 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 
 		c.Set("jwt_secret", jwtSecret)
 		c.Set("database", database)
-		if !authenticateWebSocketFirstMessage(conn, c) {
+		// Auth: ?token= query param (browser WS can't set headers) or, as a
+		// fallback for API clients, a JSON {token} first message.
+		if q := c.Query("token"); q != "" {
+			if _, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database); err != nil {
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+				return
+			}
+		} else if !authenticateWebSocketFirstMessage(conn, c) {
 			return
 		}
 
