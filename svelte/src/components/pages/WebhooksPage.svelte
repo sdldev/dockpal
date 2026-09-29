@@ -5,6 +5,11 @@
 	import Button from '../ui/Button.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
+	interface Props {
+		hideHeader?: boolean;
+	}
+	let { hideHeader = false }: Props = $props();
+
 	let webhooks = $state<Webhook[]>([]);
 	let loading = $state(true);
 	let error = $state('');
@@ -95,11 +100,15 @@
 </script>
 
 <div class="space-y-4">
+	{#if !hideHeader}
 	<div class="flex items-center justify-between">
 		<div>
 			<h2 class="text-lg font-semibold text-white">Webhooks</h2>
 			<p class="text-sm text-zinc-500">Git push-to-deploy triggers (no auth on the deploy URL — use a secret)</p>
 		</div>
+	</div>
+	{/if}
+	<div class="flex items-center justify-end">
 		<Button variant="primary" size="sm" onclick={() => { showForm = !showForm; }}>
 			{showForm ? 'Cancel' : 'New webhook'}
 		</Button>

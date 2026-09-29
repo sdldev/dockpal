@@ -5,6 +5,11 @@
 	import Button from '../ui/Button.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
+	interface Props {
+		hideHeader?: boolean;
+	}
+	let { hideHeader = false }: Props = $props();
+
 	let domains = $state<Domain[]>([]);
 	let loading = $state(true);
 	let error = $state('');
@@ -67,10 +72,12 @@
 </script>
 
 <div class="space-y-4">
+	{#if !hideHeader}
 	<div>
 		<h2 class="text-lg font-semibold text-white">Domains</h2>
 		<p class="text-sm text-zinc-500">Traefik reverse-proxy mappings (domain → service:port)</p>
 	</div>
+	{/if}
 
 	<form class="flex flex-wrap gap-2" onsubmit={(e) => { e.preventDefault(); addDomain(); }}>
 		<input

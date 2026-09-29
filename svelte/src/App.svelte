@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, getToken, clearToken } from './lib/api/client';
-  import { currentUser, currentPage, isAdmin, selectedInstance } from './lib/store';
+  import { currentUser, currentPage, selectedInstance } from './lib/store';
   import { initRouter, navigate } from './lib/router';
   import type { User } from './lib/types/api';
   import Login from './components/pages/Login.svelte';
@@ -9,12 +9,8 @@
   import ToastContainer from './components/layout/ToastContainer.svelte';
   import Dashboard from './components/pages/Dashboard.svelte';
   import ContainersPage from './components/pages/ContainersPage.svelte';
-  import ImagesPage from './components/pages/ImagesPage.svelte';
   import SettingsPage from './components/pages/SettingsPage.svelte';
-  import AdminPage from './components/pages/AdminPage.svelte';
-  import WebhooksPage from './components/pages/WebhooksPage.svelte';
-  import DomainsPage from './components/pages/DomainsPage.svelte';
-  import AppsPage from './components/pages/AppsPage.svelte';
+  import IntegrationsPage from './components/pages/IntegrationsPage.svelte';
   import ContainerPage from './components/pages/ContainerPage.svelte';
   import StacksPage from './components/pages/StacksPage.svelte';
   import ComposePage from './components/pages/ComposePage.svelte';
@@ -78,22 +74,10 @@
           <FleetPage />
         {:else if $currentPage === 'containers'}
           <ContainersPage />
-        {:else if $currentPage === 'images'}
-          <ImagesPage />
         {:else if $currentPage === 'settings'}
           <SettingsPage />
-        {:else if $currentPage === 'admin'}
-          {#if $isAdmin}
-            <AdminPage />
-          {:else}
-            <div class="text-zinc-500">Access denied — admin only</div>
-          {/if}
-        {:else if $currentPage === 'webhooks'}
-          <WebhooksPage />
-        {:else if $currentPage === 'domains'}
-          <DomainsPage />
-        {:else if $currentPage === 'apps'}
-          <AppsPage />
+        {:else if $currentPage === 'integrations'}
+          <IntegrationsPage />
         {:else if $currentPage === 'stacks'}
           <StacksPage />
         {:else if $currentPage === 'compose'}

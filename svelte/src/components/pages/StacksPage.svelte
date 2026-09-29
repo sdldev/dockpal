@@ -9,13 +9,14 @@
   import { currentStackName, selectedInstance } from '$lib/store';
   import { navigate } from '$lib/router';
   import CatalogTab from '../stacks/CatalogTab.svelte';
+  import AppsPage from './AppsPage.svelte';
 
   let stacks = $state<Stack[]>([]);
   let instances = $state<InstanceListItem[]>([]);
   let loading = $state(true);
   let error = $state('');
 
-  const tabs = ['stacks', 'catalog'] as const;
+  const tabs = ['stacks', 'catalog', 'updates'] as const;
   type Tab = (typeof tabs)[number];
   let activeTab = $state<Tab>('stacks');
 
@@ -120,7 +121,7 @@
         class:text-zinc-500={activeTab !== tab}
         class:hover:text-zinc-300={activeTab !== tab}
       >
-        {tab === 'stacks' ? 'My Stacks' : 'Catalog'}
+        {tab === 'stacks' ? 'My Stacks' : tab === 'catalog' ? 'Catalog' : 'Updates'}
       </button>
     {/each}
   </div>
@@ -155,7 +156,9 @@
         {/each}
       </div>
     {/if}
-  {:else}
+  {:else if activeTab === 'catalog'}
     <CatalogTab />
+  {:else if activeTab === 'updates'}
+    <AppsPage hideHeader={true} />
   {/if}
 </div>

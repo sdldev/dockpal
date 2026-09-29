@@ -7,6 +7,13 @@
 	import Modal from '../ui/Modal.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
+	interface Props {
+		// When embedded as a tab (e.g. Stacks → Updates), the page header is
+		// provided by the host; hide our own.
+		hideHeader?: boolean;
+	}
+	let { hideHeader = false }: Props = $props();
+
 	// Installed Apps absorbed the old Services page (same underlying reality:
 	// deployed apps) as a secondary tab, so "what have I deployed?" has one home.
 	const tabs = ['apps', 'services'] as const;
@@ -181,10 +188,12 @@
 </script>
 
 <div class="space-y-4">
+	{#if !hideHeader}
 	<div>
 		<h2 class="text-lg font-semibold text-white">Installed Apps</h2>
 		<p class="text-sm text-zinc-500">Compose projects deployed through the panel</p>
 	</div>
+	{/if}
 
 	<div class="flex gap-1 border-b border-zinc-800">
 		{#each tabs as tab}

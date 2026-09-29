@@ -6,6 +6,11 @@
 	import Button from '../ui/Button.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
+	interface Props {
+		hideHeader?: boolean;
+	}
+	let { hideHeader = false }: Props = $props();
+
 	let images = $state<ImageInfo[]>([]);
 	let loading = $state(true);
 	let error = $state('');
@@ -114,6 +119,7 @@
 </script>
 
 <div class="space-y-4">
+	{#if !hideHeader}
 	<div class="flex items-center justify-between">
 		<h2 class="text-lg font-semibold text-white">Images</h2>
 		<div class="flex gap-2">
@@ -121,6 +127,12 @@
 			<Button variant="secondary" size="sm" loading={pruneBusy} onclick={() => (showPruneDialog = true)}>Prune dangling</Button>
 		</div>
 	</div>
+	{:else}
+	<div class="flex items-center justify-end gap-2">
+		<Button variant="secondary" size="sm" onclick={checkUpdates}>Refresh</Button>
+		<Button variant="secondary" size="sm" loading={pruneBusy} onclick={() => (showPruneDialog = true)}>Prune dangling</Button>
+	</div>
+	{/if}
 
 	<form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); pullImage(); }}>
 		<input

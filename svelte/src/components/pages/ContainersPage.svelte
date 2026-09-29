@@ -9,6 +9,12 @@
 	import Icon from '../ui/Icon.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 	import { addToast } from '$lib/store';
+	import ImagesPage from './ImagesPage.svelte';
+
+	// Images live here as a tab (infra view), keeping the sidebar focused.
+	const tabs = ['containers', 'images'] as const;
+	type Tab = (typeof tabs)[number];
+	let activeTab = $state<Tab>('containers');
 
 	let containers: ContainerInfo[] = $state([]);
 	let selectedContainerId: string | null = $state(null);
@@ -67,7 +73,29 @@
 </script>
 
 <div class="space-y-4">
-	<h2 class="text-lg font-semibold text-white">Containers</h2>
+	<div>
+		<h2 class="text-lg font-semibold text-white">Containers</h2>
+	</div>
+
+	<div class="flex gap-1 border-b border-zinc-800">
+		{#each tabs as tab}
+			<button
+				onclick={() => { activeTab = tab; }}
+				class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
+				class:border-white={activeTab === tab}
+				class:text-white={activeTab === tab}
+				class:border-transparent={activeTab !== tab}
+				class:text-zinc-500={activeTab !== tab}
+				class:hover:text-zinc-300={activeTab !== tab}
+			>
+				{tab === 'containers' ? 'Containers' : 'Images'}
+			</button>
+		{/each}
+	</div>
+
+	{#if activeTab === 'images'}
+		<ImagesPage hideHeader={true} />
+	{:else if activeTab === 'containers'}
 
 	{#if error}
 		<div class="p-3 bg-red-500/10 border border-red-500/20 rounded-sm">
@@ -148,4 +176,5 @@
 		onconfirm={confirmDelete}
 		onclose={() => (pendingDelete = null)}
 	/>
+	{/if}
 </div>

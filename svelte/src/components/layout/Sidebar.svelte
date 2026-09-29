@@ -69,12 +69,8 @@
     { id: 'fleet', label: 'Servers', icon: 'fleet', visible: () => showFleet },
     { id: 'stacks', label: 'Stacks', icon: 'stacks' },
     { id: 'containers', label: 'Containers', icon: 'containers' },
-    { id: 'images', label: 'Images', icon: 'images' },
-    { id: 'apps', label: 'Installed Apps', icon: 'apps' },
-    { id: 'webhooks', label: 'Webhooks', icon: 'webhooks', role: 'operator' },
-    { id: 'domains', label: 'Domains', icon: 'domains', role: 'operator' },
-    { id: 'settings', label: 'Settings', icon: 'settings' },
-    { id: 'admin', label: 'Admin', icon: 'admin', role: 'admin' }
+    { id: 'integrations', label: 'Integrations', icon: 'webhooks', role: 'operator' },
+    { id: 'settings', label: 'Settings', icon: 'settings' }
   ];
 
   // Recomputed whenever instances/roles change so Servers appears/disappears
@@ -100,27 +96,28 @@
     <p class="text-xs text-zinc-500 mt-0.5">Docker Management</p>
   </div>
 
-  <!-- Instance / server selector (legacy sidebar parity). The "+ Add Server"
-       link only shows to admins while the Servers item is hidden (single
-       instance) — it is the discoverable entry point to the multi-server
-       flow before a second instance exists. -->
+  <!-- Instance / server selector — only shown once a second server exists
+       (single-server users don't need to "choose" anything). The "+ Add
+       Server" link is the discoverable entry point to the multi-server flow. -->
   <div class="px-1 pb-4 mb-2 border-b border-zinc-800">
-    <select
-      aria-label="Select server"
-      value={$selectedInstance}
-      onchange={onInstanceChange}
-      class="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer"
-    >
-      {#each instances as inst (inst.id)}
-        <option value={inst.id}>{instanceIcon(inst)} {instanceLabel(inst)}</option>
-      {:else}
-        <option value="local">⚙️ This Server</option>
-      {/each}
-    </select>
+    {#if showFleet}
+      <select
+        aria-label="Select server"
+        value={$selectedInstance}
+        onchange={onInstanceChange}
+        class="w-full px-2 py-1.5 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-600 cursor-pointer"
+      >
+        {#each instances as inst (inst.id)}
+          <option value={inst.id}>{instanceIcon(inst)} {instanceLabel(inst)}</option>
+        {:else}
+          <option value="local">⚙️ This Server</option>
+        {/each}
+      </select>
+    {/if}
     {#if $isAdmin && !showFleet}
       <button
         onclick={() => navigate('fleet')}
-        class="mt-2 w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm text-xs text-zinc-500 hover:text-white hover:bg-zinc-800 border border-dashed border-zinc-800 hover:border-zinc-600 transition-colors"
+        class="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm text-xs text-zinc-500 hover:text-white hover:bg-zinc-800 border border-dashed border-zinc-800 hover:border-zinc-600 transition-colors"
       >
         <span class="text-sm leading-none">+</span> Add Server
       </button>

@@ -18,24 +18,25 @@ const pagePaths: Record<string, string> = {
 	compose: '/compose',
 	containers: '/containers',
 	'container-detail': '/containers', // dynamic: /containers/:id (see pageToPath)
-	images: '/images',
-	apps: '/apps',
-	webhooks: '/webhooks',
-	domains: '/domains',
-	settings: '/settings',
-	admin: '/admin'
+	integrations: '/integrations',
+	settings: '/settings'
 };
 
-// Legacy Alpine paths that map onto SPA pages, so old bookmarks keep working.
-// /services and /templates are IA consolidation aliases: Services merged into
-// the Installed Apps page (Service Records tab), App Installer into the
-// Stacks page (Catalog tab).
+// Paths whose pages were folded into other pages by the IA consolidation,
+// kept working for old bookmarks: Images → Containers tab, Installed Apps
+// (updates) → Stacks tab, Webhooks/Domains → Integrations tabs, Admin →
+// Settings tab, App Installer → Stacks catalog.
 const legacyAliases: Record<string, string> = {
 	'/profile': 'settings',
-	'/registry': 'admin',
+	'/registry': 'settings',
+	'/admin': 'settings',
 	'/deploy': 'stacks',
 	'/templates': 'stacks',
-	'/services': 'apps',
+	'/services': 'stacks',
+	'/apps': 'stacks',
+	'/images': 'containers',
+	'/webhooks': 'integrations',
+	'/domains': 'integrations',
 	'/instances': 'fleet',
 	'/add-instance': 'fleet'
 };
