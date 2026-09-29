@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -43,23 +44,36 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 
 	fmt.Fprintf(w, "[Dockpal Installer] Starting installation on %s:%d as user %s...\n", params.Host, params.Port, params.User)
 
-	// Configure SSH Auth
-	var authMethod ssh.AuthMethod
+	// Configure SSH Auth. Both the primary method and keyboard-interactive
+	// use the same secret: hardened images (and PAM-based setups) often
+	// expose only "keyboard-interactive" instead of "password", and cloud
+	// providers commonly enable both. Trying both maximizes compatibility
+	// without changing what the user typed.
+	var authMethods []ssh.AuthMethod
 	if params.AuthType == "key" {
 		signer, err := ssh.ParsePrivateKey([]byte(params.AuthSecret))
 		if err != nil {
 			return fmt.Errorf("failed to parse SSH private key: %w", err)
 		}
-		authMethod = ssh.PublicKeys(signer)
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
 		fmt.Fprintln(w, "[Dockpal Installer] Using SSH private key authentication.")
 	} else {
-		authMethod = ssh.Password(params.AuthSecret)
-		fmt.Fprintln(w, "[Dockpal Installer] Using SSH password authentication.")
+		authMethods = append(authMethods, ssh.Password(params.AuthSecret))
+		authMethods = append(authMethods, ssh.KeyboardInteractive(
+			func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+				answers := make([]string, len(questions))
+				for i := range questions {
+					answers[i] = params.AuthSecret
+				}
+				return answers, nil
+			},
+		))
+		fmt.Fprintln(w, "[Dockpal Installer] Using SSH password authentication (password + keyboard-interactive).")
 	}
 
 	config := &ssh.ClientConfig{
-		User: params.User,
-		Auth: []ssh.AuthMethod{authMethod},
+		User:            params.User,
+		Auth:            authMethods,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For VPS setups, we bypass strict host verification
 		Timeout:         15 * time.Second,
 	}
@@ -68,7 +82,31 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 	fmt.Fprintf(w, "[Dockpal Installer] Connecting to %s...\n", addr)
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
-		return fmt.Errorf("failed to connect via SSH: %w", err)
+		err = fmt.Errorf("failed to connect via SSH: %w", err)
+		// Distinguish auth failures from pure network failures. Auth rejections
+		// surface as either "unable to authenticate, attempted methods [...]"
+		// or (an x/crypto quirk when the server drops keyboard-interactive
+		// mid-prompt) "unexpected message type 51". Network errors start with
+		// "dial tcp" and get their own, shorter hint.
+		msg := err.Error()
+		isAuthFailure := strings.Contains(msg, "unable to authenticate") ||
+			strings.Contains(msg, "unexpected message type")
+		isNetwork := strings.Contains(msg, "dial tcp") && !strings.Contains(msg, "handshake")
+		switch {
+		case isAuthFailure:
+			hint := "The server rejected the credentials. Check: (1) the password/key is correct for this user; " +
+				"(2) the server allows this auth method — many cloud images set PermitRootLogin prohibit-password " +
+				"or PasswordAuthentication no in /etc/ssh/sshd_config, in which case log in once with a key and use key auth here."
+			if params.AuthType == "key" {
+				hint = "The server rejected the private key. Check the key matches an authorized_key for this user " +
+					"and that the server permits key login for it (PermitRootLogin)."
+			}
+			fmt.Fprintf(w, "[Dockpal Installer] Hint: %s\n", hint)
+			err = fmt.Errorf("%w\n%s", err, hint)
+		case isNetwork:
+			fmt.Fprintf(w, "[Dockpal Installer] Hint: the server was unreachable — check the host/IP, the SSH port, and any firewall or cloud security group.\n")
+		}
+		return err
 	}
 	defer client.Close()
 
