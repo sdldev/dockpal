@@ -59,7 +59,7 @@ go test ./internal/server -run TestName -v
 go test ./internal/docker -run TestName -count=1   # bypass go test cache
 ```
 
-Node 22 (`.nvmrc`, `svelte/package.json` engines) — vitest 4 dropped Node 20.
+Node 24 LTS (`.nvmrc`; `svelte/package.json` engines allows `^22 || >=24`) — vitest 4 dropped Node 20.
 
 **Gotcha:** the Go binary only serves what is embedded in `web/svelteDist`. Editing
 `svelte/` and running `make dev` changes nothing at `/` until you `make svelte-embed`
