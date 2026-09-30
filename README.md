@@ -178,6 +178,11 @@ make build          # compile binary ./dockpal
 
 Binary `./dockpal` hasilnya menyajikan SPA terbaru di `/`.
 
+> Build multi-platform: `make cross` menghasilkan `dockpal-linux-amd64` +
+> `dockpal-linux-arm64` + `SHA256SUMS.txt` (ARM64 mendukung Raspberry Pi /
+> Graviton). macOS sengaja tidak di-support karena `internal/agent` memakai
+> syscall Linux-only (`syscall.Sysinfo`, `/proc`, cgroups).
+
 ### Kualitas kode
 
 ```bash
@@ -197,6 +202,7 @@ make install-hooks
 ### Debugging tips
 
 - **Login "invalid credentials" padahal log mencetak password admin** — pesan "Generated initial admin password" hanya berlaku saat user admin **pertama kali dibuat** (first-run). User yang sudah ada tidak pernah diubah oleh restart; gunakan `./dockpal reset-password` untuk menggantinya.
+- **`dockpal install` gagal "remote installation requires DOCKPAL_INITIAL_ADMIN_PASSWORD"** — host terdeteksi punya IP publik (non-RFC-1918), sehingga password acak tidak diizinkan karena akan tercetak ke log/terminal di server yang bisa diakses publik. Set env var-nya lebih dulu, atau jalankan `dockpal install --password ...` eksplisit. Deteksi berbasis interface IP; di belakang NAT dengan IP privat lokal, pembatasan ini tidak berlaku.
 - **"instance not found" di halaman Stacks** — localStorage `dockpal_selected_instance` menunjuk instance yang sudah tidak ada; halaman otomatis fallback ke `local`, atau clear localStorage.
 - **Perubahan SPA tidak muncul di `/`** — Anda lupa `make svelte-embed` + rebuild binary; binary hanya menyajikan hasil embed (`web/svelteDist`).
 - **`go vet` gagal karena fake test client** — semua fake yang meng-implement `agent.AgentClient` harus menyediakan stub untuk seluruh method interface (termasuk stack operations).
@@ -293,10 +299,13 @@ dockpal/
 ├── Makefile                   # Build/test/dev targets (lihat: make help)
 ├── internal/                  # Go packages
 │   ├── server/                # Gin routes, middleware, RBAC, stacks routes
-│   ├── agent/                 # AgentClient (local/direct/edge)
+│   ├── agent/                 # AgentClient (local/direct/edge) + WS client helpers
 │   ├── composecli/            # docker compose CLI runner (stacks engine)
 │   ├── docker/                # Moby client wrapper + stack store
 │   ├── auth/                  # JWT, login, passwords
+│   ├── security/              # Remote-host detection, deploy password enforcement
+│   ├── config/                # Env config loading + validation
+│   ├── integration/           # Integration tests (build tag: integration)
 │   ├── db/                    # BBolt persistence
 │   └── ...
 ├── svelte/                    # SPA Svelte 5 source (served at /)
