@@ -1,12 +1,15 @@
 <script lang="ts">
-  // Interactive terminal (docker exec) over the instance exec WebSocket.
-  // Browser WS → server → TerminalBridge → container TTY.
-  //
-  // The terminal is intentionally simple (no xterm.js dependency): output is
-  // rendered as plain text in a scrollable pre, input is sent per keystroke
-  // in a hidden input. ANSI colors show as escape codes; full xterm support
-  // can be layered in later without touching the backend.
-  import { onDestroy } from 'svelte';
+  // Interactive terminal (docker exec) over the instance exec WebSocket,
+  // rendered with xterm.js. The emulator interprets the container's TTY byte
+  // stream (colors, cursor moves, escape sequences) and answers terminal
+  // queries itself, so raw escapes like the cursor-position report never leak
+  // onto the screen. Input goes straight from the emulator to the WS as
+  // binary frames; size changes are sent as JSON control frames that the
+  // server applies with docker exec resize.
+  import { onDestroy, tick } from 'svelte';
+  import { Terminal } from '@xterm/xterm';
+  import { FitAddon } from '@xterm/addon-fit';
+  import '@xterm/xterm/css/xterm.css';
   import { getToken } from '$lib/api/client';
 
   interface Props {
@@ -17,49 +20,77 @@
   }
   let { instanceId, containerId, running, shell = 'sh' }: Props = $props();
 
-  let output = $state('');
   let connected = $state(false);
   let status = $state<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle');
   let statusMessage = $state('');
 
   let socket: WebSocket | null = null;
-  let outEl: HTMLPreElement | undefined = $state();
-  let inputEl: HTMLInputElement | undefined = $state();
+  let term: Terminal | null = null;
+  let fitAddon: FitAddon | null = null;
+  let termEl: HTMLDivElement | undefined = $state();
 
   function wsURL(): string {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/exec?shell=${shell}&token=${encodeURIComponent(getToken() ?? '')}`;
   }
 
-  function connect() {
+  function sendResize(cols: number, rows: number) {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type: 'resize', cols, rows }));
+  }
+
+  async function connect() {
     if (!running) {
       status = 'error';
       statusMessage = 'Container is not running — start it to open a terminal.';
       return;
     }
-    socket?.close();
-    output = '';
+    teardown();
     status = 'connecting';
     statusMessage = '';
 
+    term = new Terminal({
+      cursorBlink: true,
+      scrollback: 5000,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontSize: 12,
+      theme: {
+        background: '#000000',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+        selectionBackground: '#264f78'
+      }
+    });
+    fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.onData((data) => {
+      // emulator input → container stdin (binary frame)
+      socket?.send(new TextEncoder().encode(data));
+    });
+    term.onResize(({ cols, rows }) => sendResize(cols, rows));
+
     socket = new WebSocket(wsURL());
     socket.binaryType = 'arraybuffer';
-
-    socket.onopen = () => {
+    socket.onopen = async () => {
       status = 'open';
       connected = true;
-      inputEl?.focus();
+      // the terminal container only renders once status flips, so wait for
+      // the DOM update before attaching the emulator.
+      await tick();
+      if (term && termEl) {
+        term.open(termEl);
+        try {
+          fitAddon?.fit(); // triggers onResize → server sets the exec TTY size
+        } catch {
+          // container not measurable yet (hidden tab); the next resize refits
+        }
+        term.focus();
+      }
     };
     socket.onmessage = (event) => {
-      let text: string;
-      if (event.data instanceof ArrayBuffer) {
-        text = new TextDecoder().decode(event.data);
-      } else {
-        text = String(event.data);
-      }
-      output += text;
-      if (output.length > 400_000) output = output.slice(-400_000);
-      if (outEl) outEl.scrollTop = outEl.scrollHeight;
+      if (!term) return;
+      // container TTY output → emulator (handles escapes, answers DSR, etc.)
+      term.write(event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data);
     };
     socket.onclose = () => {
       connected = false;
@@ -75,48 +106,33 @@
     };
   }
 
-  function send(payload: string) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(payload);
-    }
-  }
-
-  function onKeydown(e: KeyboardEvent) {
-    if (!connected) return;
-    // Convert special keys to their TTY control sequences so shell
-    // line-editing (arrows, history, backspace) works.
-    const map: Record<string, string> = {
-      ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D',
-      Home: '\x1b[H', End: '\x1b[F', Delete: '\x1b[3~', Tab: '\t', Escape: '\x1b'
-    };
-    if (e.key.length === 1 && e.ctrlKey && (e.key === 'c' || e.key === 'd')) return;
-    if (map[e.key]) {
-      e.preventDefault();
-      send(map[e.key]);
-      return;
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      send('\r');
-      return;
-    }
-    if (e.key === 'Backspace') {
-      e.preventDefault();
-      send('\x7f');
-      return;
-    }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      e.preventDefault();
-      send(e.key);
-    }
-  }
-
-  function handleCtrlC() { send('\x03'); }
-  function handleCtrlD() { send('\x04'); }
-
-  onDestroy(() => {
+  function teardown() {
     socket?.close();
     socket = null;
+    term?.dispose();
+    term = null;
+    fitAddon = null;
+  }
+
+  function sendControlByte(b: string) {
+    socket?.send(new TextEncoder().encode(b));
+  }
+
+  onDestroy(teardown);
+
+  // Refit when the panel is resized so the emulator and the container TTY
+  // stay in sync (fit triggers onResize, which notifies the server).
+  $effect(() => {
+    if (!termEl || !fitAddon) return;
+    const observer = new ResizeObserver(() => {
+      try {
+        fitAddon?.fit();
+      } catch {
+        // not measurable; keep the last size
+      }
+    });
+    observer.observe(termEl);
+    return () => observer.disconnect();
   });
 </script>
 
@@ -138,25 +154,16 @@
   </div>
 
   {#if status === 'open' || status === 'closed'}
-    <pre
-      bind:this={outEl}
-      class="bg-black border border-zinc-800 rounded-sm p-3 text-xs font-mono text-zinc-300 overflow-auto h-[420px] whitespace-pre-wrap break-all"
-    >{output || '—'}</pre>
-
+    <!-- xterm.js mounts here; background/foreground come from the theme above -->
+    <div bind:this={termEl} class="bg-black border border-zinc-800 rounded-sm p-2 h-[420px] overflow-hidden"></div>
     {#if connected}
-      <!-- Hidden input captures keystrokes; the visible line is a hint. -->
-      <input
-        bind:this={inputEl}
-        class="sr-only"
-        aria-label="Terminal input"
-        onkeydown={onKeydown}
-      />
-      <p class="text-[11px] text-zinc-600">
-        Type while this panel is focused — input is sent per keystroke. Ctrl+C interrupts, Ctrl+D exits, arrows/editing work.
-      </p>
       <div class="flex gap-2">
-        <button class="px-2 py-1 text-[11px] rounded-sm border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800" onclick={handleCtrlC}>Ctrl+C</button>
-        <button class="px-2 py-1 text-[11px] rounded-sm border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800" onclick={handleCtrlD}>Ctrl+D</button>
+        <button
+          class="px-2 py-1 text-[11px] rounded-sm border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          onclick={() => sendControlByte('\x03')}>Ctrl+C</button>
+        <button
+          class="px-2 py-1 text-[11px] rounded-sm border border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800"
+          onclick={() => sendControlByte('\x04')}>Ctrl+D</button>
       </div>
     {/if}
   {:else if status === 'error'}
@@ -169,9 +176,3 @@
     </div>
   {/if}
 </div>
-
-<svelte:document on:click={(e) => {
-  if (connected && inputEl && !(e.target as HTMLElement).closest('button, select, a')) {
-    inputEl.focus();
-  }
-}} />

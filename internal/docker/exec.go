@@ -12,13 +12,17 @@ import (
 // The caller attaches to it via ExecAttachAndBridge. The command is a shell
 // so the terminal behaves like an interactive session.
 func (c *Client) ExecCreate(ctx context.Context, containerID string, cmd []string) (string, error) {
-	resp, err := c.cli.ExecCreate(ctx, containerID, client.ExecCreateOptions{
-		Cmd:          cmd,
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		TTY:          true, // TTY so shell line-editing and colored output behave
-	})
+		resp, err := c.cli.ExecCreate(ctx, containerID, client.ExecCreateOptions{
+			Cmd:          cmd,
+			AttachStdin:  true,
+			AttachStdout: true,
+			AttachStderr: true,
+			TTY:          true, // TTY so shell line-editing and colored output behave
+			// Sane default until the client sends its real size (see Resize on
+			// TerminalBridge); without this the TTY is 0x0 and $LINES/$COLUMNS are
+			// unset, which makes shells and full-screen apps misbehave.
+			ConsoleSize: client.ConsoleSize{Height: 24, Width: 80},
+		})
 	if err != nil {
 		return "", fmt.Errorf("failed to create exec: %w", err)
 	}
@@ -26,6 +30,12 @@ func (c *Client) ExecCreate(ctx context.Context, containerID string, cmd []strin
 		return "", fmt.Errorf("exec create returned an empty exec id")
 	}
 	return resp.ID, nil
+}
+
+// TerminalSize is a TTY size in rows/columns, reported by the client emulator.
+type TerminalSize struct {
+	Height uint
+	Width  uint
 }
 
 // TerminalBridge is the transport-agnostic surface the exec bridge pumps
@@ -37,6 +47,8 @@ type TerminalBridge struct {
 	ToContainer chan []byte
 	// FromContainer delivers a chunk of TTY output toward the browser.
 	FromContainer chan []byte
+	// Resize delivers terminal size changes from the client emulator.
+	Resize chan TerminalSize
 	// Closed is closed once either side terminates the session.
 	Closed chan struct{}
 	once   sync.Once
@@ -46,6 +58,7 @@ func NewTerminalBridge() *TerminalBridge {
 	return &TerminalBridge{
 		ToContainer:   make(chan []byte, 64),
 		FromContainer: make(chan []byte, 64),
+		Resize:        make(chan TerminalSize, 16),
 		Closed:        make(chan struct{}),
 	}
 }
@@ -102,6 +115,28 @@ func (c *Client) ExecAttachAndBridge(ctx context.Context, execID string, bridge 
 					bridge.Close()
 					return
 				}
+			case <-bridge.Closed:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// client resize → exec TTY (best-effort; the session keeps its last size)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case sz, ok := <-bridge.Resize:
+				if !ok {
+					return
+				}
+				_, _ = c.cli.ExecResize(ctx, execID, client.ExecResizeOptions{
+					Height: sz.Height,
+					Width:  sz.Width,
+				})
 			case <-bridge.Closed:
 				return
 			case <-ctx.Done():

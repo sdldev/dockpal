@@ -412,8 +412,10 @@ func handleInstanceContainerLogs(c *gin.Context) {
 // handleInstanceContainerExec upgrades a browser WebSocket into an
 // interactive shell (docker exec) inside the container. Protocol:
 //   - upgrade: query token or first {token} message (same as logs)
-//   - client → server: binary/text frames = stdin bytes; the first message
+//   - client → server binary frames = stdin bytes; the first message
 //     may instead be a JSON {"token": ...} when no query token is present
+//   - client → server text frames = control messages, currently
+//     {"type":"resize","cols":N,"rows":M} to resize the exec TTY
 //   - server → client: binary/text frames = TTY output; exit closes the WS
 //
 // Security: operator role minimum (RequireRole on the route) — a shell
@@ -479,7 +481,7 @@ func handleInstanceContainerExec(c *gin.Context) {
 		}
 	}()
 
-	// browser → container stdin
+	// browser → container stdin / resize
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -489,7 +491,22 @@ func handleInstanceContainerExec(c *gin.Context) {
 				bridge.Close()
 				return
 			}
-			_ = mtype
+			// Text frames carry control messages; binary frames are raw stdin.
+			if mtype == websocket.TextMessage {
+				var msg struct {
+					Type string `json:"type"`
+					Cols uint   `json:"cols"`
+					Rows uint   `json:"rows"`
+				}
+				if json.Unmarshal(payload, &msg) == nil && msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
+					select {
+					case bridge.Resize <- docker.TerminalSize{Height: msg.Rows, Width: msg.Cols}:
+					case <-bridge.Closed:
+						return
+					}
+				}
+				continue
+			}
 			select {
 			case bridge.ToContainer <- payload:
 			case <-bridge.Closed:
