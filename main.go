@@ -31,6 +31,7 @@ import (
 	"github.com/sdldev/dockpal/internal/logging"
 	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
+	"github.com/sdldev/dockpal/internal/security"
 	"github.com/sdldev/dockpal/internal/server"
 	"github.com/sdldev/dockpal/web"
 	"golang.org/x/crypto/bcrypt"
@@ -127,10 +128,13 @@ func main() {
 }
 
 func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
-	dataDir := os.Getenv("DOCKPAL_DATA_DIR")
-	if dataDir == "" {
-		dataDir = defaultDataDir
-	}
+	// Warn if running on a remote host without TLS
+	security.WarnIfRemote(tls)
+
+	// Load all configuration from environment
+	envCfg := config.LoadEnvConfig()
+
+	dataDir := envCfg.DataDir
 	dataDir = mustAbs("DOCKPAL_DATA_DIR", dataDir)
 
 	if err := os.MkdirAll(dataDir, 0750); err != nil {
@@ -138,10 +142,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 
 	// Set up log rotation
-	logPath := os.Getenv("DOCKPAL_LOG_PATH")
-	if logPath == "" {
-		logPath = filepath.Join(dataDir, "dockpal.log")
-	}
+	logPath := envCfg.LogPath
 	logPath = mustAbs("DOCKPAL_LOG_PATH", logPath)
 
 	logRotator, err := logging.NewLogRotatorWithAge(
@@ -157,46 +158,18 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	log.SetOutput(logRotator)
 	logging.ConfigureJSON(logRotator)
 
-	dbPath := os.Getenv("DOCKPAL_DB_PATH")
-	if dbPath == "" {
-		dbPath = filepath.Join(dataDir, "dockpal.db")
-	}
+	dbPath := envCfg.DBPath
 	dbPath = mustAbs("DOCKPAL_DB_PATH", dbPath)
 
-	secretPath := os.Getenv("DOCKPAL_SECRET_PATH")
-	if secretPath == "" {
-		secretPath = filepath.Join(dataDir, ".secret")
-	}
+	secretPath := envCfg.SecretPath
 	secretPath = mustAbs("DOCKPAL_SECRET_PATH", secretPath)
 
-	// Get port configuration
-	port := os.Getenv("PORT")
-	if port == "" {
-		if tls {
-			port = "3443"
-		} else {
-			port = "3012"
-		}
-	}
-
 	// Get admin password and JWT secret for validation
-	adminPassword := os.Getenv("DOCKPAL_INITIAL_ADMIN_PASSWORD")
-	jwtSecret := os.Getenv("JWT_SECRET")
+	adminPassword := envCfg.AdminPassword
+	jwtSecret := envCfg.JWTSecret
 
 	// Perform comprehensive configuration validation
-	cfg := &config.Config{
-		DataDir:       dataDir,
-		DBPath:        dbPath,
-		LogPath:       logPath,
-		SecretPath:    secretPath,
-		Port:          port,
-		TLS:           tls,
-		TLSCert:       tlsCert,
-		TLSKey:        tlsKey,
-		TLSDomain:     tlsDomain,
-		AdminPassword: adminPassword,
-		JWTSecret:     jwtSecret,
-	}
+	cfg := envCfg.ToValidationConfig()
 
 	validator := config.NewValidator(cfg)
 	result := validator.ValidateConfig()
@@ -305,12 +278,12 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	server.RegisterRoutes(appCtx, srv.Router(), dockerClient, jwtSecret, database, agentMgr, dataDir, dbPath, version)
 
 	// Initialize and start background backup scheduler
-	backupInterval := parseDurationEnv("DOCKPAL_BACKUP_INTERVAL", 24*time.Hour)
-	backupRetention := parseDurationEnv("DOCKPAL_BACKUP_RETENTION", 168*time.Hour)
+	backupInterval := envCfg.BackupInterval
+	backupRetention := envCfg.BackupRetention
 	backupScheduler := backupPkg.NewScheduler(database, dataDir, backupInterval, backupRetention)
 	backupScheduler.Start(appCtx)
 
-	auditRetention := parseDurationEnv("DOCKPAL_AUDIT_LOG_RETENTION", 2160*time.Hour)
+	auditRetention := envCfg.AuditRetention
 	startAuditRetentionWorker(appCtx, database, auditRetention)
 
 	// Serve embedded Svelte SPA at the root.
@@ -669,6 +642,12 @@ func runResetPassword(username, password string) {
 }
 
 func runInstall(username, password string) {
+	// Require explicit password on remote hosts to prevent exposure
+	// of auto-generated passwords in logs or terminal history.
+	if err := security.RequireInitialPassword(); err != nil {
+		log.Fatalf("Security check failed: %v", err)
+	}
+
 	dbPath := os.Getenv("DOCKPAL_DB_PATH")
 	if dbPath == "" {
 		dbPath = defaultDBPath

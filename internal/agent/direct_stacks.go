@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/sdldev/dockpal/internal/docker"
-	"nhooyr.io/websocket"
 )
 
 // Dockge-style stack operations for the remote agent in direct mode.
@@ -153,19 +151,14 @@ func (c *DirectClient) DeployStackStreamed(ctx context.Context, name, composeYAM
 	}
 
 	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1) + "/agent/docker/stacks/deploy/stream/" + deployID
-	wsConn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
-		HTTPClient: c.httpClient,
-		HTTPHeader: http.Header{
-			"Authorization": []string{"Bearer " + c.authToken},
-		},
-	})
+	wsConn, err := wsDial(ctx, wsURL, c.httpClient, c.authToken)
 	if err != nil {
 		return fmt.Errorf("failed to connect to WebSocket: %w", err)
 	}
-	defer wsConn.Close(websocket.StatusNormalClosure, "")
+	defer wsClose(wsConn)
 
 	for {
-		_, msg, err := wsConn.Read(ctx)
+		msg, err := wsReadMessage(wsConn)
 		if err != nil {
 			break
 		}

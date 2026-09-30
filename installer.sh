@@ -380,6 +380,44 @@ primary_ip() {
     echo "$ip"
 }
 
+# Detect if this is a remote (non-private) host and print a security warning.
+check_remote_security() {
+    local ip
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+
+    if [[ -z "$ip" ]]; then
+        return 0
+    fi
+
+    # Check if the IP is in a private range (RFC 1918 + link-local)
+    local first_octet second_octet
+    first_octet=$(echo "$ip" | cut -d. -f1)
+    second_octet=$(echo "$ip" | cut -d. -f2)
+
+    local is_private=false
+    if [[ "$first_octet" == "10" ]]; then
+        is_private=true
+    elif [[ "$first_octet" == "172" ]] && [[ "$second_octet" -ge 16 && "$second_octet" -le 31 ]]; then
+        is_private=true
+    elif [[ "$first_octet" == "192" && "$second_octet" == "168" ]]; then
+        is_private=true
+    elif [[ "$first_octet" == "169" && "$second_octet" == "254" ]]; then
+        is_private=true
+    elif [[ "$first_octet" == "127" ]]; then
+        is_private=true
+    fi
+
+    if [[ "$is_private" == "false" ]]; then
+        echo ""
+        log_warn "⚠️  REMOTE INSTALLATION DETECTED"
+        log_warn "   This server appears to have a public IP address ($ip)."
+        log_warn "   For security, set DOCKPAL_INITIAL_ADMIN_PASSWORD before starting:"
+        log_warn "     sudo systemctl set-environment DOCKPAL_INITIAL_ADMIN_PASSWORD=your-secure-password"
+        log_warn "     sudo systemctl restart dockpal"
+        echo ""
+    fi
+}
+
 main() {
     if [ "$(id -u)" -ne 0 ]; then
         log_error "This script must be run as root"
@@ -393,6 +431,8 @@ main() {
 
     require_amd64
     require_debian_family
+
+    check_remote_security
 
     install_dependencies
     install_docker

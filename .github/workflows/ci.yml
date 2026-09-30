@@ -68,13 +68,31 @@ jobs:
       - name: Lint
         run: make lint
 
-      - name: Test
+      - name: Test (with race detection)
         run: make test
+
+      - name: Vet integration suite
+        run: go vet -tags=integration ./internal/integration/...
+
+      - name: Test integration
+        run: make test-integration
+        timeout-minutes: 10
 
       - name: Cover
         run: |
-          go test -coverprofile=coverage.out ./...
+          go test -race -coverprofile=coverage.out ./...
           go tool cover -html=coverage.out -o coverage.html
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out | tail -1 | awk '{printf "Total coverage: **%s**\n", $3}' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.out
+            coverage.html
+          retention-days: 14
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4

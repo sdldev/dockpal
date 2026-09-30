@@ -6,7 +6,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.9
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
 .PHONY: all build build-linux-amd64 dev test lint clean help \
-        svelte-build svelte-dev svelte-check svelte-test svelte-embed prod-build
+        svelte-build svelte-dev svelte-check svelte-test svelte-embed prod-build \
+        test-integration vet-integration cross
 
 all: build
 
@@ -48,6 +49,16 @@ build-linux-amd64:
 	@echo "Building Dockpal for Linux AMD64 version $(VERSION)..."
 	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dockpal-linux-amd64 .
 
+## cross: Build binaries for multiple platforms
+cross: svelte-embed
+	@echo "Building multi-platform binaries (version $(VERSION))..."
+	GOOS=linux GOARCH=amd64   go build -ldflags "$(LDFLAGS)" -o dockpal-linux-amd64 .
+	GOOS=linux GOARCH=arm64   go build -ldflags "$(LDFLAGS)" -o dockpal-linux-arm64 .
+	@echo "Built:"
+	@ls -lh dockpal-linux-amd64 dockpal-linux-arm64
+	@sha256sum dockpal-linux-amd64 dockpal-linux-arm64 > SHA256SUMS.txt
+	@echo "SHA256 checksums written to SHA256SUMS.txt"
+
 ## dev: Build and run locally for development
 dev: build
 	@echo "Starting Dockpal dev server on port 3012..."
@@ -61,7 +72,16 @@ dev-watch:
 ## test: Run unit tests
 test:
 	@echo "Running tests..."
-	go test -v ./...
+	go test -v -race ./...
+
+## test-integration: Run integration tests with race detection
+test-integration:
+	@echo "Running integration tests..."
+	go test -tags=integration -race -count=1 ./internal/integration/... -v
+
+## vet-integration: Vet integration test files
+vet-integration:
+	go vet -tags=integration ./internal/integration/...
 
 ## lint: Run static code analysis
 lint:
@@ -107,7 +127,7 @@ install-hooks:
 ## clean: Clean build artifacts and temporary files
 clean:
 	@echo "Cleaning up..."
-	rm -f dockpal dockpal-linux-amd64 coverage.out
+	rm -f dockpal dockpal-linux-amd64 dockpal-linux-arm64 coverage.out SHA256SUMS.txt
 
 ## help: Show help documentation
 help:

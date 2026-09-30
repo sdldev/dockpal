@@ -15,7 +15,6 @@ import (
 
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
-	"nhooyr.io/websocket"
 )
 
 // DirectClient implements AgentClient for communicating with a remote agent via HTTP/HTTPS.
@@ -249,28 +248,25 @@ func (c *DirectClient) ContainerLogs(ctx context.Context, id string, tail string
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
 	wsURL += "/agent/docker/containers/" + id + "/logs?tail=" + tail
 
-	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
-		HTTPClient: c.httpClient,
-		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.authToken}},
-	})
+	conn, err := wsDial(ctx, wsURL, c.httpClient, c.authToken)
 	if err != nil {
-		return nil, fmt.Errorf("websocket dial failed: %w", err)
+		return nil, err
 	}
 
 	// Authenticate via first message (JSON-encoded token)
 	authMsg, _ := json.Marshal(map[string]string{"token": c.authToken})
-	if err := conn.Write(ctx, websocket.MessageText, authMsg); err != nil {
-		conn.Close(websocket.StatusInternalError, "auth write failed")
+	if err := wsWriteText(conn, authMsg); err != nil {
+		wsClose(conn)
 		return nil, fmt.Errorf("websocket auth failed: %w", err)
 	}
 
 	// Read incoming messages and pipe them through a pipe
 	pr, pw := io.Pipe()
 	go func() {
-		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer wsClose(conn)
 		defer pw.Close()
 		for {
-			_, msg, err := conn.Read(ctx)
+			msg, err := wsReadMessage(conn)
 			if err != nil {
 				return
 			}
@@ -295,18 +291,15 @@ func (c *DirectClient) ExecAttachAndBridge(ctx context.Context, id, shell string
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
 	wsURL += "/agent/docker/exec?container=" + id + "&shell=" + shell
 
-	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
-		HTTPClient: c.httpClient,
-		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.authToken}},
-	})
+	conn, err := wsDial(ctx, wsURL, c.httpClient, c.authToken)
 	if err != nil {
 		return fmt.Errorf("terminal unavailable: the remote agent may be outdated (upgrade the agent image) — %w", err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "")
+	defer wsClose(conn)
 
 	// Newer agents may also accept the token as the first message.
 	authMsg, _ := json.Marshal(map[string]string{"token": c.authToken})
-	_ = conn.Write(ctx, websocket.MessageText, authMsg)
+	_ = wsWriteText(conn, authMsg)
 
 	var wg sync.WaitGroup
 
@@ -315,7 +308,7 @@ func (c *DirectClient) ExecAttachAndBridge(ctx context.Context, id, shell string
 	go func() {
 		defer wg.Done()
 		for {
-			_, msg, err := conn.Read(ctx)
+			msg, err := wsReadMessage(conn)
 			if err != nil {
 				bridge.Close()
 				return
@@ -338,7 +331,7 @@ func (c *DirectClient) ExecAttachAndBridge(ctx context.Context, id, shell string
 				if !ok {
 					return
 				}
-				if err := conn.Write(ctx, websocket.MessageBinary, payload); err != nil {
+				if err := wsWriteBinary(conn, payload); err != nil {
 					bridge.Close()
 					return
 				}
@@ -438,20 +431,15 @@ func (c *DirectClient) DeployComposeStreamed(ctx context.Context, name, composeY
 	// Step 2: Connect to WebSocket for streaming events
 	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1) + "/agent/docker/deploy/stream/" + deployID
 
-	wsConn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
-		HTTPClient: c.httpClient,
-		HTTPHeader: http.Header{
-			"Authorization": []string{"Bearer " + c.authToken},
-		},
-	})
+	wsConn, err := wsDial(ctx, wsURL, c.httpClient, c.authToken)
 	if err != nil {
 		return fmt.Errorf("failed to connect to WebSocket: %w", err)
 	}
-	defer wsConn.Close(websocket.StatusNormalClosure, "")
+	defer wsClose(wsConn)
 
 	// Step 3: Read events from WebSocket and write to session.Events
 	for {
-		_, msg, err := wsConn.Read(ctx)
+		msg, err := wsReadMessage(wsConn)
 		if err != nil {
 			// Connection closed, we're done
 			break
