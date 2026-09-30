@@ -42,6 +42,13 @@ on an existing install, run:
 dockpal reset-password --username admin --password mypassword
 ```
 
+> ⚠️ **Remote servers**: when the host has a public (non-RFC-1918) IP address,
+> the installer and `dockpal install` **require** `DOCKPAL_INITIAL_ADMIN_PASSWORD`
+> to be set — an auto-generated password would otherwise be leaked to
+> `journalctl`/terminal history on a publicly reachable box. The installer prints
+> a warning with the exact `systemctl set-environment` commands when it detects
+> this.
+
 Update an existing installation with `update.sh`:
 
 ```bash
@@ -100,7 +107,7 @@ All via environment variables. No config file needed.
 | `DOCKPAL_TLS_DOMAIN` | — | Domain for ACME/Let's Encrypt auto-cert |
 | `DOCKPAL_BACKUP_INTERVAL` | `24h` | Scheduled backup interval (`0` = disabled) |
 | `DOCKPAL_BACKUP_RETENTION` | `168h` | Backup retention window (7 days) |
-| `DOCKPAL_INITIAL_ADMIN_PASSWORD` | random | Admin password (only on first startup) |
+| `DOCKPAL_INITIAL_ADMIN_PASSWORD` | random | Admin password (only on first startup; **required on remote hosts**) |
 
 ### TLS modes
 
@@ -116,7 +123,7 @@ Dockpal adalah satu binary Go dengan frontend Svelte 5 SPA yang ter-embed dan di
 
 ### Prasyarat
 
-- Go 1.25+
+- Go 1.26+
 - Node.js 22+ & npm (untuk frontend Svelte)
 - Docker daemon berjalan (sebagian test & fitur compose stacks)
 
@@ -174,7 +181,8 @@ Binary `./dockpal` hasilnya menyajikan SPA terbaru di `/`.
 ### Kualitas kode
 
 ```bash
-make test          # go test ./...
+make test          # go test -race ./...
+make test-integration  # integration tests (build tag: integration) with -race
 make lint          # go vet ./...
 make svelte-check  # svelte-check (type check SPA)
 make svelte-test   # vitest (unit test SPA)
@@ -224,6 +232,10 @@ Examples:
 # First-time setup on a fresh data dir (create admin without starting server)
 DOCKPAL_DB_PATH=/opt/dockpal/data/dockpal.db ./dockpal install --username admin --password NewPass123
 
+# On a remote host, DOCKPAL_INITIAL_ADMIN_PASSWORD is required:
+DOCKPAL_INITIAL_ADMIN_PASSWORD=NewPass123 DOCKPAL_DB_PATH=/opt/dockpal/data/dockpal.db \
+  ./dockpal install --username admin
+
 # Reset admin password (stop server first)
 ./dockpal reset-password --username admin --password NewPass123
 
@@ -246,7 +258,7 @@ DOCKPAL_DB_PATH=/opt/dockpal/data/dockpal.db ./dockpal install --username admin 
 | **Domains** | Traefik integration, custom routing, SSL |
 | **Monitoring** | Prometheus metrics, real-time charts, health checks |
 | **Multi-host** | Manage remote Docker hosts (direct HTTP or edge WebSocket) |
-| **Security** | RBAC (admin/operator/viewer), JWT auth, audit log |
+| **Security** | RBAC (admin/operator/viewer), JWT auth, audit log, remote-deploy password enforcement |
 | **Backup** | Scheduled + manual, SHA-256 checksum, retention policy |
 
 ---
