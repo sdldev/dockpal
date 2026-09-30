@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { createFleetStore, isAdmin, isOperator, addToast } from '../../lib/store';
+	import { createFleetStore, isAdmin, isOperator, addToast, selectedInstance } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
 	import { formatBytes } from '../../lib/stats-history';
 	import { formatPorts } from '../../lib/format';
+	import { navigate } from '../../lib/router';
 	import AddServerPanel from '../fleet/AddServerPanel.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -24,6 +25,14 @@
 
 	function canManage(id: string): boolean {
 		return $isAdmin && id !== 'local';
+	}
+
+	// Open a server in the Dashboard: make it the active instance (persisted)
+	// and navigate there — same flow as picking it in the sidebar selector.
+	function openServer(id: string) {
+		selectedInstance.set(id);
+		localStorage.setItem('dockpal_selected_instance', id);
+		navigate('dashboard');
 	}
 
 	async function removeInstance() {
@@ -257,13 +266,17 @@
 							<tr class="border-b border-zinc-800/40 hover:bg-zinc-950/10">
 								<!-- Name / mode / host -->
 								<td class="px-4 py-3">
-									<div class="flex items-center gap-2">
+									<button
+										class="flex items-center gap-2 text-left hover:bg-zinc-800/40 -mx-2 -my-1.5 px-2 py-1.5 rounded transition-colors group"
+										title={`Open ${inst.id === 'local' ? 'This Server' : inst.name} in the Dashboard`}
+										onclick={() => openServer(inst.id)}
+									>
 										<span
 											class={`w-2.5 h-2.5 rounded-full shrink-0 ${online ? 'bg-green-500' : 'bg-red-500'}`}
 										></span>
 										<div>
 											<div class="flex items-center gap-2">
-												<span class="text-sm font-semibold text-white">
+												<span class="text-sm font-semibold text-white group-hover:text-sky-300 group-hover:underline transition-colors">
 													{inst.id === 'local' ? 'This Server' : inst.name}
 												</span>
 												<span
@@ -276,7 +289,7 @@
 												{inst.id === 'local' ? 'Local Connection' : inst.host || 'Edge Agent'}
 											</span>
 										</div>
-									</div>
+									</button>
 								</td>
 
 								<!-- Status -->
