@@ -79,5 +79,7 @@ export interface SystemInfo {
   total_ram: number;
   used_disk: number;
   total_disk: number;
+  network_rx_bps: number;
+  network_tx_bps: number;
 }
 

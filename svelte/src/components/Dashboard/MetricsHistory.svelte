@@ -46,8 +46,11 @@
     // 'live' range only).
     liveCpu?: number[];
     liveRam?: number[];
+    liveDisk?: number[];
+    liveRx?: number[];
+    liveTx?: number[];
   }
-  let { instanceId, liveCpu = [], liveRam = [] }: Props = $props();
+  let { instanceId, liveCpu = [], liveRam = [], liveDisk = [], liveRx = [], liveTx = [] }: Props = $props();
 
   const id = $derived(instanceId || get(selectedInstance) || 'local');
 
@@ -104,7 +107,9 @@
       : samples.map((s) => (s.total_ram > 0 ? (s.used_ram / s.total_ram) * 100 : 0))
   );
   const diskData = $derived(
-    samples.map((s) => (s.total_disk > 0 ? (s.used_disk / s.total_disk) * 100 : 0))
+    usingLive
+      ? liveDisk
+      : samples.map((s) => (s.total_disk > 0 ? (s.used_disk / s.total_disk) * 100 : 0))
   );
 
   const labels = $derived(
@@ -125,8 +130,8 @@
     return time;
   }
 
-  const rxData = $derived(samples.map((s) => s.network_rx_bps ?? 0));
-  const txData = $derived(samples.map((s) => s.network_tx_bps ?? 0));
+  const rxData = $derived(usingLive ? liveRx : samples.map((s) => s.network_rx_bps ?? 0));
+  const txData = $derived(usingLive ? liveTx : samples.map((s) => s.network_tx_bps ?? 0));
 
   const latest = $derived({
     cpu: cpuData.at(-1) ?? 0,
@@ -265,22 +270,16 @@
             {/if}
           </div>
         </div>
-        {#if usingLive}
-          <div class="flex h-[150px] items-center justify-center text-xs text-zinc-600">
-            Network history uses the recorder — switch to 1h or 12h
-          </div>
-        {:else}
-          <LineChart
-            series={[
-              { label: 'Download', color: '#0ea5e9', data: rxData },
-              { label: 'Upload', color: '#f59e0b', data: txData }
-            ]}
-            {labels}
-            yMin={0}
-            formatY={formatBps}
-            height={150}
-          />
-        {/if}
+        <LineChart
+          series={[
+            { label: 'Download', color: '#0ea5e9', data: rxData },
+            { label: 'Upload', color: '#f59e0b', data: txData }
+          ]}
+          {labels}
+          yMin={0}
+          formatY={formatBps}
+          height={150}
+        />
       </div>
     </div>
   {/if}

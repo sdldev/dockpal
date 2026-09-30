@@ -25,6 +25,9 @@
   let sysInfo = $state<SystemInfo | null>(null);
   let cpuBuf = $state<StatBuffer>(newStatBuffer());
   let ramBuf = $state<StatBuffer>(newStatBuffer());
+  let diskBuf = $state<StatBuffer>(newStatBuffer());
+  let rxBuf = $state<StatBuffer>(newStatBuffer());
+  let txBuf = $state<StatBuffer>(newStatBuffer());
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let imageTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -68,8 +71,14 @@
       sysInfo = info;
       pushPoint(cpuBuf, info.cpu_percent ?? 0);
       pushPoint(ramBuf, info.total_ram > 0 ? (info.used_ram / info.total_ram) * 100 : 0);
+      pushPoint(diskBuf, info.total_disk > 0 ? (info.used_disk / info.total_disk) * 100 : 0);
+      pushPoint(rxBuf, info.network_rx_bps ?? 0);
+      pushPoint(txBuf, info.network_tx_bps ?? 0);
       cpuBuf = { labels: [...cpuBuf.labels], values: [...cpuBuf.values] };
       ramBuf = { labels: [...ramBuf.labels], values: [...ramBuf.values] };
+      diskBuf = { labels: [...diskBuf.labels], values: [...diskBuf.values] };
+      rxBuf = { labels: [...rxBuf.labels], values: [...rxBuf.values] };
+      txBuf = { labels: [...txBuf.labels], values: [...txBuf.values] };
       lastSuccessAt = Date.now();
       stale = false;
       staleAgeLabel = '';
@@ -166,8 +175,15 @@
 
   {#if sysInfo}
     <!-- Metrics history: time-series charts with range selector
-         (Live rolling buffer, 1h, 1d, 7d, 30d from the recorded series) -->
-    <MetricsHistory {instanceId} liveCpu={cpuBuf.values} liveRam={ramBuf.values} />
+         (Live rolling buffer, 1h, 12h from the recorded series) -->
+    <MetricsHistory
+      {instanceId}
+      liveCpu={cpuBuf.values}
+      liveRam={ramBuf.values}
+      liveDisk={diskBuf.values}
+      liveRx={rxBuf.values}
+      liveTx={txBuf.values}
+    />
 
     <!-- Info card -->
     <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 max-w-md">

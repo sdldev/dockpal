@@ -197,5 +197,7 @@ export interface SystemInfo {
 	total_disk: number;
 	used_disk: number;
 	docker_version: string;
+	network_rx_bps: number;
+	network_tx_bps: number;
 }
 
