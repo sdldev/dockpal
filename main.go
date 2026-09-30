@@ -291,6 +291,13 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	metricsCollector.Start()
 	defer metricsCollector.Stop()
 
+	// Background time-series recorder: samples host metrics for every
+	// reachable instance into BBolt (30d retention), so the dashboard can
+	// render 1h/1d/7d/30d history, not just the current page-open window.
+	historyRecorder := metrics.NewHistoryRecorder(agentMgr, database, 30*time.Second)
+	historyRecorder.Start()
+	defer historyRecorder.Stop()
+
 	// Add HTTP metrics middleware
 	srv.Router().Use(metrics.MetricsMiddleware())
 

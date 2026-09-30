@@ -110,6 +110,7 @@ var (
 	bucketAppUpdatesByID       = []byte("app_updates_by_id")
 	bucketNotificationWebhooks = []byte("notification_webhooks")
 	bucketAPIKeys              = []byte("api_keys")
+	bucketMetrics              = []byte("metrics")
 )
 
 var (
@@ -128,7 +129,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys, bucketMetrics} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -143,6 +144,17 @@ func New(path string) (*DB, error) {
 
 func (d *DB) Close() error {
 	return d.db.Close()
+}
+
+// View runs fn inside a read-only transaction. Used by the metrics
+// time-series store, which keeps its own bucket and needs cursor access.
+func (d *DB) View(fn func(tx *bbolt.Tx) error) error {
+	return d.db.View(fn)
+}
+
+// Update runs fn inside a read-write transaction.
+func (d *DB) Update(fn func(tx *bbolt.Tx) error) error {
+	return d.db.Update(fn)
 }
 
 // Users

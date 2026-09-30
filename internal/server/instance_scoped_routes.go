@@ -23,6 +23,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/git"
+	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
 	"github.com/sdldev/dockpal/internal/validator"
@@ -61,6 +62,9 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.GET("/host/info", RequireRole(auth.RoleViewer), handleInstanceHostInfo)
 	g.GET("/host/stats", RequireRole(auth.RoleViewer), handleInstanceHostStats)
 	g.GET("/system/info", RequireRole(auth.RoleViewer), handleInstanceSystemInfo)
+	// Time-series history (recorded by the background MetricsHistoryRecorder).
+	// Query params: from,to (RFC3339 or unix), max_points (uniform downsample).
+	g.GET("/metrics/history", RequireRole(auth.RoleViewer), handleInstanceMetricsHistory)
 
 	// Service routes
 	g.GET("/services", RequireRole(auth.RoleViewer), handleInstanceListServices)
@@ -1162,6 +1166,62 @@ func handleInstanceSystemInfo(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, systemInfo)
+}
+
+// handleInstanceMetricsHistory returns the recorded time series for this
+// instance. Query params:
+//
+//	from        RFC3339 or unix seconds (default: 24h ago)
+//	to          RFC3339 or unix seconds (default: now)
+//	max_points  uniform downsample cap (default 300, hard-capped at 2000)
+//
+// The series comes from the background MetricsHistoryRecorder; if the
+// instance is local, the series is keyed "local".
+func handleInstanceMetricsHistory(c *gin.Context) {
+	instanceID := c.MustGet("instance_id").(string)
+	database := c.MustGet("database").(*db.DB)
+
+	now := time.Now()
+	from := now.AddDate(0, 0, -1)
+	to := now
+	if v := c.Query("from"); v != "" {
+		if parsed, err := parseMetricsTime(v); err == nil {
+			from = parsed
+		}
+	}
+	if v := c.Query("to"); v != "" {
+		if parsed, err := parseMetricsTime(v); err == nil {
+			to = parsed
+		}
+	}
+
+	maxPoints := 300
+	if v := c.Query("max_points"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxPoints = n
+			if maxPoints > 2000 {
+				maxPoints = 2000
+			}
+		}
+	}
+
+	samples, err := metrics.NewHistoryStore(database).Query(instanceID, from, to, maxPoints)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if samples == nil {
+		samples = []metrics.Sample{}
+	}
+	c.JSON(http.StatusOK, gin.H{"instance_id": instanceID, "from": from.Unix(), "to": to.Unix(), "samples": samples})
+}
+
+// parseMetricsTime accepts RFC3339 ("2026-09-30T06:00:00Z") or unix seconds.
+func parseMetricsTime(v string) (time.Time, error) {
+	if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+		return time.Unix(n, 0), nil
+	}
+	return time.Parse(time.RFC3339, v)
 }
 
 // =============================================================================

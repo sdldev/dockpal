@@ -11,10 +11,10 @@
   import type { ContainerInfo } from '../../lib/types/api';
   import type { SystemInfo } from '../../lib/types/generated';
   import HealthWidget from '../Dashboard/HealthWidget.svelte';
-  import LineChart from '../stats/LineChart.svelte';
-  import { newStatBuffer, pushPoint, dynamicYBounds, type StatBuffer } from '$lib/stats-history';
+  import MetricsHistory from '../Dashboard/MetricsHistory.svelte';
+  import { newStatBuffer, pushPoint, type StatBuffer } from '$lib/stats-history';
 
-  let instanceId = get(selectedInstance) || 'local';
+  let instanceId = $state(get(selectedInstance) || 'local');
 
   let containers = $state<ContainerInfo[]>([]);
   let loading = $state(true);
@@ -38,9 +38,6 @@
 
   const runningCount = $derived(containers.filter((c) => c.state === 'running').length);
   const stoppedCount = $derived(containers.length - runningCount);
-
-  const cpuBounds = $derived(dynamicYBounds(cpuBuf.values));
-  const ramBounds = $derived(dynamicYBounds(ramBuf.values));
 
   const gaugeColor = (pct: number, normal: string) =>
     pct > 85 ? 'bg-red-500' : pct > 70 ? 'bg-amber-500' : normal;
@@ -168,47 +165,13 @@
   {/if}
 
   {#if sysInfo}
-    <!-- Live charts + info (legacy parity) -->
-    <div class="grid gap-4 md:grid-cols-3">
-      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
-        <div class="flex items-center justify-between mb-2">
-          <h3 class="text-sm font-medium text-zinc-300">CPU Usage</h3>
-          <span class="text-sm font-semibold text-blue-400">{(cpuBuf.values.at(-1) ?? 0).toFixed(1)}%</span>
-        </div>
-        <div
-          role="img"
-          aria-label="CPU usage over time, currently {(cpuBuf.values.at(-1) ?? 0).toFixed(1)} percent"
-        >
-          <LineChart
-            series={[{ label: 'CPU %', color: '#3b82f6', data: cpuBuf.values }]}
-            labels={cpuBuf.labels}
-            yMin={cpuBounds.min}
-            yMax={cpuBounds.max}
-            height={144}
-          />
-        </div>
-      </div>
-      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
-        <div class="flex items-center justify-between mb-2">
-          <h3 class="text-sm font-medium text-zinc-300">Memory Usage</h3>
-          <span class="text-sm font-semibold text-emerald-400">{(ramBuf.values.at(-1) ?? 0).toFixed(1)}%</span>
-        </div>
-        <div
-          role="img"
-          aria-label="Memory usage over time, currently {(ramBuf.values.at(-1) ?? 0).toFixed(1)} percent"
-        >
-          <LineChart
-            series={[{ label: 'RAM %', color: '#10b981', data: ramBuf.values }]}
-            labels={ramBuf.labels}
-            yMin={ramBounds.min}
-            yMax={ramBounds.max}
-            height={144}
-          />
-        </div>
-      </div>
+    <!-- Metrics history: time-series charts with range selector
+         (Live rolling buffer, 1h, 1d, 7d, 30d from the recorded series) -->
+    <MetricsHistory {instanceId} liveCpu={cpuBuf.values} liveRam={ramBuf.values} />
 
-      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
-        <h3 class="text-sm font-medium text-zinc-300 mb-3">Info</h3>
+    <!-- Info card -->
+    <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 max-w-md">
+      <h3 class="text-sm font-medium text-zinc-300 mb-3">Info</h3>
         <ul role="list" class="space-y-2.5">
           <li class="flex items-center justify-between">
             <span class="text-sm text-zinc-400">Running</span>
@@ -227,7 +190,6 @@
             <span class="text-sm font-semibold text-white">{loading ? '—' : imageCount}</span>
           </li>
         </ul>
-      </div>
     </div>
   {/if}
 </div>
