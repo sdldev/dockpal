@@ -172,6 +172,15 @@ export interface AppUpdateEvent {
 }
 
 // ContainerDetail from GET /containers/:id — includes all fields backend returns
+export interface ContainerMount {
+	Type?: string;
+	Name?: string;
+	Source: string;
+	Destination: string;
+	Mode?: string;
+	RW: boolean;
+}
+
 export interface ContainerDetail {
 	id: string;
 	name: string;
@@ -181,6 +190,14 @@ export interface ContainerDetail {
 	created: string;
 	ports: PortSummary[];
 	command?: string;
+	platform?: string;
+	env?: string[];
+	mounts?: ContainerMount[];
+	network_mode?: string;
+	restart_policy?: string;
+	networks?: Record<string, string>;
+	memory_limit?: number;
+	nano_cpus?: number;
 }
 
 // Legacy ContainerInfo for compatibility (same shape as ContainerDetail)

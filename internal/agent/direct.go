@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sdldev/dockpal/internal/db"
@@ -280,6 +281,77 @@ func (c *DirectClient) ContainerLogs(ctx context.Context, id string, tail string
 	}()
 
 	return pr, nil
+}
+
+// ExecAttachAndBridge opens an interactive shell in the container on the
+// remote agent over its /agent/docker/exec WebSocket (newer agent images),
+// pumping bytes through the bridge. Agents that predate the endpoint reject
+// the upgrade — surfaced as a clear upgrade hint.
+func (c *DirectClient) ExecAttachAndBridge(ctx context.Context, id, shell string, bridge *docker.TerminalBridge) error {
+	if shell == "" {
+		shell = "sh"
+	}
+	wsURL := strings.Replace(c.baseURL, "https://", "wss://", 1)
+	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+	wsURL += "/agent/docker/exec?container=" + id + "&shell=" + shell
+
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPClient: c.httpClient,
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.authToken}},
+	})
+	if err != nil {
+		return fmt.Errorf("terminal unavailable: the remote agent may be outdated (upgrade the agent image) — %w", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// Newer agents may also accept the token as the first message.
+	authMsg, _ := json.Marshal(map[string]string{"token": c.authToken})
+	_ = conn.Write(ctx, websocket.MessageText, authMsg)
+
+	var wg sync.WaitGroup
+
+	// agent → browser bridge
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			_, msg, err := conn.Read(ctx)
+			if err != nil {
+				bridge.Close()
+				return
+			}
+			select {
+			case bridge.FromContainer <- msg:
+			case <-bridge.Closed:
+				return
+			}
+		}
+	}()
+
+	// browser bridge → agent
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case payload, ok := <-bridge.ToContainer:
+				if !ok {
+					return
+				}
+				if err := conn.Write(ctx, websocket.MessageBinary, payload); err != nil {
+					bridge.Close()
+					return
+				}
+			case <-bridge.Closed:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	return nil
 }
 
 // Compose operations

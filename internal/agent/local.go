@@ -131,6 +131,19 @@ func (c *LocalClient) ContainerLogs(ctx context.Context, id string, tail string)
 	return c.dockerClient.ContainerLogs(ctx, id, tail)
 }
 
+// ExecAttachAndBridge opens an interactive shell in the container through
+// the local Docker daemon. shell defaults to "sh" when empty.
+func (c *LocalClient) ExecAttachAndBridge(ctx context.Context, id, shell string, bridge *docker.TerminalBridge) error {
+	if shell == "" {
+		shell = "sh"
+	}
+	execID, err := c.dockerClient.ExecCreate(ctx, id, []string{shell})
+	if err != nil {
+		return err
+	}
+	return c.dockerClient.ExecAttachAndBridge(ctx, execID, bridge)
+}
+
 // Compose operations
 
 // getAuthHeader creates an AuthHeaderFunc from a registryAuths map.

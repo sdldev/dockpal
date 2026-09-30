@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -65,6 +66,11 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	// Time-series history (recorded by the background MetricsHistoryRecorder).
 	// Query params: from,to (RFC3339 or unix), max_points (uniform downsample).
 	g.GET("/metrics/history", RequireRole(auth.RoleViewer), handleInstanceMetricsHistory)
+
+	// Interactive terminal (exec) over WebSocket. Only operators may open a
+	// shell inside a container. Auth: first WS message or ?token= (browser
+	// handshakes cannot set headers).
+	g.GET("/containers/:id/exec", RequireRole(auth.RoleOperator), handleInstanceContainerExec)
 
 	// Service routes
 	g.GET("/services", RequireRole(auth.RoleViewer), handleInstanceListServices)
@@ -392,6 +398,121 @@ func handleInstanceContainerLogs(c *gin.Context) {
 	}
 
 	streamContainerLogs(conn, reader)
+}
+
+// handleInstanceContainerExec upgrades a browser WebSocket into an
+// interactive shell (docker exec) inside the container. Protocol:
+//   - upgrade: query token or first {token} message (same as logs)
+//   - client → server: binary/text frames = stdin bytes; the first message
+//     may instead be a JSON {"token": ...} when no query token is present
+//   - server → client: binary/text frames = TTY output; exit closes the WS
+//
+// Security: operator role minimum (RequireRole on the route) — a shell
+// inside a container is effectively host-level access for privileged
+// containers.
+func handleInstanceContainerExec(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	containerID := c.Param("id")
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	// Auth: query token (browser WS) or first {token} message (API clients).
+	authToken := c.Query("token")
+	if authToken == "" {
+		var msg agentMessage
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, raw, rerr := conn.ReadMessage()
+		conn.SetReadDeadline(time.Time{})
+		if rerr != nil || json.Unmarshal(raw, &msg) != nil || msg.Token == "" {
+			conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(4001, "authentication required"))
+			return
+		}
+		authToken = msg.Token
+	}
+	claims, err := auth.ValidateJWTWithVersionCheck(authToken, jwtSecretFromContext(c), databaseFromContext(c))
+	if err != nil || !auth.HasRole(claims.Role, auth.RoleOperator) {
+		conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(4003, "insufficient permissions"))
+		return
+	}
+
+	// Bridge the browser connection to the container's TTY.
+	bridge := docker.NewTerminalBridge()
+	execDone := make(chan error, 1)
+	go func() {
+		execDone <- client.ExecAttachAndBridge(c.Request.Context(), containerID, "sh", bridge)
+	}()
+
+	var wg sync.WaitGroup
+
+	// container TTY → browser
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case chunk, ok := <-bridge.FromContainer:
+				if !ok {
+					return
+				}
+				if werr := conn.WriteMessage(websocket.BinaryMessage, chunk); werr != nil {
+					bridge.Close()
+					return
+				}
+			case <-bridge.Closed:
+				return
+			}
+		}
+	}()
+
+	// browser → container stdin
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			mtype, payload, err := conn.ReadMessage()
+			if err != nil {
+				bridge.Close()
+				return
+			}
+			_ = mtype
+			select {
+			case bridge.ToContainer <- payload:
+			case <-bridge.Closed:
+				return
+			}
+		}
+	}()
+
+	execErr := <-execDone
+	// Close the browser side: gorilla WriteMessage after close returns error
+	// which ends the pump goroutines.
+	conn.Close()
+	wg.Wait()
+	if execErr != nil && c.Request.Context().Err() == nil {
+		log.Printf("Exec session on container %s ended: %v", containerID, execErr)
+	}
+}
+
+// jwtSecretFromContext and databaseFromContext pull the values InstanceMiddleware
+// sets, keeping the exec handler self-contained.
+func jwtSecretFromContext(c *gin.Context) string {
+	if v, ok := c.Get("jwt_secret"); ok {
+		return v.(string)
+	}
+	return ""
+}
+
+func databaseFromContext(c *gin.Context) *db.DB {
+	if v, ok := c.Get("database"); ok {
+		return v.(*db.DB)
+	}
+	return nil
 }
 
 // validateContainerName is a simple validation for container names.

@@ -1,16 +1,21 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
-	import { addToast } from '$lib/store';
+	import { addToast, selectedInstance } from '$lib/store';
 	import { routeParams } from '$lib/router';
 	import type { ContainerDetail, ContainerInfo } from '$lib/types/generated';
 	import { formatPorts } from '$lib/format';
+	import { get } from 'svelte/store';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 	import StatsChart from '../Container/StatsChart.svelte';
+	import LogsViewer from '../Container/LogsViewer.svelte';
+	import ContainerTerminal from '../Container/ContainerTerminal.svelte';
 
 	// container id from the /containers/:id route (see lib/router.ts)
 	const containerId = $derived($routeParams.id ?? '');
+	// detail container lives under the instance it runs on
+	const instanceId = $derived(get(selectedInstance) || 'local');
 
 	let detail = $state<ContainerDetail | null>(null);
 	let loading = $state(true);
@@ -23,6 +28,19 @@
 	let editName = $state('');
 	let editRestartPolicy = $state('unless-stopped');
 	let savingEdit = $state(false);
+
+	// detail tabs: Overview / Logs / Env & Config / Terminal
+	const tabs = ['overview', 'logs', 'env', 'terminal'] as const;
+	type Tab = (typeof tabs)[number];
+	let activeTab = $state<Tab>('overview');
+	const isRunning = $derived((detail?.state ?? '').toLowerCase() === 'running');
+
+	function formatBytes(bytes: number): string {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+	}
 
 	async function load() {
 		if (!containerId) return;
@@ -163,31 +181,125 @@
 			</div>
 		</header>
 
-		<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-			<section class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 space-y-3">
-				<h3 class="text-sm font-semibold text-white">Details</h3>
-				<dl class="text-sm space-y-2">
-					<div class="flex justify-between">
-						<dt class="text-zinc-500">Image</dt>
-						<dd class="text-zinc-300 font-mono">{detail.image}</dd>
-					</div>
-					{#if detail.ports && detail.ports.length > 0}
-						<div class="flex justify-between">
-							<dt class="text-zinc-500">Ports</dt>
-							<dd class="text-zinc-300 font-mono">{formatPorts(detail.ports)}</dd>
-						</div>
-					{/if}
-					{#if detail.command}
-						<div class="flex justify-between">
-							<dt class="text-zinc-500">Command</dt>
-							<dd class="text-zinc-300 font-mono break-all">{detail.command}</dd>
-						</div>
-					{/if}
-				</dl>
-			</section>
-
-			<StatsChart containerId={containerId} />
+		<!-- Tabs -->
+		<div class="flex gap-1 border-b border-zinc-800">
+			{#each tabs as tab}
+				<button
+					onclick={() => { activeTab = tab; }}
+					class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
+					class:border-white={activeTab === tab}
+					class:text-white={activeTab === tab}
+					class:border-transparent={activeTab !== tab}
+					class:text-zinc-500={activeTab !== tab}
+					class:hover:text-zinc-300={activeTab !== tab}
+				>
+					{tab === 'overview' ? 'Overview' : tab === 'logs' ? 'Logs' : tab === 'env' ? 'Env & Config' : 'Terminal'}
+				</button>
+			{/each}
 		</div>
+
+		{#if activeTab === 'overview'}
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+				<section class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 space-y-3">
+					<h3 class="text-sm font-semibold text-white">Details</h3>
+					<dl class="text-sm space-y-2">
+						<div class="flex justify-between">
+							<dt class="text-zinc-500">Image</dt>
+							<dd class="text-zinc-300 font-mono">{detail.image}</dd>
+						</div>
+						{#if detail.ports && detail.ports.length > 0}
+							<div class="flex justify-between">
+								<dt class="text-zinc-500">Ports</dt>
+								<dd class="text-zinc-300 font-mono">{formatPorts(detail.ports)}</dd>
+							</div>
+						{/if}
+						{#if detail.command}
+							<div class="flex justify-between">
+								<dt class="text-zinc-500">Command</dt>
+								<dd class="text-zinc-300 font-mono break-all">{detail.command}</dd>
+							</div>
+						{/if}
+						{#if detail.restart_policy}
+							<div class="flex justify-between">
+								<dt class="text-zinc-500">Restart policy</dt>
+								<dd class="text-zinc-300 font-mono">{detail.restart_policy}</dd>
+							</div>
+						{/if}
+						{#if detail.network_mode}
+							<div class="flex justify-between">
+								<dt class="text-zinc-500">Network mode</dt>
+								<dd class="text-zinc-300 font-mono">{detail.network_mode}</dd>
+							</div>
+						{/if}
+						{#if detail.memory_limit}
+							<div class="flex justify-between">
+								<dt class="text-zinc-500">Memory limit</dt>
+								<dd class="text-zinc-300 font-mono">{formatBytes(detail.memory_limit)}</dd>
+							</div>
+						{/if}
+					</dl>
+				</section>
+
+				<StatsChart containerId={containerId} />
+			</div>
+		{:else if activeTab === 'logs'}
+			<LogsViewer {instanceId} {containerId} running={isRunning} />
+		{:else if activeTab === 'env'}
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+				<section class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+					<h3 class="text-sm font-semibold text-white mb-3">Environment ({detail.env?.length ?? 0})</h3>
+					{#if detail.env && detail.env.length > 0}
+						<ul role="list" class="space-y-1.5 max-h-96 overflow-y-auto">
+							{#each detail.env as entry (entry)}
+								<li class="px-2 py-1 rounded-sm bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-300 break-all">{entry}</li>
+							{/each}
+						</ul>
+					{:else}
+						<p class="text-sm text-zinc-600">No environment variables</p>
+					{/if}
+				</section>
+
+				<section class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 space-y-4">
+					<div>
+						<h3 class="text-sm font-semibold text-white mb-2">Networks</h3>
+						{#if detail.networks && Object.keys(detail.networks).length > 0}
+							<ul role="list" class="space-y-1.5">
+								{#each Object.entries(detail.networks) as [net, ip] (net)}
+									<li class="flex justify-between text-sm">
+										<span class="text-zinc-400 font-mono">{net}</span>
+										<span class="text-zinc-300 font-mono">{ip || '—'}</span>
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-sm text-zinc-600">No networks</p>
+						{/if}
+					</div>
+
+					<div>
+						<h3 class="text-sm font-semibold text-white mb-2">Mounts ({detail.mounts?.length ?? 0})</h3>
+						{#if detail.mounts && detail.mounts.length > 0}
+							<ul role="list" class="space-y-1.5 max-h-64 overflow-y-auto">
+								{#each detail.mounts as m (m.Source + m.Destination)}
+									<li class="px-2 py-1.5 rounded-sm bg-zinc-950 border border-zinc-800 text-xs">
+										<div class="flex items-center gap-2 mb-0.5">
+											<span class="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 uppercase">{m.Type}</span>
+											<span class={m.RW ? 'text-emerald-400' : 'text-amber-400'}>{m.RW ? 'RW' : 'RO'}</span>
+										</div>
+										<div class="font-mono text-zinc-300 break-all">{m.Source}</div>
+										<div class="font-mono text-zinc-500 break-all">→ {m.Destination}</div>
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="text-sm text-zinc-600">No mounts</p>
+						{/if}
+					</div>
+				</section>
+			</div>
+		{:else if activeTab === 'terminal'}
+			<ContainerTerminal {instanceId} {containerId} running={isRunning} />
+		{/if}
 	{/if}
 </div>
 

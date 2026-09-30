@@ -47,6 +47,11 @@ type AgentClient interface {
 	UpdateContainerImage(ctx context.Context, id string, registryAuth string) (*docker.ContainerDetail, error)
 	GetContainerStats(ctx context.Context, id string) (*docker.ContainerStats, error)
 	ContainerLogs(ctx context.Context, id string, tail string) (io.ReadCloser, error)
+	// ExecAttachAndBridge opens an interactive TTY session in the container
+	// and pumps bytes through the bridge until the shell exits or either
+	// transport side closes. Supported by local and direct clients; edge
+	// agents with older images report an error until their image is updated.
+	ExecAttachAndBridge(ctx context.Context, id, shell string, bridge *docker.TerminalBridge) error
 
 	// Compose operations
 	DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string, forcePull bool) error

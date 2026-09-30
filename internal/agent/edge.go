@@ -184,6 +184,18 @@ func (e *EdgeClient) ContainerLogs(ctx context.Context, id string, tail string) 
 	return io.NopCloser(bytes.NewReader(resp.Body)), nil
 }
 
+// ExecAttachAndBridge cannot run over the edge transport: interactive
+// terminals need a persistent bidirectional WebSocket, while the edge
+// connection multiplexes request/response. Requires an updated agent image
+// with the exec WS endpoint and an edge-aware bridge — reported clearly so
+// the UI can tell the operator why the terminal tab is unavailable.
+func (e *EdgeClient) ExecAttachAndBridge(ctx context.Context, id, shell string, bridge *docker.TerminalBridge) error {
+	bridge.Close()
+	return fmt.Errorf(
+		"interactive terminal is not yet available for edge agents — " +
+			"update the agent image on this server, or use direct mode")
+}
+
 // Compose operations
 
 // deployComposeRequest is the request body for deploying compose.

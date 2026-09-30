@@ -57,6 +57,9 @@ func (f *protectionFakeAgentClient) GetContainerStats(context.Context, string) (
 func (f *protectionFakeAgentClient) ContainerLogs(context.Context, string, string) (io.ReadCloser, error) {
 	return nil, nil
 }
+func (f *protectionFakeAgentClient) ExecAttachAndBridge(context.Context, string, string, *docker.TerminalBridge) error {
+	return nil
+}
 func (f *protectionFakeAgentClient) DeployCompose(context.Context, string, string, map[string]string, bool) error {
 	return nil
 }
