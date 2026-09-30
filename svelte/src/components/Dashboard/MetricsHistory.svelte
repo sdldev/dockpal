@@ -1,8 +1,8 @@
 <script lang="ts">
   // Metrics history panel — time-series charts over the recorded host
-  // metrics (30d retention) with a range selector. This is what lets the
-  // dashboard answer "when did the server spike to 100%?", not just "what
-  // is happening right now".
+  // metrics with a range selector (Live rolling buffer, or 1h/12h from the
+  // recorder). This is what lets the dashboard answer "when did the server
+  // spike?", not just "what is happening right now".
   //
   // Data comes from GET /api/instances/:id/metrics/history (backend
   // MetricsHistoryRecorder, 30s sampling, uniform downsampling server-side).
@@ -28,13 +28,13 @@
   }
 
   // Range options. `live` keeps the old in-page 2.5s rolling buffer look
-  // (no history fetch); the rest query the recorder.
+  // (no history fetch); 1h/12h query the 30s recorder. Longer ranges were
+  // removed: at 30d granularity a 300-point downsample flattens spikes into
+  // an unreadable average, which misrepresents the server's real state.
   const ranges = [
     { id: 'live', label: 'Live', hours: 0 },
     { id: '1h', label: '1h', hours: 1 },
-    { id: '1d', label: '1d', hours: 24 },
-    { id: '7d', label: '7d', hours: 24 * 7 },
-    { id: '30d', label: '30d', hours: 24 * 30 }
+    { id: '12h', label: '12h', hours: 12 }
   ] as const;
   type RangeId = (typeof ranges)[number]['id'];
 
@@ -111,12 +111,16 @@
       : samples.map((s) => formatTimeLabel(s.ts, activeRange))
   );
 
-  function formatTimeLabel(ts: number, range: RangeId): string {
+  function formatTimeLabel(ts: number, _range: RangeId): string {
     const d = new Date(ts * 1000);
     const time = d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-    if (range === '1h' || range === 'live') return time;
-    const day = `${d.getMonth() + 1}/${d.getDate()}`;
-    return range === '1d' ? time : `${day} ${time}`;
+    // Live/1h use time-of-day only; 12h adds the date so points on other
+    // days stay unambiguous.
+    if (_range === '12h') {
+      const day = `${d.getMonth() + 1}/${d.getDate()}`;
+      return `${day} ${time}`;
+    }
+    return time;
   }
 
   const latest = $derived({
@@ -159,7 +163,7 @@
       {:else if loading}
         loading…
       {:else if samples.length > 0}
-        {samples.length} points · 30s samples · 30d retained
+        {samples.length} points · 30s samples
       {/if}
     </span>
   </div>
