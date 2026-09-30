@@ -45,8 +45,9 @@
 
   // Sidebar: open by default on desktop, closed on mobile (evaluated once
   // at app start so innerWidth is measured after hydration, not at import).
+  // The 768px threshold must match the md: breakpoint used on the wrapper.
   $effect.pre(() => {
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
       sidebarOpen.set(false);
     }
   });
@@ -87,17 +88,18 @@
   <Login />
 {:else}
   <div class="flex min-h-screen">
-    <!-- Sidebar: overlay on all breakpoints when open; toggled from the
-         hamburger in the navheader (fully off-screen when closed). -->
+    <!-- Sidebar: pushes content from md (768px) up — in-flow sticky so it
+         never covers the page; below md it slides in as an overlay drawer
+         with a backdrop. Toggled from the hamburger in the navheader. -->
     {#if $sidebarOpen}
       <!-- Backdrop (mobile only; desktop content stays behind the sidebar) -->
       <button
-        class="fixed inset-0 z-40 bg-black/60 lg:hidden"
+        class="fixed inset-0 z-40 bg-black/60 md:hidden"
         aria-label="Close sidebar"
         onclick={() => sidebarOpen.set(false)}
       ></button>
       <div
-        class="fixed inset-y-0 left-0 z-50 w-64 lg:static lg:z-0 lg:h-screen lg:sticky lg:top-0 transition-transform duration-200"
+        class="fixed inset-y-0 left-0 z-50 w-64 md:sticky md:top-0 md:bottom-auto md:z-0"
       >
         <Sidebar currentRoute={$currentPage} logout={logout} />
       </div>

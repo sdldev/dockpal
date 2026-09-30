@@ -89,10 +89,11 @@
     logout?.();
   }
 
-  // On mobile the sidebar is an overlay; navigate should close it.
+  // On mobile (< md, matching App.svelte) the sidebar is an overlay;
+  // navigate should close it there. On desktop it pushes content instead.
   function handleNavigate(id: string) {
     navigate(id);
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
       sidebarOpen.set(false);
     }
   }
