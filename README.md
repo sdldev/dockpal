@@ -293,12 +293,11 @@ dockpal/
 │   ├── tests/                 # Vitest unit tests
 │   └── vite.config.ts         # Dev proxy /api → :3012
 ├── web/                       # Embedded SPA (web/svelteDist = vite build output)
-├── docs/                      # Design docs + svelte-migration notes
 ├── templates/                 # JSON deploy templates
 └── update.sh                  # Self-updater script
 ```
 
-> Panduan kontribusi untuk AI/editor (perintah, arsitektur, testing notes) ada di [AGENTS.md](AGENTS.md). Catatan migrasi SPA per-phase ada di [docs/svelte-migration/](docs/svelte-migration/).
+> Panduan kontribusi untuk AI/editor (perintah, arsitektur, testing notes) ada di [AGENTS.md](AGENTS.md).
 
 ---
 
