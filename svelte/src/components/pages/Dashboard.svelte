@@ -185,9 +185,10 @@
       liveTx={txBuf.values}
     />
 
-    <!-- Info card -->
-    <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 max-w-md">
-      <h3 class="text-sm font-medium text-zinc-300 mb-3">Info</h3>
+    <!-- Info + Active Containers, side by side -->
+    <div class="grid gap-4 lg:grid-cols-2">
+      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+        <h3 class="text-sm font-medium text-zinc-300 mb-3">Info</h3>
         <ul role="list" class="space-y-2.5">
           <li class="flex items-center justify-between">
             <span class="text-sm text-zinc-400">Running</span>
@@ -206,6 +207,31 @@
             <span class="text-sm font-semibold text-white">{loading ? '—' : imageCount}</span>
           </li>
         </ul>
+      </div>
+
+      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-medium text-zinc-300">Active Containers</h3>
+          <span class="text-xs text-zinc-500">{runningCount} running</span>
+        </div>
+        {#if loading}
+          <p class="text-sm text-zinc-600">Loading…</p>
+        {:else if runningCount === 0}
+          <p class="text-sm text-zinc-600">No running containers</p>
+        {:else}
+          <ul role="list" class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+            {#each containers.filter((c) => c.state === 'running') as c (c.id)}
+              <li class="flex items-center justify-between gap-3 px-2 py-1.5 rounded-sm bg-zinc-950 border border-zinc-800">
+                <span class="flex items-center gap-2 min-w-0">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-hidden="true"></span>
+                  <span class="text-sm text-zinc-200 truncate">{c.name}</span>
+                </span>
+                <span class="text-xs text-zinc-500 font-mono truncate max-w-40">{c.image}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>

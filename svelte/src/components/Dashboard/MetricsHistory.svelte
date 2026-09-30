@@ -200,7 +200,7 @@
       charts will appear shortly.
     </div>
   {:else}
-    <div class="grid gap-4 md:grid-cols-3">
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       <!-- CPU -->
       <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
         <div class="flex items-center justify-between mb-1">
@@ -216,7 +216,7 @@
           series={[{ label: 'CPU %', color: '#3b82f6', data: cpuData }]}
           {labels}
           yMin={0}
-          height={150}
+          height={132}
         />
       </div>
 
@@ -235,7 +235,7 @@
           series={[{ label: 'RAM %', color: '#10b981', data: ramData }]}
           {labels}
           yMin={0}
-          height={150}
+          height={132}
         />
       </div>
 
@@ -254,7 +254,7 @@
           series={[{ label: 'Disk %', color: '#8b5cf6', data: diskData }]}
           {labels}
           yMin={0}
-          height={150}
+          height={132}
         />
       </div>
 
@@ -278,7 +278,7 @@
           {labels}
           yMin={0}
           formatY={formatBps}
-          height={150}
+          height={132}
         />
       </div>
     </div>
