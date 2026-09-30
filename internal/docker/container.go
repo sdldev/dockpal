@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	apinetwork "github.com/moby/moby/api/types/network"
@@ -101,10 +104,11 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 
 type ContainerDetail struct {
 	ContainerInfo
-	Platform      string                 `json:"platform"`
-	Env           []string               `json:"env"`
-	Mounts        []container.MountPoint `json:"mounts"`
-	NetworkMode   string                 `json:"network_mode"`
+	Platform    string                 `json:"platform"`
+	Command     []string               `json:"command,omitempty"`
+	Env         []string               `json:"env"`
+	Mounts      []container.MountPoint `json:"mounts"`
+	NetworkMode string                 `json:"network_mode"`
 	RestartPolicy string                 `json:"restart_policy"`
 	Networks      map[string]string      `json:"networks"`
 	MemoryLimit   int64                  `json:"memory_limit"`
@@ -144,6 +148,13 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDet
 		nanoCPUs = ctr.HostConfig.NanoCPUs
 	}
 
+	// Docker reports the created timestamp as an RFC 3339 string in the inspect
+	// response, but the API exposes it as a unix timestamp (as the list does).
+	created := int64(0)
+	if t, err := time.Parse(time.RFC3339Nano, ctr.Created); err == nil {
+		created = t.Unix()
+	}
+
 	info := &ContainerDetail{
 		ContainerInfo: ContainerInfo{
 			ID:      ctr.ID[:12],
@@ -151,10 +162,11 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDet
 			Image:   ctr.Config.Image,
 			Status:  status,
 			State:   status,
-			Ports:   []container.PortSummary{},
-			Created: 0,
+			Ports:   portSummaries(ctr.NetworkSettings),
+			Created: created,
 		},
 		Platform:      ctr.Platform,
+		Command:       ctr.Config.Cmd,
 		Env:           ctr.Config.Env,
 		Mounts:        ctr.Mounts,
 		NetworkMode:   networkMode,
@@ -165,6 +177,53 @@ func (c *Client) InspectContainer(ctx context.Context, id string) (*ContainerDet
 	}
 
 	return info, nil
+}
+
+// portSummaries builds the port list for the container detail from the inspect
+// result. Docker reports every published port once per binding (IPv4 0.0.0.0
+// and IPv6 ::), which is exactly what the list endpoint exposes too — the
+// frontend dedupes the rendered string, so both entries are kept here.
+// Ports that are exposed by the image but not published on the host appear
+// with a private port only. The result is sorted so the API output is stable.
+func portSummaries(settings *container.NetworkSettings) []container.PortSummary {
+	if settings == nil {
+		return nil
+	}
+	ports := make([]container.PortSummary, 0, len(settings.Ports))
+	for port, bindings := range settings.Ports {
+		if len(bindings) == 0 {
+			ports = append(ports, container.PortSummary{
+				PrivatePort: port.Num(),
+				Type:        string(port.Proto()),
+			})
+			continue
+		}
+		for _, b := range bindings {
+			ps := container.PortSummary{
+				IP:          b.HostIP,
+				PrivatePort: port.Num(),
+				Type:        string(port.Proto()),
+			}
+			if n, err := strconv.ParseUint(b.HostPort, 10, 16); err == nil {
+				ps.PublicPort = uint16(n)
+			}
+			ports = append(ports, ps)
+		}
+	}
+	sort.Slice(ports, func(i, j int) bool {
+		a, b := ports[i], ports[j]
+		if a.PrivatePort != b.PrivatePort {
+			return a.PrivatePort < b.PrivatePort
+		}
+		if a.PublicPort != b.PublicPort {
+			return a.PublicPort < b.PublicPort
+		}
+		if a.Type != b.Type {
+			return a.Type < b.Type
+		}
+		return a.IP.String() < b.IP.String()
+	})
+	return ports
 }
 
 func (c *Client) StartContainer(ctx context.Context, id string) error {

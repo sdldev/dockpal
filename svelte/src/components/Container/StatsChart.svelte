@@ -7,6 +7,7 @@
 	import { get } from 'svelte/store';
 	import type { ContainerStats } from '$lib/types/generated';
 	import { selectedInstance } from '$lib/store';
+	import { getToken } from '$lib/api/client';
 	import LineChart from '../stats/LineChart.svelte';
 	import { newStatBuffer, pushPoint, formatBytes, seriesMax, type StatBuffer } from '$lib/stats-history';
 
@@ -43,7 +44,7 @@
 		try {
 			// raw fetch with explicit auth header (api.get would trigger global
 			// logout on transient 401s — we just want to skip the tick instead)
-			const token = localStorage.getItem('dockpal_token');
+			const token = getToken();
 			const response = await fetch(statsPath(get(selectedInstance) || 'local'), {
 				headers: token ? { Authorization: `Bearer ${token}` } : {}
 			});

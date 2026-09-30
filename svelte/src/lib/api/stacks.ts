@@ -2,7 +2,7 @@
 // Instance-aware: "local" targets /api/stacks, any other instance id targets
 // /api/instances/<id>/stacks (mirrored routes on the server).
 
-import { api } from './client';
+import { api, getToken } from './client';
 
 export interface StackService {
   name: string;
@@ -122,7 +122,7 @@ export function watchDeploy(
   onDone?: () => void,
   instanceId = 'local'
 ): () => void {
-  const token = localStorage.getItem('dockpal_token') ?? '';
+  const token = getToken() ?? '';
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(
     `${proto}//${window.location.host}/api/instances/${encodeURIComponent(instanceId)}/deploy/stream/${encodeURIComponent(deployId)}?token=${encodeURIComponent(token)}`

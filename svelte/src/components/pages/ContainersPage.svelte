@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import type { ContainerInfo } from '$lib/types/api';
-	import { formatPort } from '$lib/format';
+	import { formatPort, dedupePorts } from '$lib/format';
 	import { navigate } from '$lib/router';
 	import StatsChart from '../Container/StatsChart.svelte';
 	import Button from '../ui/Button.svelte';
@@ -123,8 +123,9 @@
 					</td>
 					<td class="px-4 py-2.5 text-sm text-zinc-400 font-mono">
 						{#if Array.isArray(container.ports) && container.ports.length > 0}
-							{#each container.ports.slice(0, 2) as port}<code class="mr-2 text-xs">{formatPort(port)}</code>{/each}
-							{#if container.ports.length > 2}<span class="text-zinc-600 text-xs">+{container.ports.length - 2}</span>{/if}
+							{@const ports = dedupePorts(container.ports)}
+							{#each ports.slice(0, 2) as port}<code class="mr-2 text-xs">{formatPort(port)}</code>{/each}
+							{#if ports.length > 2}<span class="text-zinc-600 text-xs">+{ports.length - 2}</span>{/if}
 						{:else}
 							<span class="text-zinc-600 text-xs">No ports</span>
 						{/if}

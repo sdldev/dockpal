@@ -213,10 +213,18 @@
 								<dd class="text-zinc-300 font-mono">{formatPorts(detail.ports)}</dd>
 							</div>
 						{/if}
-						{#if detail.command}
+						{#if detail.command && detail.command.length > 0}
 							<div class="flex justify-between">
 								<dt class="text-zinc-500">Command</dt>
-								<dd class="text-zinc-300 font-mono break-all">{detail.command}</dd>
+								<dd class="text-zinc-300 font-mono break-all">{detail.command.join(' ')}</dd>
+							</div>
+						{/if}
+						{#if detail.created}
+							<div class="flex justify-between">
+								<dt class="text-zinc-500">Created</dt>
+								<dd class="text-zinc-300 font-mono">
+									{new Date(detail.created * 1000).toLocaleString('en-US', { hour12: false })}
+								</dd>
 							</div>
 						{/if}
 						{#if detail.restart_policy}

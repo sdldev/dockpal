@@ -187,9 +187,9 @@ export interface ContainerDetail {
 	image: string;
 	state: string;
 	status: string;
-	created: string;
+	created: number;
 	ports: PortSummary[];
-	command?: string;
+	command?: string[];
 	platform?: string;
 	env?: string[];
 	mounts?: ContainerMount[];

@@ -975,15 +975,24 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		if err != nil {
 			return
 		}
-		if !authenticateWebSocketFirstMessage(conn, c) {
-			conn.Close()
+		defer conn.Close()
+
+		// Auth: query token (browser WS) or first {token} message (API clients) —
+		// same protocol as the instance-scoped logs handler.
+		if q := c.Query("token"); q != "" {
+			claims, aerr := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database)
+			if aerr != nil || !auth.HasRole(claims.Role, auth.RoleViewer) {
+				conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(4001, "authentication failed"))
+				return
+			}
+		} else if !authenticateWebSocketFirstMessage(conn, c) {
 			return
 		}
 
-		reader, err := client.ContainerLogs(c.Request.Context(), c.Param("id"), "100")
+		reader, err := client.ContainerLogs(c.Request.Context(), c.Param("id"), c.DefaultQuery("tail", "100"))
 		if err != nil {
 			conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
-			conn.Close()
 			return
 		}
 

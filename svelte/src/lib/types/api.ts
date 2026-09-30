@@ -53,7 +53,7 @@ export interface ContainerInfo {
   status: string;
   state: string;
   ports: PortSummary[];
-  created: string;
+  created: number;
   network_mode?: string;
 }
 

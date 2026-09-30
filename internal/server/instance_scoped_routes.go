@@ -381,9 +381,18 @@ func handleInstanceContainerLogs(c *gin.Context) {
 	if err != nil {
 		return
 	}
+	defer conn.Close()
 
-	if !authenticateWebSocketFirstMessage(conn, c) {
-		conn.Close()
+	// Auth: query token (browser WS) or first {token} message (API clients) —
+	// same protocol as the exec handler below.
+	if q := c.Query("token"); q != "" {
+		claims, aerr := auth.ValidateJWTWithVersionCheck(q, jwtSecretFromContext(c), databaseFromContext(c))
+		if aerr != nil || !auth.HasRole(claims.Role, auth.RoleViewer) {
+			conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(4001, "authentication failed"))
+			return
+		}
+	} else if !authenticateWebSocketFirstMessage(conn, c) {
 		return
 	}
 
