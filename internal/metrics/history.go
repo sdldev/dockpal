@@ -23,6 +23,9 @@ type Sample struct {
 	TotalRAM   uint64  `json:"total_ram"`
 	UsedDisk   uint64  `json:"used_disk"`
 	TotalDisk  uint64  `json:"total_disk"`
+	// Network I/O rates (bytes/sec); zero before this field existed.
+	NetworkRxBps float64 `json:"network_rx_bps"`
+	NetworkTxBps float64 `json:"network_tx_bps"`
 }
 
 // metricsBucket mirrors db's private bucketMetrics name — it must match
@@ -262,12 +265,14 @@ func (r *HistoryRecorder) collect() {
 			continue
 		}
 		sample := Sample{
-			Timestamp:  now.Unix(),
-			CPUPercent: stats.CPUPercent,
-			UsedRAM:    stats.UsedRAM,
-			TotalRAM:   stats.TotalRAM,
-			UsedDisk:   stats.UsedDisk,
-			TotalDisk:  stats.TotalDisk,
+			Timestamp:    now.Unix(),
+			CPUPercent:   stats.CPUPercent,
+			UsedRAM:      stats.UsedRAM,
+			TotalRAM:     stats.TotalRAM,
+			UsedDisk:     stats.UsedDisk,
+			TotalDisk:    stats.TotalDisk,
+			NetworkRxBps: stats.NetworkRxBps,
+			NetworkTxBps: stats.NetworkTxBps,
 		}
 		if err := r.store.Append(id, sample); err != nil {
 			log.Printf("Failed to record metrics sample for %s: %v", id, err)

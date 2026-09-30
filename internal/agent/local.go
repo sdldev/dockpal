@@ -377,6 +377,7 @@ func (c *LocalClient) GetHostInfo(ctx context.Context) (*HostInfo, error) {
 func (c *LocalClient) GetHostStats(ctx context.Context) (*HostStats, error) {
 	cpuPercent := getCPUPercent()
 	totalRAM, usedRAM := getMemoryInfo()
+	rxBps, txBps := getNetworkIORates()
 
 	var stat syscall.Statfs_t
 	syscall.Statfs("/", &stat)
@@ -385,11 +386,13 @@ func (c *LocalClient) GetHostStats(ctx context.Context) (*HostStats, error) {
 	usedDisk := (stat.Blocks - stat.Bfree) * uint64(stat.Bsize)
 
 	return &HostStats{
-		CPUPercent: cpuPercent,
-		UsedRAM:    usedRAM,
-		TotalRAM:   totalRAM,
-		UsedDisk:   usedDisk,
-		TotalDisk:  totalDisk,
+		CPUPercent:   cpuPercent,
+		UsedRAM:      usedRAM,
+		TotalRAM:     totalRAM,
+		UsedDisk:     usedDisk,
+		TotalDisk:    totalDisk,
+		NetworkRxBps: rxBps,
+		NetworkTxBps: txBps,
 	}, nil
 }
 
@@ -611,6 +614,46 @@ func getCPUPercent() float64 {
 	}
 	idleDelta := float64(idle2 - idle1)
 	return (1.0 - idleDelta/totalDelta) * 100.0
+}
+
+// getNetworkIORates reads /proc/net/dev twice over a short interval and
+// returns per-second received/transmitted byte rates aggregated across all
+// physical interfaces (skips lo). Format: "iface: bytes packets ..." with
+// rx bytes at field 1 and tx bytes at field 9.
+func getNetworkIORates() (rxBps, txBps float64) {
+	readTotals := func() (rx, tx uint64) {
+		data, err := readFile("/proc/net/dev")
+		if err != nil {
+			return 0, 0
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			iface := strings.TrimSpace(parts[0])
+			if iface == "lo" || strings.HasPrefix(iface, "veth") {
+				continue
+			}
+			fields := strings.Fields(parts[1])
+			if len(fields) < 9 {
+				continue
+			}
+			r, _ := strconv.ParseUint(fields[0], 10, 64)
+			t, _ := strconv.ParseUint(fields[8], 10, 64)
+			rx += r
+			tx += t
+		}
+		return rx, tx
+	}
+
+	const interval = 200 * time.Millisecond
+	rx1, tx1 := readTotals()
+	time.Sleep(interval)
+	rx2, tx2 := readTotals()
+
+	secs := interval.Seconds()
+	return float64(rx2-rx1) / secs, float64(tx2-tx1) / secs
 }
 
 // readFile is a wrapper around os.ReadFile.

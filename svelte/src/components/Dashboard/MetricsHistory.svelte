@@ -18,6 +18,8 @@
     total_ram: number;
     used_disk: number;
     total_disk: number;
+    network_rx_bps: number;
+    network_tx_bps: number;
   }
 
   interface HistoryResponse {
@@ -123,10 +125,15 @@
     return time;
   }
 
+  const rxData = $derived(samples.map((s) => s.network_rx_bps ?? 0));
+  const txData = $derived(samples.map((s) => s.network_tx_bps ?? 0));
+
   const latest = $derived({
     cpu: cpuData.at(-1) ?? 0,
     ram: ramData.at(-1) ?? 0,
-    disk: diskData.at(-1) ?? 0
+    disk: diskData.at(-1) ?? 0,
+    rx: rxData.at(-1) ?? 0,
+    tx: txData.at(-1) ?? 0
   });
 
   // Peak over the visible range — the whole point of history: see the max,
@@ -134,10 +141,20 @@
   const peak = $derived({
     cpu: cpuData.length ? Math.max(...cpuData) : 0,
     ram: ramData.length ? Math.max(...ramData) : 0,
-    disk: diskData.length ? Math.max(...diskData) : 0
+    disk: diskData.length ? Math.max(...diskData) : 0,
+    net: rxData.length || txData.length
+      ? Math.max(...rxData, ...txData, 0)
+      : 0
   });
 
   const noHistory = $derived(!usingLive && !loading && samples.length === 0);
+
+  function formatBps(bps: number): string {
+    if (bps < 1024) return `${bps.toFixed(0)} B/s`;
+    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+    if (bps < 1024 * 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
+    return `${(bps / 1024 / 1024 / 1024).toFixed(2)} GB/s`;
+  }
 </script>
 
 <div class="space-y-4">
@@ -234,6 +251,36 @@
           yMin={0}
           height={150}
         />
+      </div>
+
+      <!-- Network -->
+      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-sm font-medium text-zinc-300">Network</h3>
+          <div class="text-right text-xs">
+            <span class="text-sky-400 font-semibold">↓ {formatBps(latest.rx)}</span>
+            <span class="text-amber-400 font-semibold ml-2">↑ {formatBps(latest.tx)}</span>
+            {#if !usingLive && peak.net > 0}
+              <span class="block text-[10px] text-zinc-600">peak {formatBps(peak.net)}</span>
+            {/if}
+          </div>
+        </div>
+        {#if usingLive}
+          <div class="flex h-[150px] items-center justify-center text-xs text-zinc-600">
+            Network history uses the recorder — switch to 1h or 12h
+          </div>
+        {:else}
+          <LineChart
+            series={[
+              { label: 'Download', color: '#0ea5e9', data: rxData },
+              { label: 'Upload', color: '#f59e0b', data: txData }
+            ]}
+            {labels}
+            yMin={0}
+            formatY={formatBps}
+            height={150}
+          />
+        {/if}
       </div>
     </div>
   {/if}

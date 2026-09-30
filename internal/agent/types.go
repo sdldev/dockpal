@@ -25,6 +25,12 @@ type HostStats struct {
 	TotalRAM   uint64  `json:"total_ram"`
 	UsedDisk   uint64  `json:"used_disk"`
 	TotalDisk  uint64  `json:"total_disk"`
+	// Network I/O rates (bytes/sec), aggregated across all physical interfaces
+	// from /proc/net/dev. Zero when not measured yet or on platforms without
+	// /proc (a remote agent image that predates this field keeps it at 0 —
+	// the JSON tag keeps backward compatibility).
+	NetworkRxBps float64 `json:"network_rx_bps"`
+	NetworkTxBps float64 `json:"network_tx_bps"`
 }
 
 // AgentClient defines the interface for interacting with a Docker host agent.
