@@ -176,6 +176,18 @@
 	];
 </script>
 
+{#snippet gauge(pct: number, barClass: string, label: string)}
+	<div class="min-w-24 max-w-36 space-y-1">
+		<div class="flex justify-between text-[11px] text-zinc-400">
+			<span class="font-semibold text-zinc-300">{pct.toFixed(1)}%</span>
+		</div>
+		<div class="w-full bg-zinc-800 rounded-full h-1.5">
+			<div class={`${barClass} h-1.5 rounded-full`} style={`width: ${Math.min(pct, 100)}%`}></div>
+		</div>
+		<span class="text-[10px] text-zinc-600 font-mono">{label}</span>
+	</div>
+{/snippet}
+
 <div class="space-y-6">
 	<!-- Tabs (page title lives in the navheader now) -->
 	<div class="flex items-center justify-end">
@@ -222,169 +234,144 @@
 				</div>
 			</div>
 
-			<!-- Instance Cards Grid -->
-			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-				{#each $fleet.instances as inst (inst.id)}
-					<div class="bg-zinc-900 border border-zinc-800/80 rounded-sm p-5 flex flex-col justify-between space-y-4">
-						<!-- Instance Title / Status -->
-						<div class="flex items-center justify-between border-b border-zinc-800/60 pb-3">
-							<div>
-								<div class="flex items-center gap-2">
-									<span
-										class={`w-2.5 h-2.5 rounded-full ${fleet.isOnline(inst) ? 'bg-green-500' : 'bg-red-500'}`}
-									></span>
-									<span class="font-semibold text-white text-sm">
-										{inst.id === 'local' ? 'This Server' : inst.name}
-									</span>
-									<span
-										class="text-[10px] bg-zinc-800 border border-zinc-700/60 text-zinc-400 px-1.5 py-0.5 rounded uppercase font-mono"
-									>
-										{inst.mode || 'local'}
-									</span>
-								</div>
-								<p class="text-xs text-zinc-500 mt-1 font-mono">
-									{inst.id === 'local' ? 'Local Connection' : inst.host || 'Edge Agent'}
-								</p>
-							</div>
-
-							<div class="flex items-center gap-2">
-								<span
-									class={`text-xs font-semibold px-2 py-0.5 rounded ${fleet.isOnline(inst) ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}
-								>
-									{fleet.isOnline(inst) ? 'ONLINE' : 'OFFLINE'}
-								</span>
-								{#if canManage(inst.id)}
-									<div class="relative">
-										<button
-											class="p-1.5 rounded-sm text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
-											title="Server actions"
-											aria-label="Server actions for {inst.id === 'local' ? 'This Server' : inst.name}"
-											onclick={() => (instanceMenuOpen = instanceMenuOpen === inst.id ? null : inst.id)}
-										>
-											<Icon name="settings" class="w-4 h-4" />
-										</button>
-										{#if instanceMenuOpen === inst.id}
-											<!-- Backdrop to close the menu -->
-											<button
-												class="fixed inset-0 z-40 cursor-default"
-												aria-label="Close menu"
-												onclick={() => (instanceMenuOpen = null)}
-											></button>
-											<div class="absolute right-0 top-9 z-50 w-44 bg-zinc-900 border border-zinc-700 rounded-sm shadow-lg py-1">
-												<button
-													class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
-													disabled={testingId === inst.id}
-													onclick={() => testInstance(inst.id)}
-												>
-													<Icon name="restart" class="w-4 h-4" />
-													{testingId === inst.id ? 'Testing…' : 'Test connection'}
-												</button>
-												<button
-													class="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 hover:text-red-300 flex items-center gap-2"
-													onclick={() => { removeTarget = { id: inst.id, name: inst.id === 'local' ? 'This Server' : inst.name }; }}
-												>
-													<Icon name="trash" class="w-4 h-4" />
-													Remove server
-												</button>
-											</div>
-										{/if}
-									</div>
-								{/if}
-							</div>
-						</div>
-
-						{#if testResult && testResult.id === inst.id}
-							<div
-								class={`mt-3 px-3 py-2 rounded-sm text-xs border ${testResult.ok ? 'bg-emerald-400/10 border-emerald-400/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}
-							>
-								{testResult.ok ? '✓' : '✕'} {testResult.message}
-							</div>
-						{/if}
-
-						<!-- Gauges (only if online) -->
-						{#if fleet.isOnline(inst)}
-							<div class="grid grid-cols-3 gap-3">
-								<!-- CPU -->
-								<div class="space-y-1.5">
-									<div class="flex justify-between text-xs text-zinc-400">
-										<span>CPU</span>
-										<span class="font-semibold">{(inst.sysInfo?.cpu_percent || 0).toFixed(1)}%</span>
-									</div>
-									<div class="w-full bg-zinc-800 rounded-full h-1.5">
-										<div
-											class="bg-blue-500 h-1.5 rounded-full"
-											style={`width: ${Math.min(inst.sysInfo?.cpu_percent || 0, 100)}%`}
-										></div>
-									</div>
-								</div>
-
-								<!-- RAM -->
-								<div class="space-y-1.5">
-									<div class="flex justify-between text-xs text-zinc-400">
-										<span>Memory</span>
-										<span class="font-semibold"
-											>{gaugePercent(inst.sysInfo?.used_ram || 0, inst.sysInfo?.total_ram || 0).toFixed(
-												1
-											)}%</span
-										>
-									</div>
-									<div class="w-full bg-zinc-800 rounded-full h-1.5">
-										<div
-											class="bg-emerald-500 h-1.5 rounded-full"
-											style={`width: ${gaugePercent(inst.sysInfo?.used_ram || 0, inst.sysInfo?.total_ram || 0)}%`}
-										></div>
-									</div>
-								</div>
-
-								<!-- Disk -->
-								<div class="space-y-1.5">
-									<div class="flex justify-between text-xs text-zinc-400">
-										<span>Disk</span>
-										<span class="font-semibold"
-											>{gaugePercent(inst.sysInfo?.used_disk || 0, inst.sysInfo?.total_disk || 0).toFixed(
-												1
-											)}%</span
-										>
-									</div>
-									<div class="w-full bg-zinc-800 rounded-full h-1.5">
-										<div
-											class="bg-violet-500 h-1.5 rounded-full"
-											style={`width: ${gaugePercent(inst.sysInfo?.used_disk || 0, inst.sysInfo?.total_disk || 0)}%`}
-										></div>
-									</div>
-								</div>
-							</div>
-						{:else}
-							<div class="py-4 text-center text-xs text-zinc-500">
-								Agent is unreachable. Ensure the agent service is running on the host.
-							</div>
-						{/if}
-
-						<!-- Containers List Summary -->
-						<div class="border-t border-zinc-800/60 pt-3">
-							<div class="flex justify-between text-xs text-zinc-400 mb-2">
-								<span>Containers</span>
-								<span class="font-semibold">{inst.containers?.length || 0}</span>
-							</div>
-
-							<div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-								{#each inst.containers || [] as c (c.id)}
-									<span
-										class="px-2 py-0.5 bg-zinc-950 border border-zinc-800 rounded-full text-[10px] text-zinc-300 flex items-center gap-1.5"
-									>
+			<!-- Servers table: per-server resource + workload summary -->
+			<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
+				<table class="w-full">
+					<thead>
+						<tr class="border-b border-zinc-800 bg-zinc-950/20">
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Name</th>
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Status</th>
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">CPU</th>
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Memory</th>
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Disk</th>
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Containers</th>
+							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Images</th>
+							<th class="text-right px-4 py-2.5 text-xs font-medium text-zinc-500"></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each $fleet.instances as inst (inst.id)}
+							{@const online = fleet.isOnline(inst)}
+							{@const running = (inst.containers ?? []).filter((c) => c.state === 'running').length}
+							{@const stopped = (inst.containers ?? []).length - running}
+							<tr class="border-b border-zinc-800/40 hover:bg-zinc-950/10">
+								<!-- Name / mode / host -->
+								<td class="px-4 py-3">
+									<div class="flex items-center gap-2">
 										<span
-											class={`w-1.5 h-1.5 rounded-full ${c.state === 'running' ? 'bg-green-500' : 'bg-zinc-600'}`}
+											class={`w-2.5 h-2.5 rounded-full shrink-0 ${online ? 'bg-green-500' : 'bg-red-500'}`}
 										></span>
-										<span>{c.name}</span>
+										<div>
+											<div class="flex items-center gap-2">
+												<span class="text-sm font-semibold text-white">
+													{inst.id === 'local' ? 'This Server' : inst.name}
+												</span>
+												<span
+													class="text-[10px] bg-zinc-800 border border-zinc-700/60 text-zinc-400 px-1.5 py-0.5 rounded uppercase font-mono"
+												>
+													{inst.mode || 'local'}
+												</span>
+											</div>
+											<span class="text-xs text-zinc-500 font-mono">
+												{inst.id === 'local' ? 'Local Connection' : inst.host || 'Edge Agent'}
+											</span>
+										</div>
+									</div>
+								</td>
+
+								<!-- Status -->
+								<td class="px-4 py-3">
+									<span
+										class={`text-xs font-semibold px-2 py-0.5 rounded ${online ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}
+									>
+										{online ? 'ONLINE' : 'OFFLINE'}
 									</span>
-								{/each}
-								{#if !inst.containers || inst.containers.length === 0}
-									<span class="text-xs text-zinc-600">No containers</span>
+									{#if testResult && testResult.id === inst.id}
+										<div class={`mt-1.5 text-[11px] ${testResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+											{testResult.ok ? '✓' : '✕'} {testResult.message}
+										</div>
+									{/if}
+								</td>
+
+								<!-- CPU / Memory / Disk -->
+								{#if online}
+									<td class="px-4 py-3">
+										{@render gauge(inst.sysInfo?.cpu_percent || 0, 'bg-blue-500', `${inst.sysInfo?.cpu_cores ?? 0} cores`)}
+									</td>
+									<td class="px-4 py-3">
+										{@render gauge(gaugePercent(inst.sysInfo?.used_ram || 0, inst.sysInfo?.total_ram || 0), 'bg-emerald-500', `${formatBytes(inst.sysInfo?.used_ram || 0)} / ${formatBytes(inst.sysInfo?.total_ram || 0)}`)}
+									</td>
+									<td class="px-4 py-3">
+										{@render gauge(gaugePercent(inst.sysInfo?.used_disk || 0, inst.sysInfo?.total_disk || 0), 'bg-violet-500', `${formatBytes(inst.sysInfo?.used_disk || 0)} / ${formatBytes(inst.sysInfo?.total_disk || 0)}`)}
+									</td>
+								{:else}
+									<td colspan="3" class="px-4 py-3 text-xs text-zinc-600">Agent unreachable</td>
 								{/if}
-							</div>
-						</div>
-					</div>
-				{/each}
+
+								<!-- Containers (on/off) -->
+								<td class="px-4 py-3">
+									{#if online}
+										<div class="flex items-center gap-1.5 text-xs">
+											<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-400/10 text-emerald-400 font-medium">
+												<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>{running}
+											</span>
+											<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-400/10 text-zinc-400 font-medium">
+												<span class="w-1.5 h-1.5 rounded-full bg-zinc-500"></span>{stopped}
+											</span>
+										</div>
+									{:else}
+										<span class="text-xs text-zinc-600">—</span>
+									{/if}
+								</td>
+
+								<!-- Images -->
+								<td class="px-4 py-3 text-sm text-zinc-300">
+									{online ? inst.imageCount : '—'}
+								</td>
+
+								<!-- Actions -->
+								<td class="px-4 py-3 text-right">
+									{#if canManage(inst.id)}
+										<div class="relative inline-block text-left">
+											<button
+												class="p-1.5 rounded-sm text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+												title="Server actions"
+												aria-label="Server actions for {inst.id === 'local' ? 'This Server' : inst.name}"
+												onclick={() => (instanceMenuOpen = instanceMenuOpen === inst.id ? null : inst.id)}
+											>
+												<Icon name="settings" class="w-4 h-4" />
+											</button>
+											{#if instanceMenuOpen === inst.id}
+												<button
+													class="fixed inset-0 z-40 cursor-default"
+													aria-label="Close menu"
+													onclick={() => (instanceMenuOpen = null)}
+												></button>
+												<div class="absolute right-0 top-9 z-50 w-44 bg-zinc-900 border border-zinc-700 rounded-sm shadow-lg py-1 text-left">
+													<button
+														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
+														disabled={testingId === inst.id}
+														onclick={() => testInstance(inst.id)}
+													>
+														<Icon name="restart" class="w-4 h-4" />
+														{testingId === inst.id ? 'Testing…' : 'Test connection'}
+													</button>
+													<button
+														class="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-zinc-800 hover:text-red-300 flex items-center gap-2"
+														onclick={() => { removeTarget = { id: inst.id, name: inst.id === 'local' ? 'This Server' : inst.name }; }}
+													>
+														<Icon name="trash" class="w-4 h-4" />
+														Remove server
+													</button>
+												</div>
+											{/if}
+										</div>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
 			</div>
 		</div>
 	{:else if fleetTab === 'containers'}

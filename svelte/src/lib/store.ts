@@ -76,6 +76,7 @@ export function removeToast(id: string): void {
 export interface FleetInstance extends InstanceListItem {
 	sysInfo: SystemInfo | null;
 	containers: ContainerInfo[];
+	imageCount: number;
 }
 
 export interface FleetContainer extends ContainerInfo {
@@ -102,8 +103,9 @@ export function createFleetStore() {
 		return inst.id === 'local' || inst.status === 'online';
 	}
 
-	// Fetch the instance list, then sysInfo + containers for every reachable
-	// instance in parallel. Flattens containers into the global fleet view.
+	// Fetch the instance list, then sysInfo + containers + image count for
+	// every reachable instance in parallel. Flattens containers into the
+	// global fleet view.
 	async function fetchMetrics() {
 		try {
 			const list = await api.get<InstanceListItem[]>('/instances');
@@ -111,6 +113,7 @@ export function createFleetStore() {
 				list.map(async (inst) => {
 					let sysInfo: SystemInfo | null = null;
 					let containers: ContainerInfo[] = [];
+					let imageCount = 0;
 					if (isOnline(inst)) {
 						try {
 							sysInfo = await api.get<SystemInfo>(`/instances/${inst.id}/system/info`);
@@ -122,8 +125,14 @@ export function createFleetStore() {
 						} catch (e) {
 							console.error(`Failed to get containers for instance ${inst.id}:`, e);
 						}
+						try {
+							const images = await api.get<unknown[]>(`/instances/${inst.id}/images`);
+							imageCount = Array.isArray(images) ? images.length : 0;
+						} catch (e) {
+							console.error(`Failed to get images for instance ${inst.id}:`, e);
+						}
 					}
-					return { ...inst, sysInfo, containers };
+					return { ...inst, sysInfo, containers, imageCount };
 				})
 			);
 
