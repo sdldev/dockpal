@@ -1498,6 +1498,10 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		for _, p := range tpl.Ports {
 			hostPort := p.Default
 			if customPort, ok := req.Ports[fmt.Sprintf("%d", p.ContainerPort)]; ok && customPort > 0 {
+				if err := validator.ValidatePort(customPort); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid host port for %s: %s", p.Label, err.Error())})
+					return
+				}
 				hostPort = customPort
 			}
 			oldPort := fmt.Sprintf("'%d:%d'", p.Default, p.ContainerPort)
@@ -1515,9 +1519,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 		name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
 		if req.CustomName != "" {
-			if err := validator.ValidateContainerName(req.CustomName); err == nil {
-				name = req.CustomName
+			if err := validator.ValidateContainerName(req.CustomName); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid app name: %s", err.Error())})
+				return
 			}
+			name = req.CustomName
 		}
 
 		// Get auth headers for registries

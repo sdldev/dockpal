@@ -701,6 +701,10 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 	for _, p := range tpl.Ports {
 		hostPort := p.Default
 		if customPort, ok := req.Ports[fmt.Sprintf("%d", p.ContainerPort)]; ok && customPort > 0 {
+			if err := validator.ValidatePort(customPort); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid host port for %s: %s", p.Label, err.Error())})
+				return
+			}
 			hostPort = customPort
 		}
 		oldPort := fmt.Sprintf("'%d:%d'", p.Default, p.ContainerPort)
@@ -718,9 +722,11 @@ func handleInstanceTemplateDeployStream(c *gin.Context) {
 
 	name := tpl.ID + "-" + fmt.Sprintf("%d", time.Now().Unix())
 	if req.CustomName != "" {
-		if err := validator.ValidateContainerName(req.CustomName); err == nil {
-			name = req.CustomName
+		if err := validator.ValidateContainerName(req.CustomName); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid app name: %s", err.Error())})
+			return
 		}
+		name = req.CustomName
 	}
 
 	// Resolve registry credentials for this instance

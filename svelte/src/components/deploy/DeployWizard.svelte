@@ -40,6 +40,9 @@
   let logs = $state<Array<{ time: string; message: string; status: string }>>([]);
   let deployError = $state('');
   let socket: WebSocket | null = null;
+  // Per-field validation messages, keyed by field id (serviceName, env-KEY,
+  // port-CONTAINER, customImage, cenv-N, cport-N).
+  let errors = $state<Record<string, string>>({});
 
   // Template mode
   let env = $state<Record<string, string>>({});
@@ -99,47 +102,79 @@
     logs = [...logs, { time: new Date().toLocaleTimeString(), message, status }];
   }
 
-  function validateTemplate() {
-    for (const key of template?.env_required ?? []) {
-      if (!env[key] || !String(env[key]).trim()) {
-        deployError = `${key} is required`;
-        activeTab = 'environment';
-        return false;
-      }
+  // Mirrors internal/validator.ValidateContainerName so an invalid name is
+  // rejected in the UI before it reaches the backend.
+  const SERVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$/;
+
+  function clearError(key: string) {
+    if (errors[key]) {
+      const next = { ...errors };
+      delete next[key];
+      errors = next;
     }
-    return true;
   }
 
-  function validateCustom() {
-    if (!customImage.trim()) {
-      deployError = 'Docker image is required';
-      activeTab = 'environment';
-      return false;
+  // validate() recomputes every field error and returns whether the form is
+  // valid. It also points the user at the first tab holding an error.
+  function validate(): boolean {
+    const e: Record<string, string> = {};
+
+    const name = serviceName.trim();
+    if (!name) {
+      e.serviceName = 'App name is required';
+    } else if (name.length > 128) {
+      e.serviceName = 'App name must be 128 characters or fewer';
+    } else if (!SERVICE_NAME_RE.test(name)) {
+      e.serviceName = 'App name must start with a letter or digit and can only contain letters, digits, ".", "_", and "-"';
     }
-    for (const row of customEnv) {
-      if (row.key.trim() && !row.value.trim()) {
-        deployError = `Value required for ${row.key}`;
-        activeTab = 'environment';
-        return false;
+
+    if (mode === 'template') {
+      for (const key of template?.env_required ?? []) {
+        if (!env[key] || !String(env[key]).trim()) {
+          e[`env-${key}`] = `${key} is required`;
+        }
       }
+      for (const p of template?.ports ?? []) {
+        const hp = ports[String(p.container_port)];
+        if (hp !== undefined && (hp < 1 || hp > 65535)) {
+          e[`port-${p.container_port}`] = 'Host port must be between 1 and 65535';
+        }
+      }
+    } else {
+      if (!customImage.trim()) {
+        e.customImage = 'Docker image is required';
+      }
+      customEnv.forEach((row, idx) => {
+        if (row.key.trim() && !row.value.trim()) {
+          e[`cenv-${idx}`] = `Value required for ${row.key}`;
+        }
+      });
+      customPorts.forEach((row, idx) => {
+        if (row.host > 0 && (row.host < 1 || row.host > 65535 || row.container < 1 || row.container > 65535)) {
+          e[`cport-${idx}`] = 'Ports must be between 1 and 65535';
+        }
+      });
     }
-    for (const row of customPorts) {
-      if (row.host > 0 && (row.host < 1 || row.host > 65535 || row.container < 1 || row.container > 65535)) {
-        deployError = 'Ports must be 1-65535';
+
+    errors = e;
+
+    if (Object.keys(e).length > 0) {
+      const hasEnvError = e.serviceName || Object.keys(e).some((k) => k.startsWith('env-') || k === 'customImage');
+      const hasPortError = Object.keys(e).some((k) => k.startsWith('port-') || k.startsWith('cport-'));
+      if (hasPortError && !hasEnvError) {
         activeTab = 'ports';
-        return false;
+      } else {
+        activeTab = 'environment';
       }
     }
-    return true;
+    return Object.keys(e).length === 0;
   }
 
   async function deploy() {
-    if (!serviceName) {
-      deployError = 'App name is required';
+    if (!validate()) {
+      deployError = Object.values(errors)[0];
       return;
     }
-    if (mode === 'template' && !validateTemplate()) return;
-    if (mode === 'custom' && !validateCustom()) return;
 
     deploying = true;
     deployError = '';
@@ -305,8 +340,14 @@
           id="service-name"
           type="text"
           bind:value={serviceName}
-          class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono"
+          oninput={() => clearError('serviceName')}
+          class="w-full px-3 py-2 bg-zinc-950 border rounded-sm text-sm text-white font-mono"
+          class:border-red-500={errors.serviceName}
+          class:border-zinc-800={!errors.serviceName}
         />
+        {#if errors.serviceName}
+          <p class="text-xs text-red-400 mt-1">{errors.serviceName}</p>
+        {/if}
       </div>
 
       {#if mode === 'custom'}
@@ -316,9 +357,15 @@
             id="custom-image"
             type="text"
             bind:value={customImage}
+            oninput={() => clearError('customImage')}
             placeholder="nginx:1.27-alpine"
-            class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono"
+            class="w-full px-3 py-2 bg-zinc-950 border rounded-sm text-sm text-white font-mono"
+            class:border-red-500={errors.customImage}
+            class:border-zinc-800={!errors.customImage}
           />
+          {#if errors.customImage}
+            <p class="text-xs text-red-400 mt-1">{errors.customImage}</p>
+          {/if}
         </div>
 
         <div>
@@ -328,20 +375,29 @@
           </div>
           <div class="space-y-2">
             {#each customEnv as row, idx (idx)}
-              <div class="grid grid-cols-12 gap-2">
-                <input
-                  type="text"
-                  bind:value={row.key}
-                  placeholder="KEY"
-                  class="col-span-5 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono"
-                />
-                <input
-                  type={row.key.toLowerCase().includes('password') || row.key.toLowerCase().includes('secret') ? 'password' : 'text'}
-                  bind:value={row.value}
-                  placeholder="value"
-                  class="col-span-6 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono"
-                />
-                <button onclick={() => removeEnvRow(idx)} class="col-span-1 text-zinc-600 hover:text-red-400 text-sm">✕</button>
+              <div class="space-y-1">
+                <div class="grid grid-cols-12 gap-2">
+                  <input
+                    type="text"
+                    bind:value={row.key}
+                    oninput={() => clearError(`cenv-${idx}`)}
+                    placeholder="KEY"
+                    class="col-span-5 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono"
+                  />
+                  <input
+                    type={row.key.toLowerCase().includes('password') || row.key.toLowerCase().includes('secret') ? 'password' : 'text'}
+                    bind:value={row.value}
+                    oninput={() => clearError(`cenv-${idx}`)}
+                    placeholder="value"
+                    class="col-span-6 px-3 py-2 bg-zinc-950 border rounded-sm text-xs text-white font-mono"
+                    class:border-red-500={errors[`cenv-${idx}`]}
+                    class:border-zinc-800={!errors[`cenv-${idx}`]}
+                  />
+                  <button onclick={() => removeEnvRow(idx)} class="col-span-1 text-zinc-600 hover:text-red-400 text-sm">✕</button>
+                </div>
+                {#if errors[`cenv-${idx}`]}
+                  <p class="text-xs text-red-400">{errors[`cenv-${idx}`]}</p>
+                {/if}
               </div>
             {/each}
           </div>
@@ -376,14 +432,20 @@
       {:else}
         {#each template?.env_required ?? [] as key}
           <div>
-            <label for="env-{key}" class="block text-xs font-medium text-zinc-400 mb-1 font-mono">{key}</label>
+            <label for="env-{key}" class="block text-xs font-medium text-zinc-400 mb-1 font-mono">{key} *</label>
             <input
               bind:value={env[key]}
-              class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white"
+              oninput={() => clearError(`env-${key}`)}
+              class="w-full px-3 py-2 bg-zinc-950 border rounded-sm text-sm text-white"
+              class:border-red-500={errors[`env-${key}`]}
+              class:border-zinc-800={!errors[`env-${key}`]}
               id="env-{key}"
               placeholder="Enter value..."
               type={key.toLowerCase().includes('password') || key.toLowerCase().includes('secret') ? 'password' : 'text'}
             />
+            {#if errors[`env-${key}`]}
+              <p class="text-xs text-red-400 mt-1">{errors[`env-${key}`]}</p>
+            {/if}
           </div>
         {:else}
           <p class="text-sm text-zinc-500 italic">No environment variables required.</p>
@@ -403,32 +465,41 @@
           </div>
           <div class="space-y-2">
             {#each customPorts as row, idx (idx)}
-              <div class="grid grid-cols-12 gap-2 items-center">
-                <input
-                  type="number"
-                  min="1"
-                  max="65535"
-                  bind:value={row.host}
-                  placeholder="Host"
-                  class="col-span-3 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono"
-                />
-                <span class="col-span-1 text-center text-zinc-600 text-xs">→</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="65535"
-                  bind:value={row.container}
-                  placeholder="Container"
-                  class="col-span-4 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono"
-                />
-                <select
-                  bind:value={row.protocol}
-                  class="col-span-3 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white"
-                >
-                  <option value="tcp">tcp</option>
-                  <option value="udp">udp</option>
-                </select>
-                <button onclick={() => removePortRow(idx)} class="col-span-1 text-zinc-600 hover:text-red-400 text-sm">✕</button>
+              <div class="space-y-1">
+                <div class="grid grid-cols-12 gap-2 items-center">
+                  <input
+                    type="number"
+                    min="1"
+                    max="65535"
+                    bind:value={row.host}
+                    oninput={() => clearError(`cport-${idx}`)}
+                    placeholder="Host"
+                    class="col-span-3 px-3 py-2 bg-zinc-950 border rounded-sm text-xs text-white font-mono"
+                    class:border-red-500={errors[`cport-${idx}`]}
+                    class:border-zinc-800={!errors[`cport-${idx}`]}
+                  />
+                  <span class="col-span-1 text-center text-zinc-600 text-xs">→</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="65535"
+                    bind:value={row.container}
+                    oninput={() => clearError(`cport-${idx}`)}
+                    placeholder="Container"
+                    class="col-span-4 px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono"
+                  />
+                  <select
+                    bind:value={row.protocol}
+                    class="col-span-3 px-2 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white"
+                  >
+                    <option value="tcp">tcp</option>
+                    <option value="udp">udp</option>
+                  </select>
+                  <button onclick={() => removePortRow(idx)} class="col-span-1 text-zinc-600 hover:text-red-400 text-sm">✕</button>
+                </div>
+                {#if errors[`cport-${idx}`]}
+                  <p class="text-xs text-red-400">{errors[`cport-${idx}`]}</p>
+                {/if}
               </div>
             {/each}
           </div>
@@ -444,8 +515,14 @@
                 min="1"
                 max="65535"
                 bind:value={ports[String(port.container_port)]}
-                class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono"
+                oninput={() => clearError(`port-${port.container_port}`)}
+                class="w-full px-3 py-2 bg-zinc-950 border rounded-sm text-sm text-white font-mono"
+                class:border-red-500={errors[`port-${port.container_port}`]}
+                class:border-zinc-800={!errors[`port-${port.container_port}`]}
               />
+              {#if errors[`port-${port.container_port}`]}
+                <p class="text-xs text-red-400 mt-1">{errors[`port-${port.container_port}`]}</p>
+              {/if}
             </div>
             <div class="col-span-2 text-center text-zinc-600 pb-2">→</div>
             <div class="col-span-5">

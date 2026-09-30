@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/moby/moby/client"
 )
 
 // DeployEvent represents a single log event during deployment.
@@ -121,9 +119,11 @@ func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, compose
 		}
 		session.Emit("cleanup", "Cleaning up partial deployment...", "running")
 		for _, name := range createdContainers {
-			c.cli.ContainerRemove(context.Background(), name, client.ContainerRemoveOptions{Force: true})
+			if err := c.removeContainerByID(context.Background(), name); err == nil {
+				session.Emit("cleanup", fmt.Sprintf("Removed leftover container %s", name), "done")
+			}
 		}
-		session.Emit("cleanup", "Removed partial containers", "done")
+		session.Emit("cleanup", "Partial deployment cleaned up", "done")
 	}
 
 	// Pull images
@@ -172,6 +172,10 @@ func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, compose
 		svc := cf.Services[svcName]
 		containerName := fmt.Sprintf("%s_%s", projectName, svcName)
 
+		// Track the name before attempting creation: a container that was
+		// created but failed to start must still be cleaned up on failure.
+		createdContainers = append(createdContainers, containerName)
+
 		session.Emit("create", fmt.Sprintf("Creating container %s...", containerName), "running")
 		if err := c.createAndStartService(ctx, projectName, svcName, svc, cf); err != nil {
 			suggestion := diagnoseDeployError(err.Error())
@@ -182,7 +186,6 @@ func (c *Client) DeployComposeStreamed(ctx context.Context, projectName, compose
 			cleanup()
 			return err
 		}
-		createdContainers = append(createdContainers, containerName)
 		session.Emit("create", fmt.Sprintf("Container %s started ✓", containerName), "done")
 	}
 
@@ -198,8 +201,8 @@ func diagnoseDeployError(errMsg string) string {
 		return "💡 Port conflict: another service is using this port. Stop the existing service or change the port mapping in the compose config."
 	case strings.Contains(errMsg, "No such image"):
 		return "💡 Image not found: check the image name and tag. Make sure it exists on Docker Hub or your registry."
-	case strings.Contains(errMsg, "name is already in use"):
-		return "💡 Container name conflict: a container with this name already exists. Remove it first from the Containers page."
+	case strings.Contains(errMsg, "is already in use"):
+		return "💡 Container name conflict: a container with this name already exists. Stop and remove it first from the Containers page, or use a different app name."
 	case strings.Contains(errMsg, "permission denied"):
 		return "💡 Permission denied: Dockpal may need elevated privileges, or the volume path doesn't exist."
 	case strings.Contains(errMsg, "network not found"):

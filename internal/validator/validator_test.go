@@ -94,3 +94,27 @@ func TestValidateEnvVarName(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePort(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   int
+		wantErr bool
+	}{
+		{"valid low", 1, false},
+		{"valid high", 65535, false},
+		{"common http", 80, false},
+		{"zero", 0, true},
+		{"negative", -1, true},
+		{"too high", 65536, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePort(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePort(%d) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}

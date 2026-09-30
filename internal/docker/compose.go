@@ -419,13 +419,55 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 
 	result, err := c.cli.ContainerCreate(ctx, createOpts)
 	if err != nil {
-		return fmt.Errorf("failed to create container for %s: %w", svcName, err)
+		// A leftover container from a previously failed deploy can hold the
+		// name. If it isn't running, drop it once and retry the create.
+		if isContainerNameConflict(err) && c.removeStaleContainerByName(ctx, containerName) {
+			result, err = c.cli.ContainerCreate(ctx, createOpts)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to create container for %s: %w", svcName, err)
+		}
 	}
 
 	if _, err := c.cli.ContainerStart(ctx, result.ID, client.ContainerStartOptions{}); err != nil {
+		// The container exists but never started (e.g. the daemon failed to
+		// bind the host port). Remove it so the next deploy isn't blocked by
+		// its name — otherwise every retry fails with "name is already in use".
+		_ = c.removeContainerByID(ctx, result.ID)
 		return fmt.Errorf("failed to start container %s: %w", svcName, err)
 	}
 	return nil
+}
+
+// isContainerNameConflict reports whether a container creation error means the
+// container name is already taken. The daemon messages this matches are
+// `Conflict. The container name "/x" is already in use by container "y"`.
+func isContainerNameConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "is already in use")
+}
+
+// removeStaleContainerByName removes a non-running container with the given
+// name so a failed deployment can be retried. A running container is never
+// touched. It returns true when a stale container was removed.
+func (c *Client) removeStaleContainerByName(ctx context.Context, name string) bool {
+	result, err := c.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
+	if err != nil {
+		// Not found or unreachable — nothing stale to clean up.
+		return false
+	}
+	if state := result.Container.State; state != nil && state.Running {
+		return false
+	}
+	return c.removeContainerByID(ctx, result.Container.ID) == nil
+}
+
+// removeContainerByID force-removes a container, ignoring a "not found" result.
+func (c *Client) removeContainerByID(ctx context.Context, id string) error {
+	_, err := c.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
+	return err
 }
 
 // AuthHeaderFunc is a function that returns the registry auth header for a given image reference.

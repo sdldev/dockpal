@@ -88,3 +88,11 @@ func ValidateBranchName(branch string) error {
 	}
 	return nil
 }
+
+// ValidatePort checks that a host port is within the valid TCP/UDP range.
+func ValidatePort(port int) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535")
+	}
+	return nil
+}
