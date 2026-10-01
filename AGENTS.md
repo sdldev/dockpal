@@ -124,7 +124,7 @@ Navigate programmatically with `navigate(page, params)` from `lib/router.ts` —
 bookmarks keep working. The `$lib` alias must stay in sync between `vite.config.ts` and
 `tsconfig.json`.
 
-Layout (post-navheader, commit TBD): `App.svelte` renders a **collapsible
+Layout (post-navheader, commit `4cb776a`): `App.svelte` renders a **collapsible
 sidebar** (store `sidebarOpen` in `lib/store.ts`; toggled by the hamburger in
 `NavHeader`, off-canvas overlay on mobile) plus a sticky `NavHeader.svelte`
 showing the page title (store `navTitle`, derived from `currentPage`) and

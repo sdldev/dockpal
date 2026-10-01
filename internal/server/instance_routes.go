@@ -537,6 +537,11 @@ type InstallAgentRequest struct {
 	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key"`
 	SSHSecret     string `json:"ssh_secret" binding:"required"`
 	InstallDocker bool   `json:"install_docker"`
+	// SSHHostKey pins the server's SSH host key as a SHA-256 fingerprint
+	// ("SHA256:...") for strict verification (audit-auth L6). Empty = TOFU:
+	// the presented fingerprint is printed in the install log for the admin
+	// to verify and pin on a later install.
+	SSHHostKey string `json:"ssh_host_key"`
 	// PanelAddress overrides the address embedded in the agent's edge-mode
 	// server URL. Defaults to the HTTP request's Host, which is wrong when
 	// the panel is accessed via localhost/IP aliases that don't resolve from
@@ -654,17 +659,18 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 			}
 
 			params := ssh.InstallParams{
-				Host:          req.SSHHost,
-				Port:          req.SSHPort,
-				User:          req.SSHUser,
-				AuthType:      req.SSHAuthType,
-				AuthSecret:    req.SSHSecret,
-				InstallDocker: req.InstallDocker,
-				Mode:          inst.Mode,
-				Token:         token,
-				ServerHost:    host,
-				AgentImage:    agentImg,
-				IsSecureWS:    isSecureWS,
+				Host:            req.SSHHost,
+				Port:            req.SSHPort,
+				User:            req.SSHUser,
+				AuthType:        req.SSHAuthType,
+				AuthSecret:      req.SSHSecret,
+				InstallDocker:   req.InstallDocker,
+				Mode:            inst.Mode,
+				Token:           token,
+				ServerHost:      host,
+				AgentImage:      agentImg,
+				IsSecureWS:      isSecureWS,
+				ExpectedHostKey: req.SSHHostKey,
 			}
 
 			err := ssh.InstallAgent(params, lw)

@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +37,13 @@ const (
 )
 
 // Stack is one compose project.
+//
+// Note (audit-stack-container L10): stack DTOs deliberately use camelCase
+// JSON tags (statusText, composeYAML, containerName) to match the Dockge-
+// style TypeScript client in svelte/src/lib/api/stacks.ts, while container
+// DTOs (container.go) use snake_case for moby API parity. This split is
+// load-bearing for the TS client — keep it, and keep new stack fields
+// camelCase.
 type Stack struct {
 	Name        string         `json:"name"`
 	Status      string         `json:"status"`
@@ -51,14 +60,19 @@ type StackService struct {
 	ContainerName string `json:"containerName"`
 	Image         string `json:"image"`
 	State         string `json:"state"`  // running | exited | created | ...
-	Health        string `json:"health"` // healthy | unhealthy | "" 
+	Health        string `json:"health"` // healthy | unhealthy | ""
 }
 
 var stackNameRegex = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
+// ComposeFileName is the canonical compose file name written by every Dockpal
+// code path (stack store AND the legacy App-Install writer) so one project
+// directory never contains two competing compose files (audit H3).
+const ComposeFileName = "compose.yaml"
+
 // acceptedComposeFileNames in read preference order (Dockge parity).
 var acceptedComposeFileNames = []string{
-	"compose.yaml",
+	ComposeFileName,
 	"docker-compose.yaml",
 	"docker-compose.yml",
 	"compose.yml",
@@ -71,6 +85,10 @@ type stackCLI interface {
 	Output(ctx context.Context, dir string, args ...string) (string, error)
 	TryLock(stackName string) bool
 	Unlock(stackName string)
+	// StackUpStreamed runs `compose up -d --remove-orphans` streaming events
+	// into the session and closing it on every exit path. It lives on the
+	// seam so tests can intercept deploys (audit-stack-container H6).
+	StackUpStreamed(ctx context.Context, name string, session *DeploySession) error
 }
 
 var cli stackCLI
@@ -78,8 +96,19 @@ var cli stackCLI
 // RegisterStackCLI wires the compose CLI backend. Called once at startup.
 func RegisterStackCLI(c stackCLI) { cli = c }
 
+// StackUpStreamedCLI routes a streamed stack deploy through the registered
+// CLI backend — the testable counterpart of calling the composecli package
+// directly.
+func StackUpStreamedCLI(ctx context.Context, name string, session *DeploySession) error {
+	if cli == nil {
+		defer session.Close()
+		return errNoCLI()
+	}
+	return cli.StackUpStreamed(ctx, name, session)
+}
+
 func errNoCLI() error {
-	return errors.New("docker compose CLI integration not initialized")
+	return errors.New("docker compose plugin not available on this host — install the Docker Compose CLI plugin (verify with 'docker compose version') to manage stacks")
 }
 
 // ValidateStackName enforces Dockge-style lowercase stack names.
@@ -169,7 +198,7 @@ func writeFileAtomic(path string, content string, perm os.FileMode) error {
 
 // SaveStack validates and persists a stack's compose file and .env.
 // isAdd=true requires the directory to not exist yet; isAdd=false requires it to exist.
-// The compose file is always written as "compose.yaml".
+// The compose file is always written as ComposeFileName ("compose.yaml").
 func SaveStack(name, composeYAML, composeENV string, isAdd bool) error {
 	if err := ValidateStackName(name); err != nil {
 		return err
@@ -199,7 +228,7 @@ func SaveStack(name, composeYAML, composeENV string, isAdd bool) error {
 		}
 	}
 
-	if err := writeFileAtomic(filepath.Join(dir, "compose.yaml"), composeYAML, 0644); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, ComposeFileName), composeYAML, 0644); err != nil {
 		return fmt.Errorf("write compose file: %w", err)
 	}
 	if err := writeFileAtomic(filepath.Join(dir, ".env"), composeENV, 0644); err != nil {
@@ -212,7 +241,7 @@ func SaveStack(name, composeYAML, composeENV string, isAdd bool) error {
 		if _, err := fmt.Sscanf(puid, "%d", &uid); err == nil {
 			if _, err := fmt.Sscanf(pgid, "%d", &gid); err == nil {
 				_ = os.Chown(dir, uid, gid)
-				_ = os.Chown(filepath.Join(dir, "compose.yaml"), uid, gid)
+				_ = os.Chown(filepath.Join(dir, ComposeFileName), uid, gid)
 			}
 		}
 	}
@@ -307,15 +336,43 @@ type composePsEntry struct {
 
 // StatusConvert maps `docker compose ls` status text to a stack status.
 // Examples: "running(2)", "exited(1), running(1)", "created(1)".
+// The text lists one state per service in arbitrary order, so detection is
+// order-independent: a single uniform state maps directly, any mixture is
+// "partial" (except any "exited", which is the actionable failure signal).
 func StatusConvert(status string) string {
 	s := strings.ToLower(strings.TrimSpace(status))
+	if s == "" {
+		return StackStatusUnknown
+	}
+	var states []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		// Strip the count suffix: "running(2)" → "running".
+		if idx := strings.Index(part, "("); idx >= 0 {
+			part = strings.TrimSpace(part[:idx])
+		}
+		states = append(states, part)
+	}
+	if len(states) == 0 {
+		return StackStatusUnknown
+	}
+	seen := map[string]bool{}
+	for _, st := range states {
+		seen[st] = true
+	}
 	switch {
-	case strings.HasPrefix(s, "created"):
-		return StackStatusPartial
-	case strings.Contains(s, "exited"):
+	case seen["exited"] || seen["dead"]:
 		return StackStatusExited
-	case strings.HasPrefix(s, "running"):
+	case len(seen) == 1 && seen["running"]:
 		return StackStatusRunning
+	case len(seen) == 1 && (seen["created"] || seen["paused"] || seen["restarting"]):
+		return StackStatusPartial
+	case seen["running"] || seen["created"]:
+		// Mixed states (e.g. created+running) — order-independent partial.
+		return StackStatusPartial
 	default:
 		return StackStatusUnknown
 	}
@@ -350,16 +407,53 @@ func parseNDJSON[T any](out string) ([]T, error) {
 	return items, nil
 }
 
+// composeLsCache memoizes `docker compose ls` briefly: list/detail/action
+// handlers all call ListComposeProjects, and each uncached call spawns a
+// subprocess (audit-stack-container L13). 2s is short enough that a
+// container crashing mid-request still shows up on the next poll.
+var composeLsCache struct {
+	mu      sync.Mutex
+	expires time.Time
+	entries []composeLsEntry
+}
+
+const composeLsCacheTTL = 2 * time.Second
+
+// InvalidateComposeLsCache drops the cached project list — called after any
+// stack mutation so the next read reflects the mutation immediately.
+func InvalidateComposeLsCache() {
+	composeLsCache.mu.Lock()
+	composeLsCache.expires = time.Time{}
+	composeLsCache.entries = nil
+	composeLsCache.mu.Unlock()
+}
+
 // ListComposeProjects runs `docker compose ls --all --format json`.
 func ListComposeProjects(ctx context.Context) ([]composeLsEntry, error) {
 	if cli == nil {
 		return nil, errNoCLI()
 	}
+	composeLsCache.mu.Lock()
+	if time.Now().Before(composeLsCache.expires) {
+		entries := composeLsCache.entries
+		composeLsCache.mu.Unlock()
+		return entries, nil
+	}
+	composeLsCache.mu.Unlock()
+
 	out, err := cli.Output(ctx, "", "ls", "--all", "--format", "json")
 	if err != nil {
 		return nil, err
 	}
-	return parseNDJSON[composeLsEntry](out)
+	entries, err := parseNDJSON[composeLsEntry](out)
+	if err != nil {
+		return nil, err
+	}
+	composeLsCache.mu.Lock()
+	composeLsCache.entries = entries
+	composeLsCache.expires = time.Now().Add(composeLsCacheTTL)
+	composeLsCache.mu.Unlock()
+	return entries, nil
 }
 
 // StackServices runs `docker compose ps --format json` inside the stack dir.
@@ -492,7 +586,7 @@ func GetStackFull(ctx context.Context, name string) (*Stack, error) {
 
 // --- Lifecycle operations (Dockge command parity) ---
 
-func stackRun(ctx context.Context, name string, emit func(string), args ...string) error {
+func stackRun(ctx context.Context, name string, args ...string) error {
 	if cli == nil {
 		return errNoCLI()
 	}
@@ -508,27 +602,29 @@ func stackRun(ctx context.Context, name string, emit func(string), args ...strin
 	if err := cli.Run(ctx, dir, args...); err != nil {
 		return err
 	}
+	// State changed → next list must re-probe (L13 cache).
+	InvalidateComposeLsCache()
 	return nil
 }
 
 // StackUp: docker compose up -d --remove-orphans
 func StackUp(ctx context.Context, name string) error {
-	return stackRun(ctx, name, nil, "up", "-d", "--remove-orphans")
+	return stackRun(ctx, name, "up", "-d", "--remove-orphans")
 }
 
 // StackStop: docker compose stop
 func StackStop(ctx context.Context, name string) error {
-	return stackRun(ctx, name, nil, "stop")
+	return stackRun(ctx, name, "stop")
 }
 
 // StackRestart: docker compose restart
 func StackRestart(ctx context.Context, name string) error {
-	return stackRun(ctx, name, nil, "restart")
+	return stackRun(ctx, name, "restart")
 }
 
 // StackDown: docker compose down
 func StackDown(ctx context.Context, name string) error {
-	return stackRun(ctx, name, nil, "down")
+	return stackRun(ctx, name, "down")
 }
 
 // StackUpdate: docker compose pull, then up -d --remove-orphans if the
@@ -579,24 +675,25 @@ func StackDelete(ctx context.Context, name string) error {
 	if _, statErr := os.Stat(dir); statErr == nil {
 		_ = cli.Run(ctx, dir, StackComposeArgs(dir, "down", "--remove-orphans")...) // best effort
 	}
-	return os.RemoveAll(dir)
+	err = os.RemoveAll(dir)
+	InvalidateComposeLsCache()
+	return err
 }
 
 // StackServiceUp: docker compose up -d <service>
 func StackServiceUp(ctx context.Context, name, service string) error {
-	return stackRun(ctx, name, nil, "up", "-d", service)
+	return stackRun(ctx, name, "up", "-d", service)
 }
 
 // StackServiceStop: docker compose stop <service>
 func StackServiceStop(ctx context.Context, name, service string) error {
-	return stackRun(ctx, name, nil, "stop", service)
+	return stackRun(ctx, name, "stop", service)
 }
 
 // StackServiceRestart: docker compose restart <service>
 func StackServiceRestart(ctx context.Context, name, service string) error {
-	return stackRun(ctx, name, nil, "restart", service)
+	return stackRun(ctx, name, "restart", service)
 }
-
 
 // ListDockerNetworks returns host docker network names (sorted, without the
 // built-in none/host/bridge), for the network editor dropdown.

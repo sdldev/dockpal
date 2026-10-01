@@ -101,6 +101,8 @@ func (e *EdgeClient) StackServiceAction(ctx context.Context, name, service, acti
 // streaming (pending map → channel per request id kept until Done) so deploy
 // events reach the session for edge instances too.
 func (e *EdgeClient) DeployStackStreamed(ctx context.Context, name, composeYAML, composeENV string, isAdd bool, session *docker.DeploySession) error {
+	// Terminate the stream on every exit path so WS readers finish (audit C1).
+	defer session.Close()
 	reqBody := map[string]any{
 		"compose": composeYAML,
 		"env":     composeENV,
@@ -120,7 +122,11 @@ func (e *EdgeClient) DeployStackStreamed(ctx context.Context, name, composeYAML,
 	if streamResp.DeployID == "" {
 		return fmt.Errorf("no deploy_id returned from agent")
 	}
-	session.Emit("deploy", "deploy started on agent ("+streamResp.DeployID+")", "running")
+	// Be honest about what "nil" means here: the edge transport returns after
+	// the agent ACCEPTED the deploy — the outcome is unknown (audit M9). The
+	// terminal event tells the UI the deploy was submitted, not completed.
+	session.Emit("deploy", "deploy started on agent ("+streamResp.DeployID+") — outcome not streamed for edge instances; verify via stack status refresh", "running")
+	session.Emit("done", "Deploy submitted to agent — check stack status for the result", "done")
 	return nil
 }
 

@@ -70,11 +70,6 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 </html>`)
 	})
 
-	// Prometheus metrics endpoint (public)
-	api.GET("/metrics", func(c *gin.Context) {
-		metrics.Handler().ServeHTTP(c.Writer, c.Request)
-	})
-
 	// Public client-facing configuration (task 8.2). The UI reads this on
 	// boot — before the user logs in — to decide whether to render the
 	// auto-update toggle and "Update now" affordances. The endpoint is
@@ -105,6 +100,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	// Webhooks public trigger
 	api.POST("/webhooks/deploy/:webhook_id", RateLimitMiddleware(webhookRateLimiter), HandleWebhookDeploy(database, agentMgr, jwtSecret))
 
+	// Wire auth events (login/logout/password/role) into the audit log. The
+	// hook indirection avoids an auth → server import cycle (audit-auth M8).
+	auth.AuditHook = func(c *gin.Context, action, resource, status, details string) {
+		LogAudit(c, database, action, resource, status, details)
+	}
+
 	baseProtected := api.Group("")
 	baseProtected.Use(AuthMiddleware(jwtSecret, database))
 	baseProtected.Use(methodRateLimit(readLimit, mutationLimit))
@@ -124,13 +125,27 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		adminGroup:    adminGroup,
 	}
 
-	// Auth protected
-	protected.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
-	protected.POST("/auth/reset-password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleResetPassword(c, database) })
+	// Prometheus metrics endpoint. Requires an authenticated viewer — the
+	// series carry container/image/hostname labels that amount to a full
+	// workload inventory (audit-auth M1). External scrapers must pass a
+	// bearer token (JWT or API key).
+	viewerGroup.GET("/metrics", func(c *gin.Context) {
+		metrics.Handler().ServeHTTP(c.Writer, c.Request)
+	})
+
+	// Auth protected (self-service account actions — any authenticated user,
+	// including viewers; audit-auth H2). baseProtected already applies the
+	// mutation rate limiter to POST/PUT, so no per-route limiter here (M7).
+	baseProtected.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
+	baseProtected.POST("/auth/reset-password", func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
 	// Profile (all authenticated users)
 	baseProtected.GET("/profile", func(c *gin.Context) { auth.HandleGetProfile(c, database) })
-	baseProtected.PUT("/profile/password", RateLimitMiddleware(mutationRateLimiter), func(c *gin.Context) { auth.HandleChangePassword(c, database) })
+	baseProtected.PUT("/profile/password", func(c *gin.Context) { auth.HandleChangePassword(c, database) })
+
+	// Short-lived, single-use tickets for WebSocket upgrades — keeps 4h JWTs
+	// out of WS URL query strings (audit-auth L1).
+	baseProtected.GET("/ws-ticket", handleWSTicket)
 
 	// User management (admin only)
 	adminGroup.GET("/users", func(c *gin.Context) { auth.HandleListUsers(c, database) })
@@ -165,7 +180,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 	// Dockge-style compose stacks (local host only, via docker compose CLI)
 	composecli.Register()
-	registerStackRoutes(viewerGroup, operatorGroup)
+	registerStackRoutes(viewerGroup, operatorGroup, database)
 
 	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)
@@ -780,6 +795,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		LogAudit(c, database, "container.start", "containers/"+c.Param("id"), "success", "")
 		c.JSON(http.StatusOK, gin.H{"status": "started"})
 	})
 
@@ -793,6 +809,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		LogAudit(c, database, "container.stop", "containers/"+c.Param("id"), "success", "")
 		c.JSON(http.StatusOK, gin.H{"status": "stopped"})
 	})
 
@@ -806,6 +823,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		LogAudit(c, database, "container.restart", "containers/"+c.Param("id"), "success", "")
 		c.JSON(http.StatusOK, gin.H{"status": "restarted"})
 	})
 
@@ -829,6 +847,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		LogAudit(c, database, "container.remove", "containers/"+containerID, "success", fmt.Sprintf("force=%v", force))
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
 	})
 
@@ -858,9 +877,8 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 		// Validate restart policy if provided
 		if req.RestartPolicy != nil {
-			validPolicies := map[string]bool{"no": true, "always": true, "unless-stopped": true, "on-failure": true}
-			if !validPolicies[*req.RestartPolicy] {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid restart policy: must be one of no, always, unless-stopped, on-failure"})
+			if err := validator.ValidateRestartPolicy(*req.RestartPolicy); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 		}
@@ -890,16 +908,8 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		// Validate ports if provided
 		if req.Ports != nil {
 			for _, pm := range *req.Ports {
-				if pm.ContainerPort < 1 || pm.ContainerPort > 65535 {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid container port: %d", pm.ContainerPort)})
-					return
-				}
-				if pm.HostPort < 1 || pm.HostPort > 65535 {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid host port: %d", pm.HostPort)})
-					return
-				}
-				if pm.Protocol != "tcp" && pm.Protocol != "udp" && pm.Protocol != "" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid protocol: %s (must be tcp or udp)", pm.Protocol)})
+				if err := validator.ValidatePortMapping(pm.HostPort, pm.ContainerPort, pm.Protocol); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
 			}
@@ -937,6 +947,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		LogAudit(c, database, "container.edit", "containers/"+containerID, "success", fmt.Sprintf("recreated=%v", needsRecreate))
 
 		response := gin.H{
 			"status":    "updated",
@@ -1065,16 +1076,17 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		c.JSON(http.StatusOK, gin.H{"deploy_id": session.ID})
 	})
 
-	// WebSocket endpoint for deploy log streaming (uses query param auth)
-	// Note: WebSocket cannot send custom headers during upgrade, so token
-	// must be passed as query param. The token is short-lived (30 days max)
-	// and the endpoint is read-only (streaming logs only).
+	// WebSocket endpoint for deploy log streaming. Registered under
+	// baseProtected so AuthMiddleware + rate limiting apply (the ?token=
+	// query-param branch is honored for WS upgrades); the handler's own
+	// query-token auth remains as defense in depth. The endpoint is
+	// read-only (streaming logs only) and requires the viewer role.
 	deployStreamWS := handleDeployStreamWS(jwtSecret, database, deployManager)
-	r.GET("/api/deploy/stream/:id", legacyAPIWarningMiddleware(), deployStreamWS)
+	baseProtected.GET("/deploy/stream/:id", legacyAPIWarningMiddleware(), RequireRole(auth.RoleViewer), deployStreamWS)
 
 	// Instance-scoped WebSocket endpoint for deploy log streaming.
 	// Same logic as above but matches the instance-scoped URL pattern used by the frontend.
-	r.GET("/api/instances/:instance_id/deploy/stream/:id", legacyAPIWarningMiddleware(), deployStreamWS)
+	baseProtected.GET("/instances/:instance_id/deploy/stream/:id", legacyAPIWarningMiddleware(), RequireRole(auth.RoleViewer), deployStreamWS)
 
 	protected.POST("/deploy/compose", func(c *gin.Context) {
 		var req struct {
@@ -1331,6 +1343,18 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			internalError(c, err)
 			return
 		}
+		// Compose bodies routinely embed secrets (DB passwords, API keys) —
+		// viewers get metadata only; the UI list view doesn't use the compose
+		// field (audit-auth L5).
+		if !auth.HasRole(c.GetString("role"), auth.RoleOperator) {
+			redacted := make([]db.Service, len(services))
+			copy(redacted, services)
+			for i := range redacted {
+				redacted[i].Compose = ""
+			}
+			c.JSON(http.StatusOK, redacted)
+			return
+		}
 		c.JSON(http.StatusOK, services)
 	})
 
@@ -1476,9 +1500,9 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			RestartPolicy string            `json:"restart_policy"`
 			AutoStart     *bool             `json:"auto_start"`
 			AutoRecover   bool              `json:"auto_recover"`
-		Domain        string            `json:"domain"`
-		NetworkMode   string            `json:"network_mode"`
-		CustomNetwork string            `json:"custom_network"`
+			Domain        string            `json:"domain"`
+			NetworkMode   string            `json:"network_mode"`
+			CustomNetwork string            `json:"custom_network"`
 		}
 		c.ShouldBindJSON(&req)
 
@@ -1693,8 +1717,10 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		c.JSON(http.StatusOK, result)
 	})
 
-	// File Manager
-	protected.GET("/files", func(c *gin.Context) {
+	// File Manager. Read endpoints (list/read/download) are operator-gated —
+	// they run `docker exec <container> cat/ls`, the same capability class as
+	// the exec route, so a viewer must not reach them (audit-auth C1).
+	operatorGroup.GET("/files", func(c *gin.Context) {
 		containerID := c.Query("container")
 		path := c.Query("path")
 		if containerID == "" {
@@ -1709,7 +1735,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		c.JSON(http.StatusOK, files)
 	})
 
-	protected.GET("/files/read", func(c *gin.Context) {
+	operatorGroup.GET("/files/read", func(c *gin.Context) {
 		content, err := dockerClient.ReadFile(c.Request.Context(), c.Query("container"), c.Query("path"))
 		if err != nil {
 			internalError(c, err)
@@ -1767,7 +1793,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		c.JSON(http.StatusOK, gin.H{"status": "uploaded"})
 	})
 
-	protected.GET("/files/download", func(c *gin.Context) {
+	operatorGroup.GET("/files/download", func(c *gin.Context) {
 		content, err := dockerClient.ReadFile(c.Request.Context(), c.Query("container"), c.Query("path"))
 		if err != nil {
 			internalError(c, err)

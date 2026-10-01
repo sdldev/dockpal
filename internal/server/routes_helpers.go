@@ -410,29 +410,43 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 		c.Set("jwt_secret", jwtSecret)
 		c.Set("database", database)
 		// Auth: ?token= query param (browser WS can't set headers) or, as a
-		// fallback for API clients, a JSON {token} first message.
+		// fallback for API clients, a JSON {token} first message. Both paths
+		// enforce the viewer role, same as the middleware on this route.
 		if q := c.Query("token"); q != "" {
-			if _, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database); err != nil {
+			claims, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database)
+			if err != nil {
 				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+				return
+			}
+			if !auth.HasRole(claims.Role, auth.RoleViewer) {
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
 				return
 			}
 		} else if !authenticateWebSocketFirstMessage(conn, c) {
 			return
 		}
 
+		// Each reader gets its own subscription — events are fanned out, not
+		// consumed competitively, so concurrent WS clients each see the full
+		// stream (audit-stack-container M2).
+		events := session.Subscribe()
+		defer session.Unsubscribe(events)
+
 		for {
 			select {
-			case event, ok := <-session.Events:
+			case event, ok := <-events:
 				if !ok {
+					// Subscription closed: session ended.
 					return
 				}
 				if err := conn.WriteJSON(event); err != nil {
 					return
 				}
 			case <-session.Done:
+				// Producer finished; drain the buffer then close.
 				for {
 					select {
-					case event := <-session.Events:
+					case event := <-events:
 						conn.WriteJSON(event)
 					default:
 						return

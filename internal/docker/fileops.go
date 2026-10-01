@@ -48,6 +48,15 @@ func ValidatePath(path string) (string, error) {
 		return "", fmt.Errorf("path traversal not allowed")
 	}
 
+	// Block virtual filesystems that leak host/process internals
+	// (/proc/self/environ exposes the container's env, /proc/1/root escapes
+	// to the host root when the container shares the host PID namespace).
+	for _, blocked := range []string{"/proc", "/sys"} {
+		if cleaned == blocked || strings.HasPrefix(cleaned, blocked+"/") {
+			return "", fmt.Errorf("access to %s is not allowed", blocked)
+		}
+	}
+
 	return cleaned, nil
 }
 

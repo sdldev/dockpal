@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
+	import { containersBasePath } from '$lib/api/containers';
 	import type { ContainerInfo } from '$lib/types/api';
 	import { formatPort, dedupePorts } from '$lib/format';
 	import { navigate } from '$lib/router';
@@ -8,13 +8,18 @@
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-	import { addToast } from '$lib/store';
+	import { addToast, selectedInstance, isOperator } from '$lib/store';
 	import ImagesPage from './ImagesPage.svelte';
 
 	// Images live here as a tab (infra view), keeping the sidebar focused.
 	const tabs = ['containers', 'images'] as const;
 	type Tab = (typeof tabs)[number];
 	let activeTab = $state<Tab>('containers');
+
+	// Instance-aware: list and mutate containers on the host picked in the
+	// sidebar, not always the local one (audit-stack-container C2). Recomputed
+	// reactively so switching instance re-targets every call below.
+	const basePath = $derived(containersBasePath($selectedInstance || 'local'));
 
 	let containers: ContainerInfo[] = $state([]);
 	let selectedContainerId: string | null = $state(null);
@@ -23,25 +28,33 @@
 	let actionBusy = $state<string | null>(null);
 	let pendingDelete: ContainerInfo | null = $state(null);
 
-	onMount(async () => {
+	async function loadContainers() {
+		loading = true;
+		error = '';
 		try {
-			containers = await api.get<ContainerInfo[]>('/containers');
-			if (!loading) return; // don't show old page after navigation
+			containers = await api.get<ContainerInfo[]>(basePath);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load containers';
+			containers = [];
 		} finally {
 			loading = false;
 		}
+	}
+
+	// Load on mount and again whenever the sidebar instance changes ($effect
+	// tracks basePath, which derives from $selectedInstance).
+	$effect(() => {
+		void basePath;
+		loadContainers();
 	});
 
 	async function runAction(action: 'start' | 'stop' | 'restart', id: string) {
 		actionBusy = id;
 		try {
 			// api.post already prepends /api — a leading /api here would request /api/api/...
-			const endpoint = `/containers/${id}/${action}`;
-			await api.post(endpoint);
+			await api.post(`${basePath}/${encodeURIComponent(id)}/${action}`);
 			// Refresh list
-			const updated = await api.get<ContainerInfo[]>(`/containers`);
+			const updated = await api.get<ContainerInfo[]>(basePath);
 			containers = updated.map(c => c.id === id ? { ...c, state: action === 'stop' ? 'exited' : 'running' } : c);
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : `Failed to ${action}`, 'error');
@@ -55,7 +68,7 @@
 		if (!target) return;
 		actionBusy = target.id;
 		try {
-			await api.delete(`/containers/${target.id}?force=true`);
+			await api.delete(`${basePath}/${encodeURIComponent(target.id)}?force=true`);
 			containers = containers.filter((c) => c.id !== target.id);
 			if (selectedContainerId === target.id) selectedContainerId = null;
 			addToast(`Container ${target.name} deleted`, 'success');
@@ -73,9 +86,11 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex gap-1 border-b border-zinc-800">
+	<div class="flex gap-1 border-b border-zinc-800" role="tablist">
 		{#each tabs as tab}
 			<button
+				role="tab"
+				aria-selected={activeTab === tab}
 				onclick={() => { activeTab = tab; }}
 				class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
 				class:border-white={activeTab === tab}
@@ -130,25 +145,27 @@
 							<span class="text-zinc-600 text-xs">No ports</span>
 						{/if}
 					</td>
-					<td class="px-4 py-2.5">
-						<div class="flex items-center gap-1.5">
-							<Button variant="secondary" size="sm" title={selectedContainerId === container.id ? 'Close details' : 'Details'} disabled={actionBusy === container.id} onclick={() => toggleDetail(container.id)}>
-								<Icon name="info" />
-							</Button>
-							<Button variant="primary" size="sm" title="Start" disabled={actionBusy === container.id || container.state === 'running'} onclick={() => runAction('start', container.id)}>
-								<Icon name="play" />
-							</Button>
-							<Button variant="danger" size="sm" title="Stop" disabled={actionBusy === container.id || container.state !== 'running'} onclick={() => runAction('stop', container.id)}>
-								<Icon name="stop" />
-							</Button>
-							<Button variant="secondary" size="sm" title="Restart" disabled={actionBusy === container.id || container.state !== 'running'} onclick={() => runAction('restart', container.id)}>
-								<Icon name="restart" />
-							</Button>
-							<Button variant="danger" size="sm" title="Delete" disabled={actionBusy === container.id} onclick={() => (pendingDelete = container)}>
-								<Icon name="trash" />
-							</Button>
-						</div>
-					</td>
+						<td class="px-4 py-2.5">
+							<div class="flex items-center gap-1.5">
+								<Button variant="secondary" size="sm" title={selectedContainerId === container.id ? 'Close details' : 'Details'} aria-label={selectedContainerId === container.id ? 'Close details' : 'Details'} disabled={actionBusy === container.id} onclick={() => toggleDetail(container.id)}>
+									<Icon name="info" />
+								</Button>
+								{#if $isOperator}
+									<Button variant="primary" size="sm" title="Start" aria-label="Start" disabled={actionBusy === container.id || container.state === 'running'} onclick={() => runAction('start', container.id)}>
+										<Icon name="play" />
+									</Button>
+									<Button variant="danger" size="sm" title="Stop" aria-label="Stop" disabled={actionBusy === container.id || container.state !== 'running'} onclick={() => runAction('stop', container.id)}>
+										<Icon name="stop" />
+									</Button>
+									<Button variant="secondary" size="sm" title="Restart" aria-label="Restart" disabled={actionBusy === container.id || container.state !== 'running'} onclick={() => runAction('restart', container.id)}>
+										<Icon name="restart" />
+									</Button>
+									<Button variant="danger" size="sm" title="Delete" aria-label="Delete" disabled={actionBusy === container.id} onclick={() => (pendingDelete = container)}>
+										<Icon name="trash" />
+									</Button>
+								{/if}
+							</div>
+						</td>
 				</tr>
 			{:else}
 				<tr><td colspan="5" class="text-center py-8 text-zinc-600">{loading ? 'Loading...' : 'No containers found'}</td></tr>

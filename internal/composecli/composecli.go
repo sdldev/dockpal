@@ -25,15 +25,37 @@ import (
 // runFunc is the executable entry point — swappable in tests.
 var runFunc = run
 
-
 // Available reports whether the docker CLI with the compose plugin exists.
-func Available() bool {
+// The result is probed once per process and cached — the plugin does not
+// appear or disappear mid-run, and probing spawns a subprocess per call
+// otherwise (audit-stack-container M1). Declared as a var so tests can
+// stub it (501-path tests).
+var Available = func() bool {
+	availableOnce.Do(func() {
+		availableResult = probeComposeAvailable()
+	})
+	return availableResult
+}
+
+var (
+	availableOnce   sync.Once
+	availableResult bool
+)
+
+func probeComposeAvailable() bool {
 	path, err := exec.LookPath("docker")
 	if err != nil {
 		return false
 	}
 	cmd := exec.Command(path, "compose", "version")
 	return cmd.Run() == nil
+}
+
+// ResetAvailableCache clears the cached Available result — for tests that
+// need to re-probe after changing PATH or stubbing.
+func ResetAvailableCache() {
+	availableOnce = sync.Once{}
+	availableResult = false
 }
 
 // --- per-stack operation serialization ---
@@ -62,7 +84,9 @@ func TryLock(stackName string) bool {
 	return true
 }
 
-// Unlock releases the per-stack lock acquired via TryLock.
+// Unlock releases the per-stack lock acquired via TryLock and evicts the
+// entry so long-running servers don't accumulate one map entry per stack
+// ever touched (audit-stack-container M3).
 func Unlock(stackName string) {
 	v, ok := stackLocks.Load(stackName)
 	if !ok {
@@ -70,15 +94,20 @@ func Unlock(stackName string) {
 	}
 	l := v.(*stackLock)
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	// Guard the close: Unlock can run on an error path before a successful
 	// TryLock (heldC is then nil) or twice after one lock, and close() panics
 	// in both cases — taking the whole process down from a request goroutine.
 	if !l.held {
+		l.mu.Unlock()
 		return
 	}
 	l.held = false
 	close(l.heldC)
+	l.mu.Unlock()
+	// Evict only if nobody re-acquired between our unlock and the delete.
+	// LoadOrStore returning our (now stale) entry means we won the race and
+	// can delete it; a fresh entry means a new holder — leave it alone.
+	stackLocks.CompareAndDelete(stackName, l)
 }
 
 // Run executes `docker compose <args...>` with dir as the working directory,
@@ -135,6 +164,12 @@ func streamLines(r io.Reader, session *docker.DeploySession) {
 		}
 		session.Emit("compose", line, "running")
 	}
+	// Surface scanner failures (e.g. a line over the 1 MiB buffer cap) —
+	// silently swallowing them truncates all remaining output with no sign
+	// of what happened (audit-stack-container L5).
+	if err := scanner.Err(); err != nil {
+		session.Emit("compose", fmt.Sprintf("output truncated: %v", err), "error")
+	}
 }
 
 // Output runs `docker compose <args...>` and returns trimmed stdout.
@@ -157,7 +192,6 @@ func Output(ctx context.Context, dir string, args ...string) (string, error) {
 
 // outputFunc mirror for tests.
 var outputFunc = Output
-
 
 // RunOutput is Output routed through the swappable outputFunc.
 func RunOutput(ctx context.Context, dir string, args ...string) (string, error) {

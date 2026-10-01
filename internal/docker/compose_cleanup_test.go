@@ -114,7 +114,7 @@ func TestCreateAndStartService_RemovesContainerOnStartFailure(t *testing.T) {
 	srv := &fakeAPIServer{startFail: true}
 	c, _ := newFakeDockerClient(t, srv.handler())
 
-	err := c.createAndStartService(context.Background(), "proj", "svc", testService(), &ComposeFile{})
+	_, err := c.createAndStartService(context.Background(), "proj", "svc", testService(), &ComposeFile{})
 	if err == nil || !strings.Contains(err.Error(), "failed to start container svc") {
 		t.Fatalf("expected start failure, got: %v", err)
 	}
@@ -133,9 +133,12 @@ func TestCreateAndStartService_RetriesAfterStaleNameConflict(t *testing.T) {
 	}
 	c, _ := newFakeDockerClient(t, srv.handler())
 
-	err := c.createAndStartService(context.Background(), "proj", "svc", testService(), &ComposeFile{})
+	createdID, err := c.createAndStartService(context.Background(), "proj", "svc", testService(), &ComposeFile{})
 	if err != nil {
 		t.Fatalf("expected retry to succeed, got: %v", err)
+	}
+	if createdID != "c1" {
+		t.Fatalf("expected created container ID c1, got %q", createdID)
 	}
 	if got := srv.removedIDs(); len(got) != 1 || got[0] != "stale1" {
 		t.Fatalf("expected stale container stale1 to be removed, got: %v", got)
@@ -154,7 +157,7 @@ func TestCreateAndStartService_PreservesRunningContainerOnNameConflict(t *testin
 	}
 	c, _ := newFakeDockerClient(t, srv.handler())
 
-	err := c.createAndStartService(context.Background(), "proj", "svc", testService(), &ComposeFile{})
+	_, err := c.createAndStartService(context.Background(), "proj", "svc", testService(), &ComposeFile{})
 	if err == nil {
 		t.Fatal("expected create to fail when a running container holds the name")
 	}

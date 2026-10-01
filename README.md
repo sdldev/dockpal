@@ -126,6 +126,11 @@ Dockpal adalah satu binary Go dengan frontend Svelte 5 SPA yang ter-embed dan di
 - Go 1.26+
 - Node.js 22+ & npm (untuk frontend Svelte)
 - Docker daemon berjalan (sebagian test & fitur compose stacks)
+- **Docker Compose CLI plugin** (`docker compose version`) — wajib untuk fitur
+  Stacks (Dockge-style compose). Tanpa plugin ini, endpoint `/api/stacks*`
+  merespons `501 Not Implemented`. Stack disimpan sebagai
+  `<DOCKPAL_DATA_DIR>/../compose/<stack>/compose.yaml` (+ `.env` per stack dan
+  `global.env` bersama di direktori yang sama).
 
 ### 1. Full-stack mode (binary tunggal) — untuk mengerjakan backend Go
 
@@ -258,7 +263,7 @@ DOCKPAL_INITIAL_ADMIN_PASSWORD=NewPass123 DOCKPAL_DB_PATH=/opt/dockpal/data/dock
 | Category | Details |
 |---|---|
 | **Containers** | List, start, stop, restart, delete, inspect, logs, stats |
-| **Deploy** | Compose YAML, Git repo, 5 built-in templates (PostgreSQL 17, MariaDB, Redis 7, Grafana, Adminer) |
+| **Deploy** | Compose YAML, Git repo, 38 built-in templates (PostgreSQL, MariaDB, Redis, Grafana, Adminer, …) |
 | **Images** | Pull, updates check, registry auth, prune |
 | **Files** | Browse, read, write, upload, download inside containers |
 | **Domains** | Traefik integration, custom routing, SSL |
@@ -276,7 +281,7 @@ Endpoints:
 | Path | Description |
 |---|---|
 | `/health` | Full health report (HTTP 200/503) |
-| `/api/metrics` | Prometheus metrics (no auth) |
+| `/api/metrics` | Prometheus metrics (requires auth — JWT bearer or `X-API-Key`, viewer role or higher) |
 | `/api/docs` | API documentation UI |
 
 Example metrics:

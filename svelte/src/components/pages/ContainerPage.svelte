@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
-	import { addToast, selectedInstance } from '$lib/store';
+	import { containersBasePath } from '$lib/api/containers';
+	import { addToast, selectedInstance, isOperator } from '$lib/store';
 	import { routeParams } from '$lib/router';
 	import type { ContainerDetail, ContainerInfo } from '$lib/types/generated';
 	import { formatPorts } from '$lib/format';
-	import { get } from 'svelte/store';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -15,7 +15,10 @@
 	// container id from the /containers/:id route (see lib/router.ts)
 	const containerId = $derived($routeParams.id ?? '');
 	// detail container lives under the instance it runs on
-	const instanceId = $derived(get(selectedInstance) || 'local');
+	const instanceId = $derived($selectedInstance || 'local');
+	// All reads/mutations target this instance's endpoints — the bare
+	// /containers path always hits the local host (audit-stack-container C2).
+	const basePath = $derived(containersBasePath(instanceId));
 
 	let detail = $state<ContainerDetail | null>(null);
 	let loading = $state(true);
@@ -47,7 +50,7 @@
 		loading = true;
 		error = '';
 		try {
-			detail = await api.get<ContainerInfo>(`/containers/${containerId}`);
+			detail = await api.get<ContainerInfo>(`${basePath}/${encodeURIComponent(containerId)}`);
 			editName = detail.name ?? '';
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load container';
@@ -57,13 +60,16 @@
 	}
 
 	$effect(() => {
+		// Reload when the route id or the selected instance changes.
+		void containerId;
+		void basePath;
 		load();
 	});
 
 	async function startContainer() {
 		busy = 'start';
 		try {
-			await api.post(`/containers/${containerId}/start`);
+			await api.post(`${basePath}/${encodeURIComponent(containerId)}/start`);
 			addToast('Container started', 'success');
 			await load();
 		} catch (e) {
@@ -76,7 +82,7 @@
 	async function stopContainer() {
 		busy = 'stop';
 		try {
-			await api.post(`/containers/${containerId}/stop`);
+			await api.post(`${basePath}/${encodeURIComponent(containerId)}/stop`);
 			addToast('Container stopped', 'success');
 			await load();
 		} catch (e) {
@@ -89,7 +95,7 @@
 	async function restartContainer() {
 		busy = 'restart';
 		try {
-			await api.post(`/containers/${containerId}/restart`);
+			await api.post(`${basePath}/${encodeURIComponent(containerId)}/restart`);
 			addToast('Container restarted', 'success');
 			await load();
 		} catch (e) {
@@ -102,7 +108,7 @@
 	async function deleteContainer() {
 		busy = 'delete';
 		try {
-			await api.delete(`/containers/${containerId}?force=true`);
+			await api.delete(`${basePath}/${encodeURIComponent(containerId)}?force=true`);
 			addToast('Container deleted', 'success');
 			// Redirect back to containers list
 			window.history.back();
@@ -121,7 +127,7 @@
 		}
 		savingEdit = true;
 		try {
-			await api.put(`/containers/${containerId}`, {
+			await api.put(`${basePath}/${encodeURIComponent(containerId)}`, {
 				name: editName.trim(),
 				restart_policy: editRestartPolicy
 			});
@@ -173,18 +179,22 @@
 				</span>
 			</div>
 			<div class="flex gap-2 shrink-0">
-				<Button variant="secondary" size="sm" onclick={() => { showEditModal = true; }}>Edit</Button>
-				<Button variant="primary" size="sm" disabled={busy === 'start' || detail.state?.toLowerCase() !== 'running'} onclick={startContainer}>Start</Button>
-				<Button variant="secondary" size="sm" disabled={busy === 'stop'} onclick={stopContainer}>Stop</Button>
-				<Button variant="danger" size="sm" disabled={busy === 'restart' || busy === 'delete'} onclick={restartContainer}>Restart</Button>
-				<Button variant="danger" size="sm" disabled={busy === 'delete'} onclick={() => (showDeleteDialog = true)}>Delete</Button>
+				{#if $isOperator}
+					<Button variant="secondary" size="sm" onclick={() => { showEditModal = true; }}>Edit</Button>
+					<Button variant="primary" size="sm" disabled={busy === 'start' || detail.state?.toLowerCase() !== 'running'} onclick={startContainer}>Start</Button>
+					<Button variant="secondary" size="sm" disabled={busy === 'stop'} onclick={stopContainer}>Stop</Button>
+					<Button variant="danger" size="sm" disabled={busy === 'restart' || busy === 'delete'} onclick={restartContainer}>Restart</Button>
+					<Button variant="danger" size="sm" disabled={busy === 'delete'} onclick={() => (showDeleteDialog = true)}>Delete</Button>
+				{/if}
 			</div>
 		</header>
 
 		<!-- Tabs -->
-		<div class="flex gap-1 border-b border-zinc-800">
+		<div class="flex gap-1 border-b border-zinc-800" role="tablist">
 			{#each tabs as tab}
 				<button
+					role="tab"
+					aria-selected={activeTab === tab}
 					onclick={() => { activeTab = tab; }}
 					class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px"
 					class:border-white={activeTab === tab}

@@ -56,10 +56,11 @@ func TestAuthMiddleware_WSTokenQueryParam(t *testing.T) {
 	}
 
 	cases := []struct {
-		name       string
-		target     string
-		withHeader bool
-		want       int
+		name         string
+		target       string
+		withHeader   bool
+		stripUpgrade bool // simulate a plain (non-WS) API request
+		want         int
 	}{
 		{
 			name:   "ws upgrade with valid query token passes",
@@ -83,24 +84,20 @@ func TestAuthMiddleware_WSTokenQueryParam(t *testing.T) {
 			want:       http.StatusOK,
 		},
 		{
-			name:   "plain api request may not use query token",
-			target: "/api/echo?token=" + url.QueryEscape(token),
-			want:   http.StatusUnauthorized, // no Upgrade headers → query ignored
+			name:         "plain api request may not use query token",
+			target:       "/api/echo?token=" + url.QueryEscape(token),
+			stripUpgrade: true,
+			want:         http.StatusUnauthorized, // no Upgrade headers → query ignored
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := wsUpgradeRequest(t, tc.target)
-			if !strings.Contains(tc.target, "token=") && !tc.withHeader {
-				// "without any token" case: strip upgrade headers to simulate
-				// nothing special — still unauthorized either way.
-				_ = req
-			}
 			if tc.withHeader {
 				req.Header.Set("Authorization", "Bearer "+token)
 			}
-			if tc.name == "plain api request may not use query token" {
+			if tc.stripUpgrade {
 				req.Header.Del("Upgrade")
 				req.Header.Del("Connection")
 			}

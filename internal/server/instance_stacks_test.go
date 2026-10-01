@@ -19,12 +19,12 @@ import (
 )
 
 type fakeStackClient struct {
-	stacks   []docker.Stack
-	stack    *docker.Stack
-	saveErr  error
-	actErr   error
-	delErr   error
-	networks []string
+	stacks    []docker.Stack
+	stack     *docker.Stack
+	saveErr   error
+	actErr    error
+	delErr    error
+	networks  []string
 	globalEnv string
 
 	savedName   string
@@ -97,12 +97,19 @@ func (f *fakeStackClient) SetGlobalEnv(ctx context.Context, content string) erro
 
 func instanceStackRouter(t *testing.T, fake stackClient) *gin.Engine {
 	t.Helper()
+	return instanceStackRouterAs(t, fake, "admin")
+}
+
+// instanceStackRouterAs builds the router with a specific caller role —
+// used by the RBAC matrix test (audit-stack-container M8).
+func instanceStackRouterAs(t *testing.T, fake stackClient, role string) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	g := r.Group("/api/instances/test")
 	g.Use(func(c *gin.Context) {
 		c.Set("agent_client", fake)
-		c.Set("role", "admin")
+		c.Set("role", role)
 		c.Next()
 	})
 	registerInstanceStackRoutes(g)
@@ -248,6 +255,63 @@ func TestInstanceDeployStack(t *testing.T) {
 	if !strings.HasPrefix(res.DeployID, "deploy-") {
 		t.Errorf("unexpected deploy_id: %q", res.DeployID)
 	}
+}
+
+// TestInstanceStackRBAC pins the viewer/operator boundary on every stack
+// route: viewers read, mutations require operator. Regression net for a
+// Viewer→Operator tier slip (audit-stack-container M8).
+func TestInstanceStackRBAC(t *testing.T) {
+	readRoutes := []struct{ method, path string }{
+		{http.MethodGet, "/api/instances/test/stacks"},
+		{http.MethodGet, "/api/instances/test/stacks/web"},
+		{http.MethodGet, "/api/instances/test/stacks/meta/networks"},
+		{http.MethodGet, "/api/instances/test/stacks/meta/globalenv"},
+	}
+	mutationRoutes := []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/api/instances/test/stacks", map[string]string{"name": "web", "compose": "services: {}\n"}},
+		{http.MethodPut, "/api/instances/test/stacks/web", map[string]string{"compose": "services: {}\n"}},
+		{http.MethodDelete, "/api/instances/test/stacks/web", nil},
+		{http.MethodPost, "/api/instances/test/stacks/web/deploy", nil},
+		{http.MethodPost, "/api/instances/test/stacks/web/up", nil},
+		{http.MethodPost, "/api/instances/test/stacks/web/stop", nil},
+		{http.MethodPost, "/api/instances/test/stacks/web/services/db/restart", nil},
+		{http.MethodPut, "/api/instances/test/stacks/meta/globalenv", map[string]string{"content": "G=1\n"}},
+	}
+
+	fake := &fakeStackClient{stack: &docker.Stack{Name: "web", Managed: true}}
+
+	t.Run("viewer can read", func(t *testing.T) {
+		r := instanceStackRouterAs(t, fake, "viewer")
+		for _, rt := range readRoutes {
+			w := doInstanceJSON(t, r, rt.method, rt.path, nil)
+			if w.Code == http.StatusForbidden {
+				t.Errorf("viewer %s %s: got 403, want access", rt.method, rt.path)
+			}
+		}
+	})
+
+	t.Run("viewer cannot mutate", func(t *testing.T) {
+		r := instanceStackRouterAs(t, fake, "viewer")
+		for _, rt := range mutationRoutes {
+			w := doInstanceJSON(t, r, rt.method, rt.path, rt.body)
+			if w.Code != http.StatusForbidden {
+				t.Errorf("viewer %s %s: got %d, want 403", rt.method, rt.path, w.Code)
+			}
+		}
+	})
+
+	t.Run("operator can mutate", func(t *testing.T) {
+		r := instanceStackRouterAs(t, fake, "operator")
+		for _, rt := range mutationRoutes {
+			w := doInstanceJSON(t, r, rt.method, rt.path, rt.body)
+			if w.Code == http.StatusForbidden {
+				t.Errorf("operator %s %s: got 403, want access", rt.method, rt.path)
+			}
+		}
+	})
 }
 
 func TestInstanceStackMeta(t *testing.T) {

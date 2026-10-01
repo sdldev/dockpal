@@ -33,7 +33,7 @@ func loadOrGenerateSecret(secretFilePath string) (string, error) {
 		}
 	}
 
-	// Priority 3: Generate and persist
+	// Priority 3: Generate and persist.
 	secret, err := generateNewSecret()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate secret: %w", err)
@@ -45,8 +45,33 @@ func loadOrGenerateSecret(secretFilePath string) (string, error) {
 		return "", fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	// Write secret file with restricted permissions (owner read/write only)
-	if err := os.WriteFile(secretFilePath, []byte(secret), 0600); err != nil {
+	// Create the file exclusively (O_EXCL): two Dockpal processes starting at
+	// the same time on a fresh install must not each generate a different
+	// secret and overwrite each other's — the loser keeps signing JWTs with a
+	// key that no longer matches disk (audit-auth M5). On EEXIST, re-read and
+	// use whatever the winner wrote.
+	f, err := os.OpenFile(secretFilePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		if os.IsExist(err) {
+			data, rerr := os.ReadFile(secretFilePath)
+			if rerr == nil {
+				if existing := strings.TrimSpace(string(data)); existing != "" {
+					return existing, nil
+				}
+			}
+			return "", fmt.Errorf("secret file appeared but could not be read: %w", err)
+		}
+		return "", fmt.Errorf("failed to persist secret: %w", err)
+	}
+	if _, err := f.WriteString(secret); err != nil {
+		f.Close()
+		return "", fmt.Errorf("failed to persist secret: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return "", fmt.Errorf("failed to persist secret: %w", err)
+	}
+	if err := f.Close(); err != nil {
 		return "", fmt.Errorf("failed to persist secret: %w", err)
 	}
 

@@ -491,6 +491,9 @@ func (c *LocalClient) StackServiceAction(ctx context.Context, name, service, act
 }
 
 func (c *LocalClient) DeployStackStreamed(ctx context.Context, name, composeYAML, composeENV string, isAdd bool, session *docker.DeploySession) error {
+	// Terminate the stream even on early validation failures — StackUpStreamed
+	// closes it too, but it is only reached after these guards (audit C1).
+	defer session.Close()
 	if composeYAML != "" {
 		if err := docker.SaveStack(name, composeYAML, composeENV, isAdd); err != nil {
 			return err

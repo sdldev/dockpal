@@ -15,19 +15,22 @@ func (adapter) Run(ctx context.Context, dir string, args ...string) error {
 }
 
 func (adapter) Output(ctx context.Context, dir string, args ...string) (string, error) {
-	// Subcommands that don't belong to `docker compose` (network, image, ...)
-	// run as plain `docker <args>`; compose subcommands get the prefix.
-	if len(args) > 0 {
-		switch args[0] {
-		case "network", "image", "volume", "container", "system", "info", "version":
-			return RunDockerOutput(ctx, dir, args...)
-		}
+	// Only "network" (docker network ls) is a plain-`docker` subcommand today
+	// — everything else goes through the compose plugin (audit L4: pruned the
+	// unreachable image/volume/container/system/info/version branches; add one
+	// back here if a caller ever needs it).
+	if len(args) > 0 && args[0] == "network" {
+		return RunDockerOutput(ctx, dir, args...)
 	}
 	return RunOutput(ctx, dir, args...)
 }
 
 func (adapter) TryLock(stackName string) bool { return TryLock(stackName) }
 func (adapter) Unlock(stackName string)       { Unlock(stackName) }
+
+func (adapter) StackUpStreamed(ctx context.Context, name string, session *docker.DeploySession) error {
+	return StackUpStreamed(ctx, name, session)
+}
 
 // Register wires this package as the docker package's compose CLI backend.
 // Call once at server startup.
@@ -38,6 +41,9 @@ func Register() {
 // StackUpStreamed runs `docker compose up -d --remove-orphans` streaming
 // output into the session, under the per-stack lock.
 func StackUpStreamed(ctx context.Context, name string, session *docker.DeploySession) error {
+	// Always terminate the stream — without this the WebSocket reader waits on
+	// session.Done forever and the UI never refreshes (audit C1).
+	defer session.Close()
 	dir, err := docker.StackDir(name)
 	if err != nil {
 		return err
@@ -50,6 +56,11 @@ func StackUpStreamed(ctx context.Context, name string, session *docker.DeploySes
 	args := docker.StackComposeArgs(dir, "up", "-d", "--remove-orphans")
 	if err := Run(ctx, dir, session, args...); err != nil {
 		session.Emit("up", err.Error(), "error")
+		// Offer the same actionable hints as the legacy moby deploy path
+		// (audit-stack-container L3).
+		if hint := docker.DiagnoseDeployError(err.Error()); hint != "" {
+			session.Emit("hint", hint, "error")
+		}
 		return err
 	}
 	session.Emit("up", "Stack is up", "done")

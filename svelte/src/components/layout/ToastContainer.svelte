@@ -13,11 +13,12 @@
   }
 </script>
 
-<div class="fixed bottom-4 right-4 z-50 space-y-2">
+<!-- aria-live so screen readers announce toasts as they appear (audit L7). -->
+<div class="fixed bottom-4 right-4 z-50 space-y-2" aria-live="polite" role="status">
   {#each $toasts as toast (toast.id)}
     <div class="px-4 py-3 rounded-sm border shadow-lg text-sm text-white flex items-center gap-3 {typeClasses(toast.type)}">
       <span>{toast.message}</span>
-      <button onclick={() => removeToast(toast.id)} class="opacity-70 hover:opacity-100">✕</button>
+      <button onclick={() => removeToast(toast.id)} class="opacity-70 hover:opacity-100" aria-label="Dismiss notification">✕</button>
     </div>
   {/each}
 </div>

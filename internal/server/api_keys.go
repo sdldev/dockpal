@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
 	"time"
@@ -58,7 +57,7 @@ func handleCreateAPIKey(database *db.DB) gin.HandlerFunc {
 		key := db.APIKey{
 			ID:        id,
 			Name:      req.Name,
-			KeyHash:   hashAPIKey(secret),
+			KeyHash:   auth.HashAPIKey(secret),
 			Role:      req.Role,
 			CreatedAt: time.Now().Unix(),
 		}
@@ -93,9 +92,4 @@ func randomHex(bytes int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
-}
-
-func hashAPIKey(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:])
 }

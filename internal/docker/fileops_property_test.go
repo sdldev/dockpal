@@ -134,6 +134,10 @@ func TestProperty_PathTraversal_ValidAbsolutePathsAccepted(t *testing.T) {
 		if len(parts) == 0 {
 			return true
 		}
+		// proc/sys roots are blocked by design — skip inputs that start there
+		if parts[0] == "proc" || parts[0] == "sys" {
+			return true
+		}
 		path := "/" + strings.Join(parts, "/")
 
 		result, err := ValidatePath(path)

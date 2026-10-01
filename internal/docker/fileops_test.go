@@ -100,3 +100,23 @@ func TestValidatePath_RejectsControlChars(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePath_RejectsProcAndSys(t *testing.T) {
+	// Virtual filesystems leak host/process internals (env, host root via
+	// /proc/1/root) — blocked regardless of traversal tricks.
+	paths := []string{
+		"/proc",
+		"/proc/",
+		"/proc/self/environ",
+		"/proc/1/root/etc/shadow",
+		"/sys",
+		"/sys/kernel",
+	}
+
+	for _, path := range paths {
+		_, err := ValidatePath(path)
+		if err == nil {
+			t.Errorf("ValidatePath(%q) expected error for virtual filesystem, got nil", path)
+		}
+	}
+}

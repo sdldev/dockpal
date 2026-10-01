@@ -18,11 +18,32 @@
     xl: 'max-w-4xl'
   };
 
+  // Unique per instance so multiple modals never share an aria-labelledby id.
+  const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
+
+  let panel: HTMLDivElement | null = $state(null);
+  let previouslyFocused: Element | null = null;
+
+  // Focus management: move focus into the dialog on open, restore it on
+  // close (audit-stack-container L7).
+  $effect(() => {
+    if (open) {
+      previouslyFocused = document.activeElement;
+      // Defer so the dialog DOM exists before focusing.
+      queueMicrotask(() => panel?.focus());
+      return () => {
+        if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+        previouslyFocused = null;
+      };
+    }
+  });
+
   function overlayClick(event: MouseEvent) {
     if (event.target === event.currentTarget) onclose();
   }
 
   function keydown(event: KeyboardEvent) {
+    if (!open) return;
     if (event.key === 'Escape') onclose();
   }
 </script>
@@ -35,9 +56,16 @@
     onclick={overlayClick}
     role="presentation"
   >
-    <div class="bg-zinc-900 border border-zinc-800 rounded-sm w-full {sizeClasses[size]} max-h-[90vh] overflow-y-auto">
+    <div
+      bind:this={panel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabindex="-1"
+      class="bg-zinc-900 border border-zinc-800 rounded-sm w-full {sizeClasses[size]} max-h-[90vh] overflow-y-auto focus:outline-none"
+    >
       <div class="flex items-center justify-between p-4 border-b border-zinc-800">
-        <h3 class="text-base font-semibold text-white">{title}</h3>
+        <h3 id={titleId} class="text-base font-semibold text-white">{title}</h3>
         <button onclick={onclose} class="text-zinc-400 hover:text-white" aria-label="Close">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>

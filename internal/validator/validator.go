@@ -96,3 +96,33 @@ func ValidatePort(port int) error {
 	}
 	return nil
 }
+
+// ValidRestartPolicies are the restart policies accepted on container edit.
+var ValidRestartPolicies = map[string]bool{
+	"no":             true,
+	"always":         true,
+	"unless-stopped": true,
+	"on-failure":     true,
+}
+
+// ValidateRestartPolicy checks a restart policy value (container edit).
+func ValidateRestartPolicy(policy string) error {
+	if !ValidRestartPolicies[policy] {
+		return fmt.Errorf("invalid restart policy: must be one of no, always, unless-stopped, on-failure")
+	}
+	return nil
+}
+
+// ValidatePortMapping checks a single host:container port mapping.
+func ValidatePortMapping(hostPort, containerPort int, protocol string) error {
+	if containerPort < 1 || containerPort > 65535 {
+		return fmt.Errorf("invalid container port: %d", containerPort)
+	}
+	if hostPort < 1 || hostPort > 65535 {
+		return fmt.Errorf("invalid host port: %d", hostPort)
+	}
+	if protocol != "tcp" && protocol != "udp" && protocol != "" {
+		return fmt.Errorf("invalid protocol: %s (must be tcp or udp)", protocol)
+	}
+	return nil
+}

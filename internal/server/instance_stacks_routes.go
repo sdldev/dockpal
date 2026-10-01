@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -132,6 +132,7 @@ func handleInstanceSetGlobalEnv(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	auditInstanceStack(c, "stack.globalenv", "global.env", "")
 	c.JSON(http.StatusOK, gin.H{"message": "saved"})
 }
 
@@ -169,6 +170,7 @@ func handleInstanceCreateStack(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	auditInstanceStack(c, "stack.create", req.Name, "")
 	c.JSON(http.StatusCreated, stack)
 }
 
@@ -191,6 +193,7 @@ func handleInstanceUpdateStack(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	auditInstanceStack(c, "stack.update", c.Param("name"), "")
 	c.JSON(http.StatusOK, stack)
 }
 
@@ -204,6 +207,7 @@ func handleInstanceDeleteStack(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	auditInstanceStack(c, "stack.delete", c.Param("name"), "")
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
@@ -231,17 +235,28 @@ func handleInstanceDeployStack(c *gin.Context) {
 
 	session := globalDeployManager.CreateSession()
 	go func() {
-		err := client.DeployStackStreamed(context.Background(), name, req.Compose, req.Env, req.IsAdd, session)
+		// Always schedule session removal — even on panic — so a stuck or
+		// crashed deploy never leaks the session (audit M4). Bounded context
+		// so a hung remote call can't leak forever.
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("instance deploy stack goroutine panicked", "stack", name, "panic", r)
+			}
+			time.AfterFunc(30*time.Second, func() {
+				globalDeployManager.RemoveSession(session.ID)
+			})
+		}()
+		err := client.DeployStackStreamed(ctx, name, req.Compose, req.Env, req.IsAdd, session)
 		if err == nil {
 			session.Emit("done", "Deployed", "done")
 		} else {
 			session.Emit("error", err.Error(), "error")
 		}
-		time.AfterFunc(30*time.Second, func() {
-			globalDeployManager.RemoveSession(session.ID)
-		})
 	}()
 
+	auditInstanceStack(c, "stack.deploy", name, "deploy_id "+session.ID)
 	c.JSON(http.StatusOK, gin.H{"deploy_id": session.ID})
 }
 
@@ -256,6 +271,7 @@ func handleInstanceStackAction(c *gin.Context, action string) {
 		stackError(c, err)
 		return
 	}
+	auditInstanceStack(c, "stack."+action, c.Param("name"), "")
 	if stack == nil {
 		c.JSON(http.StatusOK, gin.H{"message": action + " ok"})
 		return
@@ -271,7 +287,7 @@ func handleInstanceStackServiceAction(c *gin.Context, action string) {
 	}
 	name := c.Param("name")
 	service := c.Param("service")
-	if service == "" || strings.ContainsAny(service, "/\\ ") {
+	if !validateServiceName(service) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service name"})
 		return
 	}
@@ -288,3 +304,14 @@ func handleInstanceStackServiceAction(c *gin.Context, action string) {
 }
 
 var errNotStackClient = errors.New("agent client does not support stack operations")
+
+// auditInstanceStack records a stack mutation for the instance in the URL.
+// Never pass compose/env content in details — those hold secrets (audit H4).
+func auditInstanceStack(c *gin.Context, action, name, details string) {
+	database := getDatabase(c)
+	if database == nil {
+		return
+	}
+	resource := "instances/" + c.Param("instance_id") + "/stacks/" + name
+	LogAudit(c, database, action, resource, "success", details)
+}

@@ -53,52 +53,52 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Dockpal — Simple & powerful Docker management platform")
 		fmt.Printf("Version: %s\n", version)
-	fmt.Println()
-			fmt.Println("Usage:")
-			fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
-			fmt.Println("  dockpal backup          Create a database backup")
-			fmt.Println("  dockpal restore         Restore database from a backup")
-			fmt.Println("  dockpal install         Install/Setup (create admin user)")
-			fmt.Println("  dockpal reset-password  Reset admin password")
-			fmt.Println("  dockpal version         Show version")
-			fmt.Println("  dockpal help            Show this help")
-			return
+		fmt.Println()
+		fmt.Println("Usage:")
+		fmt.Println("  dockpal server          Start the HTTP/HTTPS server")
+		fmt.Println("  dockpal backup          Create a database backup")
+		fmt.Println("  dockpal restore         Restore database from a backup")
+		fmt.Println("  dockpal install         Install/Setup (create admin user)")
+		fmt.Println("  dockpal reset-password  Reset admin password")
+		fmt.Println("  dockpal version         Show version")
+		fmt.Println("  dockpal help            Show this help")
+		return
 	}
 
-		switch os.Args[1] {
-		case "server":
-			serverCmd := flag.NewFlagSet("server", flag.ExitOnError)
+	switch os.Args[1] {
+	case "server":
+		serverCmd := flag.NewFlagSet("server", flag.ExitOnError)
 
-			envTLS := os.Getenv("DOCKPAL_TLS") == "true"
-			envTLSCert := os.Getenv("DOCKPAL_TLS_CERT")
-			envTLSKey := os.Getenv("DOCKPAL_TLS_KEY")
-			envTLSDomain := os.Getenv("DOCKPAL_TLS_DOMAIN")
+		envTLS := os.Getenv("DOCKPAL_TLS") == "true"
+		envTLSCert := os.Getenv("DOCKPAL_TLS_CERT")
+		envTLSKey := os.Getenv("DOCKPAL_TLS_KEY")
+		envTLSDomain := os.Getenv("DOCKPAL_TLS_DOMAIN")
 
-			tls := serverCmd.Bool("tls", envTLS, "Enable TLS (HTTPS)")
-			tlsCert := serverCmd.String("tls-cert", envTLSCert, "Path to TLS certificate file")
-			tlsKey := serverCmd.String("tls-key", envTLSKey, "Path to TLS private key file")
-			tlsDomain := serverCmd.String("tls-domain", envTLSDomain, "Domain name for Let's Encrypt autocert")
+		tls := serverCmd.Bool("tls", envTLS, "Enable TLS (HTTPS)")
+		tlsCert := serverCmd.String("tls-cert", envTLSCert, "Path to TLS certificate file")
+		tlsKey := serverCmd.String("tls-key", envTLSKey, "Path to TLS private key file")
+		tlsDomain := serverCmd.String("tls-domain", envTLSDomain, "Domain name for Let's Encrypt autocert")
 
-			serverCmd.Parse(os.Args[2:])
-			runServer(*tls, *tlsCert, *tlsKey, *tlsDomain)
-		case "backup":
-			backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
-			output := backupCmd.String("output", "", "Backup output path (default: <data_dir>/backups/dockpal-<timestamp>.db)")
-			backupCmd.Parse(os.Args[2:])
-			backup(*output)
-		case "restore":
-			restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
-			from := restoreCmd.String("from", "", "Path to backup file to restore from (required)")
-			force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
-			restoreCmd.Parse(os.Args[2:])
-			restore(*from, *force)
-		case "install":
-			installCmd := flag.NewFlagSet("install", flag.ExitOnError)
-			username := installCmd.String("username", "admin", "Username for first-time setup")
-			password := installCmd.String("password", "", "Password (min 8 chars; omit to generate random)")
-			installCmd.Parse(os.Args[2:])
-			runInstall(*username, *password)
-		case "reset-password":
+		serverCmd.Parse(os.Args[2:])
+		runServer(*tls, *tlsCert, *tlsKey, *tlsDomain)
+	case "backup":
+		backupCmd := flag.NewFlagSet("backup", flag.ExitOnError)
+		output := backupCmd.String("output", "", "Backup output path (default: <data_dir>/backups/dockpal-<timestamp>.db)")
+		backupCmd.Parse(os.Args[2:])
+		backup(*output)
+	case "restore":
+		restoreCmd := flag.NewFlagSet("restore", flag.ExitOnError)
+		from := restoreCmd.String("from", "", "Path to backup file to restore from (required)")
+		force := restoreCmd.Bool("force", false, "Skip confirmation prompt")
+		restoreCmd.Parse(os.Args[2:])
+		restore(*from, *force)
+	case "install":
+		installCmd := flag.NewFlagSet("install", flag.ExitOnError)
+		username := installCmd.String("username", "admin", "Username for first-time setup")
+		password := installCmd.String("password", "", "Password (min 8 chars; omit to generate random)")
+		installCmd.Parse(os.Args[2:])
+		runInstall(*username, *password)
+	case "reset-password":
 		resetCmd := flag.NewFlagSet("reset-password", flag.ExitOnError)
 		resetUsername := resetCmd.String("username", "admin", "Username to reset")
 		resetPassword := resetCmd.String("password", "", "New password (min 8 chars); omit to generate a random one")
@@ -108,19 +108,19 @@ func main() {
 		rotateSecrets()
 	case "version":
 		fmt.Printf("Dockpal v%s\n", version)
-		case "help":
-			fmt.Println("Dockpal — Simple & powerful Docker management platform")
-			fmt.Printf("Version: %s\n", version)
-			fmt.Println()
-			fmt.Println("Commands:")
-			fmt.Println("  server          Start the HTTP/HTTPS server")
-			fmt.Println("  backup          Create a database backup")
-			fmt.Println("  restore         Restore database from a backup")
-			fmt.Println("  install         Install/Setup (create admin user)")
-			fmt.Println("  reset-password  Reset a user's password (--username, --password)")
-			fmt.Println("  rotate-secrets  Rotate JWT/encryption secret")
-			fmt.Println("  version         Show version")
-			fmt.Println("  help            Show this help")
+	case "help":
+		fmt.Println("Dockpal — Simple & powerful Docker management platform")
+		fmt.Printf("Version: %s\n", version)
+		fmt.Println()
+		fmt.Println("Commands:")
+		fmt.Println("  server          Start the HTTP/HTTPS server")
+		fmt.Println("  backup          Create a database backup")
+		fmt.Println("  restore         Restore database from a backup")
+		fmt.Println("  install         Install/Setup (create admin user)")
+		fmt.Println("  reset-password  Reset a user's password (--username, --password)")
+		fmt.Println("  rotate-secrets  Rotate JWT/encryption secret")
+		fmt.Println("  version         Show version")
+		fmt.Println("  help            Show this help")
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -218,8 +218,11 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	}
 	if createdAdmin {
 		if adminPassword == "" {
-			log.Printf("Created admin user with generated password: %s", lastGeneratedPassword())
+			// Emit the bootstrap password to stderr only — never through the
+			// rotating log writer, where it would persist for the full log
+			// retention window (audit-auth L2).
 			fmt.Fprintf(os.Stderr, "Created admin user with generated password: %s\n", lastGeneratedPassword())
+			log.Printf("Created admin user with a generated password (printed to stderr)")
 			log.Printf("Set DOCKPAL_INITIAL_ADMIN_PASSWORD to choose the bootstrap password (first run only)")
 		} else {
 			log.Printf("Created admin user with DOCKPAL_INITIAL_ADMIN_PASSWORD")
@@ -504,6 +507,25 @@ func rotateSecrets() {
 		log.Fatalf("Pre-rotation backup verification failed: %v", err)
 	}
 
+	// Write (and fsync) the new secret file BEFORE re-encrypting anything in
+	// the DB. If any later step fails, the DB is still encrypted with a key
+	// that exists on disk — the reverse order (audit-auth H1) leaves the DB
+	// unreadable when the final file write fails.
+	tmpSecret := secretPath + ".tmp"
+	if err := os.WriteFile(tmpSecret, []byte(newSecret), 0600); err != nil {
+		log.Fatalf("Failed to write new secret: %v", err)
+	}
+	if f, err := os.OpenFile(tmpSecret, os.O_RDWR, 0600); err == nil {
+		_ = f.Sync()
+		_ = f.Close()
+	}
+	if err := os.Rename(tmpSecret, secretPath); err != nil {
+		_ = os.Remove(tmpSecret)
+		log.Fatalf("Failed to persist new secret: %v", err)
+	}
+	// From here on the on-disk secret is the NEW key; keep the old one in
+	// memory (oldSecret/oldKey) to decrypt existing rows below.
+
 	registries, err := database.ListRegistryCredentials()
 	if err != nil {
 		log.Fatalf("Failed to list registry credentials: %v", err)
@@ -552,9 +574,6 @@ func rotateSecrets() {
 
 	if err := database.IncrementAllTokenVersions(); err != nil {
 		log.Fatalf("Failed to invalidate existing JWT tokens: %v", err)
-	}
-	if err := os.WriteFile(secretPath, []byte(newSecret), 0600); err != nil {
-		log.Fatalf("Failed to write new secret: %v", err)
 	}
 
 	fmt.Printf("Secrets rotated successfully. Verified backup: %s\n", backupPath)
@@ -686,10 +705,10 @@ func runInstall(username, password string) {
 	}
 
 	user := db.User{
-		ID:         "admin-001",
-		Username:   username,
+		ID:           "admin-001",
+		Username:     username,
 		PasswordHash: string(hash),
-		Role:       "admin",
+		Role:         "admin",
 		TokenVersion: 0,
 	}
 

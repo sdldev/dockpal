@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
-	import { addToast } from '$lib/store';
+	import { imagesBasePath } from '$lib/api/containers';
+	import { addToast, selectedInstance } from '$lib/store';
 	import type { ImageInfo } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -10,6 +10,10 @@
 		hideHeader?: boolean;
 	}
 	let { hideHeader = false }: Props = $props();
+
+	// Instance-aware: images are read/pulled/pruned on the host picked in the
+	// sidebar, not always the local one (audit-stack-container C2).
+	const basePath = $derived(imagesBasePath($selectedInstance || 'local'));
 
 	let images = $state<ImageInfo[]>([]);
 	let loading = $state(true);
@@ -20,15 +24,20 @@
 	let pendingDelete = $state<ImageInfo | null>(null);
 	let showPruneDialog = $state(false);
 
-	onMount(load);
+	// Load on mount and again whenever the sidebar instance changes.
+	$effect(() => {
+		void basePath;
+		load();
+	});
 
 	async function load() {
 		loading = true;
 		error = '';
 		try {
-			images = await api.get<ImageInfo[]>('/images');
+			images = await api.get<ImageInfo[]>(basePath);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load images';
+			images = [];
 		} finally {
 			loading = false;
 		}
@@ -38,7 +47,7 @@
 		if (!pullTarget.trim()) return;
 		busy = true;
 		try {
-			await api.post('/images/pull', { image: pullTarget.trim() });
+			await api.post(`${basePath}/pull`, { image: pullTarget.trim() });
 			addToast(`Pulled ${pullTarget.trim()}`, 'success');
 			pullTarget = '';
 			await load();
@@ -53,7 +62,7 @@
 		const target = pendingDelete;
 		if (!target) return;
 		try {
-			await api.delete(`/images/${target.id}`);
+			await api.delete(`${basePath}/${encodeURIComponent(target.id)}`);
 			addToast('Image removed', 'success');
 			await load();
 		} catch (e) {
@@ -65,7 +74,7 @@
 
 	async function forcePull(image: ImageInfo) {
 		try {
-			await api.post('/images/pull-force', { image: `${image.repo}:${image.tag}` });
+			await api.post(`${basePath}/pull-force`, { image: `${image.repo}:${image.tag}` });
 			addToast(`Force pulled ${image.repo}:${image.tag}`, 'success');
 			await load();
 		} catch (e) {
@@ -75,7 +84,7 @@
 
 	async function checkImageUpdate(image: ImageInfo) {
 		try {
-			const result = await api.post<{ has_update: boolean }>(`/images/check`, {
+			const result = await api.post<{ has_update: boolean }>(`${basePath}/check`, {
 				image: `${image.repo}:${image.tag}`
 			});
 			addToast(
@@ -91,7 +100,7 @@
 	async function pruneImages() {
 		pruneBusy = true;
 		try {
-			const result = await api.post<{ images_deleted: number; space_reclaimed: number }>('/images/prune', { dangling_only: true });
+			const result = await api.post<{ images_deleted: number; space_reclaimed: number }>(`${basePath}/prune`, { dangling_only: true });
 			addToast(`Pruned ${result.images_deleted ?? 0} dangling image(s), reclaimed ${formatBytes(result.space_reclaimed ?? 0)}`, 'success');
 			await load();
 		} catch (e) {
@@ -110,7 +119,7 @@
 
 	async function checkUpdates() {
 		try {
-			images = await api.get<ImageInfo[]>('/images');
+			images = await api.get<ImageInfo[]>(basePath);
 			addToast('Update check refreshed', 'info');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Update check failed', 'error');

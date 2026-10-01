@@ -63,7 +63,10 @@
   let newContainerName = $state('');
 
   // --- deploy log ---
-  let deployLogs = $state<Array<{ time: string; message: string }>>([]);
+  // Each entry keeps the event status so errors/hints stand out from progress
+  // lines (audit-stack-container L6); deployOutcome drives the terminal banner.
+  let deployLogs = $state<Array<{ time: string; message: string; status: string }>>([]);
+  let deployOutcome = $state<'running' | 'success' | 'failed' | null>(null);
   let showDeployLog = $state(false);
   let unwatchDeploy: (() => void) | null = null;
 
@@ -250,13 +253,20 @@
 
   function startDeployWatch(deployId: string) {
     deployLogs = [];
+    deployOutcome = 'running';
     showDeployLog = true;
     unwatchDeploy?.();
     unwatchDeploy = watchDeploy(deployId, (msg) => {
       const text = msg.message ?? '';
       if (!text) return;
-      deployLogs = [...deployLogs, { time: msg.time ?? '', message: text }];
+      const status = msg.status ?? 'running';
+      deployLogs = [...deployLogs, { time: msg.time ?? '', message: text, status }];
+      if (status === 'error') deployOutcome = 'failed';
+      if (msg.step === 'done' && status === 'done') deployOutcome = 'success';
     }, () => {
+      // Stream ended: if no terminal event decided the outcome, treat it as
+      // success only when nothing failed (edge agents report "started" only).
+      if (deployOutcome === 'running') deployOutcome = 'success';
       loadStack(stack.name); // refresh status when stream ends
     }, instanceId);
   }
@@ -515,11 +525,18 @@
     <div class="mb-4 rounded-md border border-zinc-700 bg-black p-3 font-mono text-xs text-zinc-200">
       <div class="mb-1 flex items-center justify-between">
         <span class="text-zinc-400">Deploy log</span>
-        <button class="text-zinc-500 hover:text-zinc-300" onclick={() => (showDeployLog = false)}>✕</button>
+        <button class="text-zinc-500 hover:text-zinc-300" aria-label="Close deploy log" onclick={() => (showDeployLog = false)}>✕</button>
       </div>
+      {#if deployOutcome === 'success'}
+        <div class="mb-2 rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 font-sans text-emerald-400">✓ Deployment finished</div>
+      {:else if deployOutcome === 'failed'}
+        <div class="mb-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 font-sans text-red-400">✕ Deployment failed — see the log below</div>
+      {/if}
       <div class="max-h-48 overflow-auto whitespace-pre-wrap">
         {#each deployLogs as line}
-          <div><span class="text-zinc-500">{line.time}</span> {line.message}</div>
+          <div class={line.status === 'error' ? 'text-red-400' : line.status === 'done' ? 'text-emerald-400' : ''}>
+            <span class="text-zinc-500">{line.time}</span> {line.message}
+          </div>
         {/each}
       </div>
     </div>

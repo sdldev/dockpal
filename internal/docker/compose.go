@@ -320,7 +320,11 @@ func buildBinds(projectName string, volumes []string) ([]string, error) {
 	return binds, nil
 }
 
-// writeComposeFile saves the compose YAML to disk.
+// writeComposeFile saves the compose YAML to disk. Both the legacy App-Install
+// path and Dockge-style stacks share one project directory per name, so the
+// filename must match the stack store's canonical ComposeFileName — writing a
+// second, differently-named compose file into the same dir leaves two files
+// with ambiguous precedence (audit-stack-container H3).
 func writeComposeFile(projectName, composeYAML string) error {
 	composeDir, err := composeProjectDir(projectName)
 	if err != nil {
@@ -329,7 +333,7 @@ func writeComposeFile(projectName, composeYAML string) error {
 	if err := os.MkdirAll(composeDir, 0755); err != nil {
 		return fmt.Errorf("failed to create compose directory: %w", err)
 	}
-	composeFilePath := filepath.Join(composeDir, "docker-compose.yml")
+	composeFilePath := filepath.Join(composeDir, ComposeFileName)
 	if err := os.WriteFile(composeFilePath, []byte(composeYAML), 0644); err != nil {
 		return fmt.Errorf("failed to write compose file: %w", err)
 	}
@@ -337,12 +341,16 @@ func writeComposeFile(projectName, composeYAML string) error {
 }
 
 // createAndStartService creates and starts a single service container.
-func (c *Client) createAndStartService(ctx context.Context, projectName, svcName string, svc ComposeService, cf *ComposeFile) error {
+// It returns the created container's ID so callers can track exactly which
+// containers a deploy created (cleanup must never target containers by a
+// prospective name — a name conflict must not lead to removing someone
+// else's running container).
+func (c *Client) createAndStartService(ctx context.Context, projectName, svcName string, svc ComposeService, cf *ComposeFile) (string, error) {
 	composeDir, err := composeProjectDir(projectName)
 	if err != nil {
-		return err
+		return "", err
 	}
-	composeFilePath := filepath.Join(composeDir, "docker-compose.yml")
+	composeFilePath := filepath.Join(composeDir, ComposeFileName)
 	baseLabels := map[string]string{
 		"dockpal.managed": "true",
 		"dockpal.project": projectName,
@@ -366,7 +374,7 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 	for _, portSpec := range svc.Ports {
 		pb, err := ParsePort(portSpec)
 		if err != nil {
-			return fmt.Errorf("service %s: %w", svcName, err)
+			return "", fmt.Errorf("service %s: %w", svcName, err)
 		}
 		portKey := network.MustParsePort(fmt.Sprintf("%d/%s", pb.ContainerPort, pb.Protocol))
 		exposedPorts[portKey] = struct{}{}
@@ -377,7 +385,7 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 
 	binds, err := buildBinds(projectName, svc.Volumes)
 	if err != nil {
-		return fmt.Errorf("service %s: %w", svcName, err)
+		return "", fmt.Errorf("service %s: %w", svcName, err)
 	}
 
 	// Default empty/unknown to unless-stopped so the app survives a host
@@ -425,7 +433,7 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 			result, err = c.cli.ContainerCreate(ctx, createOpts)
 		}
 		if err != nil {
-			return fmt.Errorf("failed to create container for %s: %w", svcName, err)
+			return "", fmt.Errorf("failed to create container for %s: %w", svcName, err)
 		}
 	}
 
@@ -434,9 +442,9 @@ func (c *Client) createAndStartService(ctx context.Context, projectName, svcName
 		// bind the host port). Remove it so the next deploy isn't blocked by
 		// its name — otherwise every retry fails with "name is already in use".
 		_ = c.removeContainerByID(ctx, result.ID)
-		return fmt.Errorf("failed to start container %s: %w", svcName, err)
+		return "", fmt.Errorf("failed to start container %s: %w", svcName, err)
 	}
-	return nil
+	return result.ID, nil
 }
 
 // isContainerNameConflict reports whether a container creation error means the
@@ -506,14 +514,13 @@ func (c *Client) DeployCompose(ctx context.Context, projectName, composeYAML str
 		if err := c.pullImageIfNeeded(ctx, svc.Image, registryAuth, forcePull); err != nil {
 			return fmt.Errorf("failed to pull image for %s: %w", svcName, err)
 		}
-		if err := c.createAndStartService(ctx, projectName, svcName, svc, cf); err != nil {
+		if _, err := c.createAndStartService(ctx, projectName, svcName, svc, cf); err != nil {
 			return err
 		}
 	}
 
 	return nil
 }
-
 
 // RemoveCompose removes all containers and files belonging to a compose project.
 func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {

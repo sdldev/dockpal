@@ -124,6 +124,8 @@ func (c *DirectClient) StackServiceAction(ctx context.Context, name, service, ac
 // WebSocket into the shared session — same two-phase pattern as
 // DeployComposeStreamed.
 func (c *DirectClient) DeployStackStreamed(ctx context.Context, name, composeYAML, composeENV string, isAdd bool, session *docker.DeploySession) error {
+	// Terminate the stream on every exit path so WS readers finish (audit C1).
+	defer session.Close()
 	reqBody := map[string]any{
 		"compose": composeYAML,
 		"env":     composeENV,
@@ -166,11 +168,8 @@ func (c *DirectClient) DeployStackStreamed(ctx context.Context, name, composeYAM
 		if err := json.Unmarshal(msg, &event); err != nil {
 			continue
 		}
-		select {
-		case session.Events <- event:
-		default:
-			// Channel full, skip
-		}
+		// Fan out to every session subscriber (not the raw channel).
+		session.EmitEvent(event)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,27 +15,38 @@ import (
 	"github.com/sdldev/dockpal/internal/registry"
 )
 
+// authFailureLimiter throttles repeated authentication failures per client
+// IP — failed auth previously consumed no rate-limit budget at all, so
+// online guessing was unthrottled (audit-auth L4). Successful requests are
+// not counted; this only bites on 401s.
+var authFailureLimiter = NewRateLimiterWithPolicy(RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 20})
+
+// rejectAuth responds 401 while charging the client against the auth-failure
+// limiter; when the limiter is exhausted it responds 429 instead.
+func rejectAuth(c *gin.Context, message string) {
+	if allowed, retryAfter := authFailureLimiter.Allow(c.ClientIP()); !allowed {
+		c.Header("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())+1))
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many failed authentication attempts"})
+		c.Abort()
+		return
+	}
+	c.JSON(http.StatusUnauthorized, gin.H{"error": message})
+	c.Abort()
+}
+
 func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if key := c.GetHeader("X-API-Key"); key != "" {
-			apiKeys, err := database.ListAPIKeys()
-			if err != nil {
-				internalError(c, err)
-				c.Abort()
+			// Resolution lives in the auth package — one place answering "is
+			// this credential valid" for every credential type (audit A2).
+			if apiKey := auth.ValidateAPIKey(database, key); apiKey != nil {
+				c.Set("user_id", apiKey.ID)
+				c.Set("username", "api-key:"+apiKey.Name)
+				c.Set("role", apiKey.Role)
+				c.Next()
 				return
 			}
-			hashed := hashAPIKey(key)
-			for _, apiKey := range apiKeys {
-				if apiKey.KeyHash == hashed {
-					c.Set("user_id", apiKey.ID)
-					c.Set("username", "api-key:"+apiKey.Name)
-					c.Set("role", apiKey.Role)
-					c.Next()
-					return
-				}
-			}
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
-			c.Abort()
+			rejectAuth(c, "invalid api key")
 			return
 		}
 
@@ -47,6 +59,16 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 			// leak tokens into URLs.
 			if isWebSocketUpgrade(c.Request) {
 				if q := c.Query("token"); q != "" {
+					// Prefer a single-use WS ticket (audit-auth L1): short-
+					// lived, carries the issuer's identity, and worthless once
+					// consumed — unlike a 4h JWT in a URL.
+					if tkt, ok := consumeWSTicket(q); ok {
+						c.Set("user_id", tkt.userID)
+						c.Set("username", tkt.username)
+						c.Set("role", tkt.role)
+						c.Next()
+						return
+					}
 					if claims, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database); err == nil {
 						c.Set("user_id", claims.UserID)
 						c.Set("username", claims.Username)
@@ -54,28 +76,24 @@ func AuthMiddleware(jwtSecret string, database *db.DB) gin.HandlerFunc {
 						c.Next()
 						return
 					}
-					c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
-					c.Abort()
+					rejectAuth(c, "invalid or expired token")
 					return
 				}
 			}
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
-			c.Abort()
+			rejectAuth(c, "missing authorization header")
 			return
 		}
 
 		parts := strings.SplitN(authHeader, " ", 2)
 		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization format"})
-			c.Abort()
+			rejectAuth(c, "invalid authorization format")
 			return
 		}
 
 		token := parts[1]
 		claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecret, database)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
-			c.Abort()
+			rejectAuth(c, "invalid or expired token")
 			return
 		}
 

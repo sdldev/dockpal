@@ -279,16 +279,12 @@ func (e *EdgeClient) DeployComposeStreamed(ctx context.Context, name, composeYAM
 			return nil
 		}
 
-		// This is a streaming chunk - forward as DeployEvent
+		// This is a streaming chunk - forward as DeployEvent to every
+		// session subscriber (not the raw channel).
 		if resp.Data != "" {
-			event := docker.DeployEvent{
+			session.EmitEvent(docker.DeployEvent{
 				Message: resp.Data,
-			}
-			select {
-			case session.Events <- event:
-			default:
-				// Channel full, skip this event
-			}
+			})
 		}
 
 		// Check if this was the last chunk

@@ -135,6 +135,17 @@ func handleInstanceInspectContainer(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// auditInstanceContainer records a container mutation for the instance in
+// the URL (audit-stack-container H4).
+func auditInstanceContainer(c *gin.Context, action, containerID, details string) {
+	database := getDatabase(c)
+	if database == nil {
+		return
+	}
+	resource := "instances/" + c.Param("instance_id") + "/containers/" + containerID
+	LogAudit(c, database, action, resource, "success", details)
+}
+
 // handleInstanceStartContainer starts a container.
 func handleInstanceStartContainer(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
@@ -145,6 +156,7 @@ func handleInstanceStartContainer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	auditInstanceContainer(c, "container.start", containerID, "")
 
 	c.JSON(http.StatusOK, gin.H{"status": "started", "instance_id": instanceID, "container_id": containerID})
 }
@@ -159,6 +171,7 @@ func handleInstanceStopContainer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	auditInstanceContainer(c, "container.stop", containerID, "")
 
 	c.JSON(http.StatusOK, gin.H{"status": "stopped", "instance_id": instanceID, "container_id": containerID})
 }
@@ -173,6 +186,7 @@ func handleInstanceRestartContainer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	auditInstanceContainer(c, "container.restart", containerID, "")
 
 	c.JSON(http.StatusOK, gin.H{"status": "restarted", "instance_id": instanceID, "container_id": containerID})
 }
@@ -197,6 +211,7 @@ func handleInstanceRemoveContainer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	auditInstanceContainer(c, "container.remove", containerID, fmt.Sprintf("force=%v", force))
 
 	c.JSON(http.StatusOK, gin.H{"status": "removed", "instance_id": instanceID, "container_id": containerID})
 }
@@ -215,7 +230,7 @@ func handleInstanceEditContainer(c *gin.Context) {
 
 	// Validate name if provided
 	if req.Name != nil {
-		if err := validateContainerName(*req.Name); err != nil {
+		if err := validator.ValidateContainerName(*req.Name); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
 			return
 		}
@@ -223,9 +238,8 @@ func handleInstanceEditContainer(c *gin.Context) {
 
 	// Validate restart policy if provided
 	if req.RestartPolicy != nil {
-		validPolicies := map[string]bool{"no": true, "always": true, "unless-stopped": true, "on-failure": true}
-		if !validPolicies[*req.RestartPolicy] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid restart policy: must be one of no, always, unless-stopped, on-failure"})
+		if err := validator.ValidateRestartPolicy(*req.RestartPolicy); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
@@ -245,7 +259,7 @@ func handleInstanceEditContainer(c *gin.Context) {
 	// Validate env vars if provided
 	if req.Env != nil {
 		for _, env := range *req.Env {
-			if err := validateEnvVarValue(env); err != nil {
+			if err := validator.ValidateEnvVarValue(env); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var: %s", err.Error())})
 				return
 			}
@@ -255,16 +269,8 @@ func handleInstanceEditContainer(c *gin.Context) {
 	// Validate ports if provided
 	if req.Ports != nil {
 		for _, pm := range *req.Ports {
-			if pm.ContainerPort < 1 || pm.ContainerPort > 65535 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid container port: %d", pm.ContainerPort)})
-				return
-			}
-			if pm.HostPort < 1 || pm.HostPort > 65535 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid host port: %d", pm.HostPort)})
-				return
-			}
-			if pm.Protocol != "tcp" && pm.Protocol != "udp" && pm.Protocol != "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid protocol: %s (must be tcp or udp)", pm.Protocol)})
+			if err := validator.ValidatePortMapping(pm.HostPort, pm.ContainerPort, pm.Protocol); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 		}
@@ -302,6 +308,7 @@ func handleInstanceEditContainer(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	auditInstanceContainer(c, "container.edit", containerID, fmt.Sprintf("recreated=%v", needsRecreate))
 
 	response := gin.H{
 		"status":    "updated",
@@ -537,38 +544,6 @@ func jwtSecretFromContext(c *gin.Context) string {
 func databaseFromContext(c *gin.Context) *db.DB {
 	if v, ok := c.Get("database"); ok {
 		return v.(*db.DB)
-	}
-	return nil
-}
-
-// validateContainerName is a simple validation for container names.
-// This duplicates validation logic from the validator package to avoid import cycles.
-func validateContainerName(name string) error {
-	if len(name) < 1 || len(name) > 128 {
-		return fmt.Errorf("name must be between 1 and 128 characters")
-	}
-	for _, c := range name {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
-			return fmt.Errorf("name can only contain letters, numbers, hyphens, underscores, and dots")
-		}
-	}
-	if name[0] == '-' || name[0] == '_' || name[0] == '.' {
-		return fmt.Errorf("name cannot start with a hyphen, underscore, or dot")
-	}
-	return nil
-}
-
-// validateEnvVarValue validates an environment variable value.
-// This duplicates validation logic from the validator package to avoid import cycles.
-func validateEnvVarValue(value string) error {
-	// Check for null bytes and control characters (except newline, tab)
-	for i, c := range value {
-		if c == 0 {
-			return fmt.Errorf("value contains null byte at position %d", i)
-		}
-		if c < 32 && c != 9 && c != 10 {
-			return fmt.Errorf("value contains control character at position %d", i)
-		}
 	}
 	return nil
 }

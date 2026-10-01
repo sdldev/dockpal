@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sdldev/dockpal/internal/composecli"
+	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 
 	"github.com/gin-gonic/gin"
@@ -22,22 +25,23 @@ import (
 
 // registerStackRoutes wires /api/stacks endpoints. viewerGroup handles reads,
 // operatorGroup mutations (both already carry auth + rate-limit middleware).
-func registerStackRoutes(viewerGroup, operatorGroup *gin.RouterGroup) {
+// database is used for audit logging of stack mutations (audit H4).
+func registerStackRoutes(viewerGroup, operatorGroup *gin.RouterGroup, database *db.DB) {
 	viewerGroup.GET("/stacks", handleListStacks)
 	viewerGroup.GET("/stacks/meta/networks", handleListDockerNetworks)
 	viewerGroup.GET("/stacks/meta/globalenv", handleGetGlobalEnv)
 	viewerGroup.GET("/stacks/:name", handleGetStack)
 
-	operatorGroup.POST("/stacks", handleCreateStack)
-	operatorGroup.PUT("/stacks/:name", handleUpdateStack)
-	operatorGroup.DELETE("/stacks/:name", handleDeleteStack)
-	operatorGroup.PUT("/stacks/meta/globalenv", handleSetGlobalEnv)
+	operatorGroup.POST("/stacks", func(c *gin.Context) { handleCreateStack(c, database) })
+	operatorGroup.PUT("/stacks/:name", func(c *gin.Context) { handleUpdateStack(c, database) })
+	operatorGroup.DELETE("/stacks/:name", func(c *gin.Context) { handleDeleteStack(c, database) })
+	operatorGroup.PUT("/stacks/meta/globalenv", func(c *gin.Context) { handleSetGlobalEnv(c, database) })
 
-	operatorGroup.POST("/stacks/:name/deploy", handleDeployStack)
+	operatorGroup.POST("/stacks/:name/deploy", func(c *gin.Context) { handleDeployStack(c, database) })
 	for _, action := range []string{"up", "start", "stop", "restart", "down", "update"} {
 		action := action
 		operatorGroup.POST("/stacks/:name/"+action, func(c *gin.Context) {
-			handleStackAction(c, action)
+			handleStackAction(c, action, database)
 		})
 	}
 
@@ -55,18 +59,34 @@ func stackCLIUnavailable(c *gin.Context) bool {
 	return false
 }
 
+// stackError maps stack failures to HTTP responses. Note: remote (instance)
+// stack errors cross the agent transport as plain strings, so substring
+// matching is the only mapping that works for both surfaces (edge_stacks.go);
+// errors.Is would only cover local failures. Every failure is logged server-
+// side with request context (audit-stack-container H5).
 func stackError(c *gin.Context, err error) {
 	msg := err.Error()
+	status := http.StatusBadRequest
 	switch {
 	case composecli.IsBusy(err), strings.Contains(msg, "another operation is already running"):
-		c.JSON(http.StatusConflict, gin.H{"error": msg})
+		status = http.StatusConflict
+	case strings.Contains(msg, "not available on this host"), strings.Contains(msg, "CLI integration not initialized"):
+		// Compose plugin missing — local surface already reports this as 501
+		// via stackCLIUnavailable; mirror it for errors that surface through
+		// instance clients (audit-stack-container M10).
+		status = http.StatusNotImplemented
 	case strings.Contains(msg, "not found"):
-		c.JSON(http.StatusNotFound, gin.H{"error": msg})
+		status = http.StatusNotFound
 	case strings.Contains(msg, "already exists"):
-		c.JSON(http.StatusConflict, gin.H{"error": msg})
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+		status = http.StatusConflict
 	}
+	slog.Warn("stack operation failed",
+		"method", c.Request.Method,
+		"path", c.Request.URL.Path,
+		"status", status,
+		"error", msg,
+	)
+	c.JSON(status, gin.H{"error": msg})
 }
 
 func handleListStacks(c *gin.Context) {
@@ -105,7 +125,7 @@ func handleGetGlobalEnv(c *gin.Context) {
 }
 
 // handleSetGlobalEnv validates and writes the shared global.env.
-func handleSetGlobalEnv(c *gin.Context) {
+func handleSetGlobalEnv(c *gin.Context, database *db.DB) {
 	var req struct {
 		Content string `json:"content"`
 	}
@@ -117,6 +137,8 @@ func handleSetGlobalEnv(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	// Never log the env content itself — it holds secrets (audit H4).
+	LogAudit(c, database, "stack.globalenv", "stacks/global.env", "success", "")
 	c.JSON(http.StatusOK, gin.H{"message": "saved"})
 }
 
@@ -139,7 +161,7 @@ type stackPayload struct {
 	Env     string `json:"env"`
 }
 
-func handleCreateStack(c *gin.Context) {
+func handleCreateStack(c *gin.Context, database *db.DB) {
 	var req stackPayload
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name and compose are required"})
@@ -154,10 +176,11 @@ func handleCreateStack(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	LogAudit(c, database, "stack.create", "stacks/"+req.Name, "success", "")
 	c.JSON(http.StatusCreated, stack)
 }
 
-func handleUpdateStack(c *gin.Context) {
+func handleUpdateStack(c *gin.Context, database *db.DB) {
 	var req struct {
 		Compose string `json:"compose" binding:"required"`
 		Env     string `json:"env"`
@@ -176,10 +199,11 @@ func handleUpdateStack(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
+	LogAudit(c, database, "stack.update", "stacks/"+name, "success", "")
 	c.JSON(http.StatusOK, stack)
 }
 
-func handleDeleteStack(c *gin.Context) {
+func handleDeleteStack(c *gin.Context, database *db.DB) {
 	if stackCLIUnavailable(c) {
 		return
 	}
@@ -188,13 +212,14 @@ func handleDeleteStack(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	LogAudit(c, database, "stack.delete", "stacks/"+name, "success", "")
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
 // handleDeployStack saves the stack (create-or-update) then runs
 // `docker compose up -d --remove-orphans` in the background; progress is
 // streamed over the existing deploy WebSocket (/api/deploy/stream/:id).
-func handleDeployStack(c *gin.Context) {
+func handleDeployStack(c *gin.Context, database *db.DB) {
 	if stackCLIUnavailable(c) {
 		return
 	}
@@ -216,26 +241,52 @@ func handleDeployStack(c *gin.Context) {
 			stackError(c, err)
 			return
 		}
-	} else if _, err := docker.GetStack(name); err != nil {
-		stackError(c, err)
-		return
+	} else {
+		// Deploying whatever is on disk requires a managed stack dir.
+		// GetStack returns (Managed:false, nil) for a missing dir, so check
+		// the flag — an error-only check never fires (audit-stack-container M5).
+		s, err := docker.GetStack(name)
+		if err != nil {
+			stackError(c, err)
+			return
+		}
+		if !s.Managed {
+			stackError(c, fmt.Errorf("stack %q not found", name))
+			return
+		}
 	}
 
 	session := globalDeployManager.CreateSession()
 	go func() {
-		err := composecli.StackUpStreamed(context.Background(), name, session)
+		// Always schedule session removal — even on panic — so a stuck or
+		// crashed deploy never leaks the session (audit M4). The deploy gets a
+		// bounded context independent of the HTTP request lifecycle so a hung
+		// compose call can't leak forever (audit M4 context follow-up).
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("deploy stack goroutine panicked", "stack", name, "panic", r)
+			}
+			time.AfterFunc(30*time.Second, func() {
+				globalDeployManager.RemoveSession(session.ID)
+			})
+		}()
+		err := docker.StackUpStreamedCLI(ctx, name, session)
 		if err == nil {
 			session.Emit("done", "Deployed", "done")
+		} else {
+			// Signal the failure — otherwise a failed local deploy is silent
+			// (audit H1).
+			session.Emit("error", err.Error(), "error")
 		}
-		time.AfterFunc(30*time.Second, func() {
-			globalDeployManager.RemoveSession(session.ID)
-		})
 	}()
 
+	LogAudit(c, database, "stack.deploy", "stacks/"+name, "success", "deploy_id "+session.ID)
 	c.JSON(http.StatusOK, gin.H{"deploy_id": session.ID})
 }
 
-func handleStackAction(c *gin.Context, action string) {
+func handleStackAction(c *gin.Context, action string, database *db.DB) {
 	if stackCLIUnavailable(c) {
 		return
 	}
@@ -262,6 +313,7 @@ func handleStackAction(c *gin.Context, action string) {
 		stackError(c, err)
 		return
 	}
+	LogAudit(c, database, "stack."+action, "stacks/"+name, "success", "")
 
 	stack, getErr := docker.GetStackFull(ctx, name)
 	if getErr != nil {
@@ -272,13 +324,19 @@ func handleStackAction(c *gin.Context, action string) {
 	c.JSON(http.StatusOK, stack)
 }
 
+// validateServiceName enforces the shared service-name rule for both the
+// local and instance stack surfaces (audit-stack-container M7).
+func validateServiceName(service string) bool {
+	return service != "" && !strings.ContainsAny(service, "/\\ ")
+}
+
 func handleStackServiceAction(c *gin.Context, action string) {
 	if stackCLIUnavailable(c) {
 		return
 	}
 	name := c.Param("name")
 	service := c.Param("service")
-	if service == "" || strings.ContainsAny(service, "/\\ ") {
+	if !validateServiceName(service) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service name"})
 		return
 	}

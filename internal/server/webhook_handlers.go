@@ -216,6 +216,18 @@ func HandleCreateWebhook(database *db.DB) gin.HandlerFunc {
 			return
 		}
 
+		// A webhook without a secret accepts unsigned triggers — anyone who
+		// sees the URL (CI configs, browser history, logs) can force a deploy
+		// (audit-auth M2). Generate one server-side when the caller leaves it
+		// empty so every webhook is HMAC-protected by default.
+		if req.Secret == "" {
+			req.Secret = generateRandomToken()
+			if req.Secret == "" {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate webhook secret"})
+				return
+			}
+		}
+
 		wh := db.Webhook{
 			ID:          "wh-" + generateRandomToken()[:16],
 			InstanceID:  req.InstanceID,

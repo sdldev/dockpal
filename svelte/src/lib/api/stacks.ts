@@ -122,19 +122,34 @@ export function watchDeploy(
   onDone?: () => void,
   instanceId = 'local'
 ): () => void {
-  const token = getToken() ?? '';
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(
-    `${proto}//${window.location.host}/api/instances/${encodeURIComponent(instanceId)}/deploy/stream/${encodeURIComponent(deployId)}?token=${encodeURIComponent(token)}`
-  );
-  ws.onmessage = (event) => {
+  let ws: WebSocket | null = null;
+  let cancelled = false;
+  // Single-use 60s ticket instead of the 4h JWT in the URL (audit-auth L1).
+  void (async () => {
+    let credential = getToken() ?? '';
     try {
-      onEvent(JSON.parse(event.data));
+      const res = await api.get<{ ticket: string }>('/ws-ticket');
+      credential = res.ticket;
     } catch {
-      onEvent({ message: String(event.data) });
+      // Older backend without /ws-ticket — fall back to the JWT.
     }
+    if (cancelled) return;
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(
+      `${proto}//${window.location.host}/api/instances/${encodeURIComponent(instanceId)}/deploy/stream/${encodeURIComponent(deployId)}?token=${encodeURIComponent(credential)}`
+    );
+    ws.onmessage = (event) => {
+      try {
+        onEvent(JSON.parse(event.data));
+      } catch {
+        onEvent({ message: String(event.data) });
+      }
+    };
+    ws.onclose = () => onDone?.();
+    ws.onerror = () => onDone?.();
+  })();
+  return () => {
+    cancelled = true;
+    ws?.close();
   };
-  ws.onclose = () => onDone?.();
-  ws.onerror = () => onDone?.();
-  return () => ws.close();
 }

@@ -24,6 +24,11 @@ type InstallParams struct {
 	ServerHost    string
 	AgentImage    string // default "ghcr.io/sdldev/dockpal-agent:latest"
 	IsSecureWS    bool   // whether to use wss:// instead of ws://
+
+	// ExpectedHostKey pins the server's host key (SHA-256 fingerprint,
+	// e.g. "SHA256:abc..."). Empty means trust-on-first-use: the presented
+	// fingerprint is printed for the operator to record (audit-auth L6).
+	ExpectedHostKey string
 }
 
 // InstallAgent connects to a remote host via SSH, configures Docker if needed,
@@ -71,10 +76,29 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 		fmt.Fprintln(w, "[Dockpal Installer] Using SSH password authentication (password + keyboard-interactive).")
 	}
 
+	// Host key verification (audit-auth L6). The agent token crosses this
+	// channel, so a silent InsecureIgnoreHostKey would let a MITM capture it.
+	// With ExpectedHostKey set, the key must match; without it (TOFU), the
+	// fingerprint is printed so the operator can verify/pin it on reruns.
+	hostKeyCallback := func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		fingerprint := ssh.FingerprintSHA256(key)
+		if params.ExpectedHostKey != "" {
+			if fingerprint != params.ExpectedHostKey {
+				return fmt.Errorf("SSH host key mismatch for %s: got %s, expected %s — refusing to connect (possible MITM or re-imaged host)", hostname, fingerprint, params.ExpectedHostKey)
+			}
+			fmt.Fprintf(w, "[Dockpal Installer] Host key verified: %s\n", fingerprint)
+			return nil
+		}
+		fmt.Fprintf(w, "[Dockpal Installer] WARNING: host key not pinned — trusting on first use.\n")
+		fmt.Fprintf(w, "[Dockpal Installer] Host key fingerprint: %s\n", fingerprint)
+		fmt.Fprintf(w, "[Dockpal Installer] Verify this fingerprint matches the server (e.g. 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on it) and pin it on the instance to enable strict verification.\n")
+		return nil
+	}
+
 	config := &ssh.ClientConfig{
 		User:            params.User,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // For VPS setups, we bypass strict host verification
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         15 * time.Second,
 	}
 

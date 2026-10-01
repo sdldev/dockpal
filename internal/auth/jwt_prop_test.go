@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -86,51 +87,46 @@ func versionIncrementGenerator(values []reflect.Value, rng *rand.Rand) {
 // Property 6: Token Version Round-Trip — JWT with matching version passes, mismatched rejects
 // **Validates: Requirements 5.4, 5.5**
 
-func TestProperty6_TokenVersionRoundTrip(t *testing.T) {
-	// Property: A JWT generated with version V validates successfully when
-	// claims.TokenVersion == V, and a JWT generated with version V fails
-	// validation when checked against a different stored version.
-	prop := func(params versionRoundTripParams) bool {
-		secret := "test-secret-key-for-property-testing"
+// TestJWT_RejectsAlgNone verifies the signing-method check in ValidateJWT:
+// a token with alg=none (no signature) must never be accepted (audit-auth T5
+// — replaces the tautological non-DB version round-trip property).
+func TestJWT_RejectsAlgNone(t *testing.T) {
+	secret := "test-secret-algnone"
 
-		// Generate a token with the given version
-		tokenStr, err := GenerateJWT("user-123", "testuser", secret, "admin", params.tokenVersion)
-		if err != nil {
-			return false
-		}
+	// Hand-craft an alg=none JWT with plausible claims.
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(
+		`{"user_id":"user-1","username":"admin","role":"admin","token_version":0,"iss":"dockpal","exp":9999999999}`))
+	token := header + "." + payload + "."
 
-		// Validate the token - should succeed (basic validation)
-		claims, err := ValidateJWT(tokenStr, secret)
-		if err != nil {
-			return false
-		}
-
-		// Matching version: claims version should equal what was embedded
-		if claims.TokenVersion != params.tokenVersion {
-			return false
-		}
-
-		// Matching version check: simulating DB has same version → should pass
-		if claims.TokenVersion != params.tokenVersion {
-			return false
-		}
-
-		// Mismatched version check: simulating DB has different version → should reject
-		// The mismatch version is guaranteed different from tokenVersion
-		if claims.TokenVersion == params.mismatchVersion {
-			// This should never be true since we guarantee they differ
-			return false
-		}
-
-		return true
+	if _, err := ValidateJWT(token, secret); err == nil {
+		t.Fatal("alg=none token was accepted — signing-method check is broken")
 	}
+}
 
-	cfg := &quick.Config{
-		MaxCount: 500,
-		Values:   versionRoundTripGenerator,
+// TestJWT_RejectsWrongSecret verifies a token signed with a different key is
+// rejected (audit-auth T5).
+func TestJWT_RejectsWrongSecret(t *testing.T) {
+	tokenStr, err := GenerateJWT("user-1", "admin", "secret-A", "admin", 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := quick.Check(prop, cfg); err != nil {
-		t.Errorf("Property 6 failed: %v", err)
+	if _, err := ValidateJWT(tokenStr, "secret-B"); err == nil {
+		t.Fatal("token signed with a different secret was accepted")
+	}
+}
+
+// TestJWT_RejectsNonHMACAlgorithm verifies asymmetric-alg tokens (RS256 etc.)
+// are rejected even though the HMAC key is public knowledge — alg-confusion
+// must not be possible (audit-auth T5, pins jwt.go's signing-method check).
+func TestJWT_RejectsNonHMACAlgorithm(t *testing.T) {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(
+		`{"user_id":"user-1","username":"admin","role":"admin","token_version":0,"iss":"dockpal","exp":9999999999}`))
+	token := header + "." + payload + ".ZmFrZXNpZ25hdHVyZQ"
+
+	if _, err := ValidateJWT(token, "any-secret"); err == nil {
+		t.Fatal("RS256 token was accepted — alg-confusion possible")
 	}
 }
 

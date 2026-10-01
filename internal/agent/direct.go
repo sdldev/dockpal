@@ -451,11 +451,9 @@ func (c *DirectClient) DeployComposeStreamed(ctx context.Context, name, composeY
 			continue
 		}
 
-		select {
-		case session.Events <- event:
-		default:
-			// Channel full, skip
-		}
+		// Fan out to every session subscriber (not the raw channel — that
+		// would skip subscribers).
+		session.EmitEvent(event)
 	}
 
 	return nil

@@ -10,7 +10,7 @@
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import '@xterm/xterm/css/xterm.css';
-  import { getToken } from '$lib/api/client';
+  import { getWSTicket } from '$lib/api/containers';
 
   interface Props {
     instanceId: string;
@@ -29,9 +29,9 @@
   let fitAddon: FitAddon | null = null;
   let termEl: HTMLDivElement | undefined = $state();
 
-  function wsURL(): string {
+  function wsURL(ticket: string): string {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/exec?shell=${shell}&token=${encodeURIComponent(getToken() ?? '')}`;
+    return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/exec?shell=${shell}&token=${encodeURIComponent(ticket)}`;
   }
 
   function sendResize(cols: number, rows: number) {
@@ -69,7 +69,14 @@
     });
     term.onResize(({ cols, rows }) => sendResize(cols, rows));
 
-    socket = new WebSocket(wsURL());
+    // Single-use 60s ticket instead of the 4h JWT in the URL (audit L1).
+    const ticket = await getWSTicket().catch(() => '');
+    if (!ticket) {
+      status = 'error';
+      statusMessage = 'Could not obtain a session ticket — please retry.';
+      return;
+    }
+    socket = new WebSocket(wsURL(ticket));
     socket.binaryType = 'arraybuffer';
     socket.onopen = async () => {
       status = 'open';

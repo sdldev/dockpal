@@ -51,11 +51,21 @@ func (f *fakeStackCLI) TryLock(name string) bool {
 
 func (f *fakeStackCLI) Unlock(name string) { delete(f.locked, name) }
 
+func (f *fakeStackCLI) StackUpStreamed(ctx context.Context, name string, session *DeploySession) error {
+	defer session.Close()
+	return f.runErr
+}
+
 func withFakeCLI(t *testing.T, f *fakeStackCLI) {
 	t.Helper()
 	prev := cli
 	cli = f
-	t.Cleanup(func() { cli = prev })
+	// The compose-ls cache (L13) would otherwise leak results across tests.
+	InvalidateComposeLsCache()
+	t.Cleanup(func() {
+		cli = prev
+		InvalidateComposeLsCache()
+	})
 }
 
 func withTempComposeBase(t *testing.T) string {
@@ -98,8 +108,13 @@ func TestStatusConvert(t *testing.T) {
 		"Running(1)":             StackStatusRunning,
 		"exited(1)":              StackStatusExited,
 		"exited(1), running(1)":  StackStatusExited,
+		"running(1), exited(1)":  StackStatusExited, // order-independent
 		"created(1)":             StackStatusPartial,
-		"paused(1)":              StackStatusUnknown,
+		"created(1), running(1)": StackStatusPartial, // mixed — order-independent
+		"running(1), created(1)": StackStatusPartial, // mixed — order-independent
+		"paused(1)":              StackStatusPartial,
+		"restarting(1)":          StackStatusPartial,
+		"unknownstate(1)":        StackStatusUnknown,
 		"":                       StackStatusUnknown,
 	}
 	for in, want := range cases {

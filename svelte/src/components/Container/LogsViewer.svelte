@@ -2,7 +2,7 @@
   // Live log viewer for a container — streams over the existing WS endpoint
   // GET /api/instances/:id/containers/:id/logs?tail=N&token=...
   import { onDestroy } from 'svelte';
-  import { getToken } from '$lib/api/client';
+  import { getWSTicket } from '$lib/api/containers';
   import Icon from '../ui/Icon.svelte';
 
   interface Props {
@@ -26,12 +26,12 @@
   let lastInstanceId = '';
   let lastContainerId = '';
 
-  function wsURL(tailN: string): string {
+  function wsURL(tailN: string, ticket: string): string {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tailN}&token=${encodeURIComponent(getToken() ?? '')}`;
+    return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tailN}&token=${encodeURIComponent(ticket)}`;
   }
 
-  function connect() {
+  async function connect() {
     socket?.close();
     socket = null;
     if (reconnectTimer) {
@@ -41,7 +41,10 @@
     lastInstanceId = instanceId;
     lastContainerId = containerId;
 
-    socket = new WebSocket(wsURL(tail));
+    // Single-use 60s ticket instead of the 4h JWT in the URL (audit L1).
+    const ticket = await getWSTicket().catch(() => '');
+    if (!ticket) return;
+    socket = new WebSocket(wsURL(tail, ticket));
     socket.onopen = () => { connected = true; };
     socket.onmessage = (event) => {
       // Docker multiplexes stdout/stderr; the server already demuxes, so each

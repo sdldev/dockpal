@@ -231,10 +231,17 @@
     }
   }
 
-  function openLogStream(deployId: string) {
+  async function openLogStream(deployId: string) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const token = getToken();
-    const wsUrl = `${proto}//${location.host}/api/instances/${instanceId}/deploy/stream/${deployId}?token=${token}`;
+    // Single-use 60s ticket instead of the 4h JWT in the URL (audit L1).
+    let credential = getToken() ?? '';
+    try {
+      const res = await api.get<{ ticket: string }>('/ws-ticket');
+      credential = res.ticket;
+    } catch {
+      // Older backend without /ws-ticket — fall back to the JWT.
+    }
+    const wsUrl = `${proto}//${location.host}/api/instances/${instanceId}/deploy/stream/${deployId}?token=${credential}`;
 
     socket = new WebSocket(wsUrl);
     socket.onmessage = (event) => {
