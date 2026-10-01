@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -47,6 +49,11 @@ type InstanceResponse struct {
 	CreatedAt      int64  `json:"created_at,omitempty"`
 	InstallCommand string `json:"install_command,omitempty"`
 	AgentVersion   string `json:"agent_version,omitempty"`
+	// SSH hardening state (see db.Instance).
+	SSHAuthType        string `json:"ssh_auth_type,omitempty"`
+	SSHHardeningStatus string `json:"ssh_hardening_status,omitempty"`
+	SSHHardenedAt      int64  `json:"ssh_hardened_at,omitempty"`
+	SSHKeyFingerprint  string `json:"ssh_key_fingerprint,omitempty"`
 }
 
 type InstanceListItem struct {
@@ -57,6 +64,10 @@ type InstanceListItem struct {
 	Mode     string `json:"mode"`
 	Status   string `json:"status"`
 	LastSeen int64  `json:"last_seen"`
+	// Enough for the Servers-table security badge without secrets.
+	SSHAuthType        string `json:"ssh_auth_type,omitempty"`
+	SSHHardeningStatus string `json:"ssh_hardening_status,omitempty"`
+	SSHHardenedAt      int64  `json:"ssh_hardened_at,omitempty"`
 }
 
 type UpdateInstanceRequest struct {
@@ -72,6 +83,7 @@ type TestResult struct {
 
 // RegisterInstanceRoutes adds instance CRUD and enrollment endpoints.
 func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string, logsManager *InstallLogsManager) {
+	hardenRunning := &sync.Map{} // instanceID -> struct{}{} while a harden job runs
 	g.POST("/instances", RequireRole(auth.RoleAdmin), handleCreateInstance(database, jwtSecret))
 	g.GET("/instances", RequireRole(auth.RoleViewer), handleListInstances(database))
 	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database, jwtSecret))
@@ -81,6 +93,8 @@ func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent
 	g.POST("/instances/:instance_id/rotate-token", RequireRole(auth.RoleAdmin), handleRotateToken(database, jwtSecret))
 	g.POST("/instances/:instance_id/install", RequireRole(auth.RoleAdmin), handleInstallAgent(database, jwtSecret, logsManager))
 	g.GET("/instances/:instance_id/install/logs", RequireRole(auth.RoleAdmin), handleInstallAgentLogs(logsManager))
+	g.POST("/instances/:instance_id/harden", RequireRole(auth.RoleAdmin), handleHardenSSH(database, jwtSecret, logsManager, hardenRunning))
+	g.GET("/instances/:instance_id/harden/logs", RequireRole(auth.RoleAdmin), handleHardenSSHLogs(logsManager))
 }
 
 // handleCreateInstance creates a new instance with a generated agent token.
@@ -213,13 +227,16 @@ func handleListInstances(database *db.DB) gin.HandlerFunc {
 		result := make([]InstanceListItem, len(instances))
 		for i, inst := range instances {
 			result[i] = InstanceListItem{
-				ID:       inst.ID,
-				Name:     inst.Name,
-				Host:     inst.Host,
-				Port:     inst.Port,
-				Mode:     inst.Mode,
-				Status:   inst.Status,
-				LastSeen: inst.LastSeen,
+				ID:                 inst.ID,
+				Name:               inst.Name,
+				Host:               inst.Host,
+				Port:               inst.Port,
+				Mode:               inst.Mode,
+				Status:             inst.Status,
+				LastSeen:           inst.LastSeen,
+				SSHAuthType:        inst.SSHAuthType,
+				SSHHardeningStatus: inst.SSHHardeningStatus,
+				SSHHardenedAt:      inst.SSHHardenedAt,
 			}
 		}
 
@@ -259,20 +276,24 @@ func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, InstanceResponse{
-			ID:             inst.ID,
-			Name:           inst.Name,
-			Host:           inst.Host,
-			Port:           inst.Port,
-			Mode:           inst.Mode,
-			Status:         inst.Status,
-			LastSeen:       inst.LastSeen,
-			CreatedAt:      inst.CreatedAt,
-			AgentVersion:   inst.AgentVersion,
-			DockerVersion:  inst.DockerVersion,
-			OS:             inst.OS,
-			CPUCores:       inst.CPUCores,
-			TotalMemory:    inst.TotalMemory,
-			InstallCommand: installCmd,
+			ID:                 inst.ID,
+			Name:               inst.Name,
+			Host:               inst.Host,
+			Port:               inst.Port,
+			Mode:               inst.Mode,
+			Status:             inst.Status,
+			LastSeen:           inst.LastSeen,
+			CreatedAt:          inst.CreatedAt,
+			AgentVersion:       inst.AgentVersion,
+			DockerVersion:      inst.DockerVersion,
+			OS:                 inst.OS,
+			CPUCores:           inst.CPUCores,
+			TotalMemory:        inst.TotalMemory,
+			InstallCommand:     installCmd,
+			SSHAuthType:        inst.SSHAuthType,
+			SSHHardeningStatus: inst.SSHHardeningStatus,
+			SSHHardenedAt:      inst.SSHHardenedAt,
+			SSHKeyFingerprint:  inst.SSHKeyFingerprint,
 		})
 	}
 }
@@ -488,20 +509,24 @@ func handleRotateToken(database *db.DB, jwtSecret string) gin.HandlerFunc {
 		installCmd := generateInstallCommand(inst.Mode, serverHost, token)
 
 		c.JSON(http.StatusOK, InstanceResponse{
-			ID:             inst.ID,
-			Name:           inst.Name,
-			Host:           inst.Host,
-			Port:           inst.Port,
-			Mode:           inst.Mode,
-			Status:         inst.Status,
-			LastSeen:       inst.LastSeen,
-			CreatedAt:      inst.CreatedAt,
-			AgentVersion:   inst.AgentVersion,
-			DockerVersion:  inst.DockerVersion,
-			OS:             inst.OS,
-			CPUCores:       inst.CPUCores,
-			TotalMemory:    inst.TotalMemory,
-			InstallCommand: installCmd,
+			ID:                 inst.ID,
+			Name:               inst.Name,
+			Host:               inst.Host,
+			Port:               inst.Port,
+			Mode:               inst.Mode,
+			Status:             inst.Status,
+			LastSeen:           inst.LastSeen,
+			CreatedAt:          inst.CreatedAt,
+			AgentVersion:       inst.AgentVersion,
+			DockerVersion:      inst.DockerVersion,
+			OS:                 inst.OS,
+			CPUCores:           inst.CPUCores,
+			TotalMemory:        inst.TotalMemory,
+			InstallCommand:     installCmd,
+			SSHAuthType:        inst.SSHAuthType,
+			SSHHardeningStatus: inst.SSHHardeningStatus,
+			SSHHardenedAt:      inst.SSHHardenedAt,
+			SSHKeyFingerprint:  inst.SSHKeyFingerprint,
 		})
 	}
 }
@@ -756,54 +781,253 @@ var installWebSocketUpgrader = websocket.Upgrader{
 
 func handleInstallAgentLogs(logsManager *InstallLogsManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("instance_id")
+		streamLogSession(c, logsManager, c.Param("instance_id"), "[Dockpal Installer]")
+	}
+}
 
-		conn, err := installWebSocketUpgrader.Upgrade(c.Writer, c.Request, nil)
-		if err != nil {
-			log.Printf("Failed to upgrade installation logs WebSocket: %v", err)
+// streamLogSession upgrades the request to a WebSocket and streams a named
+// log session: full history first, then live lines with periodic pings until
+// the client goes away or the session ends.
+func streamLogSession(c *gin.Context, logsManager *InstallLogsManager, sessionKey, closePrefix string) {
+	conn, err := installWebSocketUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Printf("Failed to upgrade log stream WebSocket (session %s): %v", sessionKey, err)
+		return
+	}
+	defer conn.Close()
+
+	ch, history, deregister := logsManager.RegisterListener(sessionKey)
+	defer deregister()
+
+	// 1. Send all existing log history
+	for _, line := range history {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
 			return
 		}
-		defer conn.Close()
+	}
 
-		ch, history, deregister := logsManager.RegisterListener(id)
-		defer deregister()
+	// 2. Stream new logs as they arrive
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
-		// 1. Send all existing log history
-		for _, line := range history {
-			if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
 				return
 			}
 		}
+	}()
 
-		// 2. Stream new logs as they arrive
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		go func() {
-			for {
-				_, _, err := conn.ReadMessage()
-				if err != nil {
-					return
-				}
+	for {
+		select {
+		case line, ok := <-ch:
+			if !ok {
+				// Channel closed, session completed
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(closePrefix+" Session disconnected."))
+				return
 			}
-		}()
-
-		for {
-			select {
-			case line, ok := <-ch:
-				if !ok {
-					// Channel closed, session completed
-					_ = conn.WriteMessage(websocket.TextMessage, []byte("[Dockpal Installer] Session disconnected."))
-					return
-				}
-				if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
-					return
-				}
-			case <-ticker.C:
-				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-					return
-				}
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(line)); err != nil {
+				return
+			}
+		case <-ticker.C:
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
 			}
 		}
+	}
+}
+
+// hardenSessionKey namespaces the hardening job's log session so it can never
+// collide with an install session for the same instance.
+func hardenSessionKey(instanceID string) string {
+	return "harden-" + instanceID
+}
+
+// HardenSSHRequest carries optional hardening options.
+type HardenSSHRequest struct {
+	// SSHKeyID optionally selects a Saved SSH Key to install instead of the
+	// default fresh keypair generated for this instance.
+	SSHKeyID string `json:"ssh_key_id"`
+}
+
+// handleHardenSSH starts the SSH hardening job: install a key, verify key
+// login from a fresh connection, then disable password auth in sshd. Runs in
+// the background; progress streams over /harden/logs like the installer.
+func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogsManager, running *sync.Map) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("instance_id")
+
+		if id == "local" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "the local instance is not managed over SSH"})
+			return
+		}
+
+		var req HardenSSHRequest
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request: %v", err)})
+			return
+		}
+
+		inst, err := database.GetInstance(id)
+		if err != nil {
+			if errors.Is(err, db.ErrInstanceNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get instance"})
+			return
+		}
+
+		// The credential the panel currently holds for this instance — the
+		// installer stored it encrypted when the server was added.
+		cryptoKey, err := registry.DeriveKey(jwtSecret)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive decryption key"})
+			return
+		}
+
+		authType := "password"
+		var authSecret string
+		if len(inst.SSHKeyEncrypted) > 0 {
+			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+			if derr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt stored SSH key"})
+				return
+			}
+			authType = "key"
+			authSecret = string(plain)
+		} else if len(inst.SSHPasswordEncrypted) > 0 {
+			plain, derr := registry.Decrypt(inst.SSHPasswordEncrypted, cryptoKey)
+			if derr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt stored SSH password"})
+				return
+			}
+			authSecret = string(plain)
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no SSH credentials stored for this server — install the agent over SSH first"})
+			return
+		}
+
+		// Where to connect: the SSH endpoint recorded during install, falling
+		// back to the agent host for direct-mode instances.
+		host := inst.SSHHost
+		if host == "" && inst.Mode == "direct" {
+			host = inst.Host
+		}
+		if host == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no SSH host recorded for this server"})
+			return
+		}
+		port := inst.SSHPort
+		if port == 0 {
+			port = 22
+		}
+		user := inst.SSHUser
+		if user == "" {
+			user = "root"
+		}
+
+		// The key that will remain on the server: a chosen saved key, or by
+		// default a fresh keypair dedicated to this instance (one leaked key
+		// must not unlock the rest of the fleet).
+		privKeyPEM := authSecret
+		var pubKey, fingerprint string
+		if req.SSHKeyID != "" {
+			resolved, rerr := resolveSSHKeySecret(database, cryptoKey, req.SSHKeyID)
+			if rerr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+				return
+			}
+			privKeyPEM = resolved
+			pubKey, fingerprint, rerr = ssh.PublicKeyFromPrivate(privKeyPEM)
+			if rerr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+				return
+			}
+		} else {
+			pub, priv, fp, gerr := ssh.GenerateKeyPair("dockpal-" + id)
+			if gerr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": gerr.Error()})
+				return
+			}
+			pubKey, privKeyPEM, fingerprint = pub, priv, fp
+		}
+
+		// One harden job per instance at a time — two concurrent runs would
+		// interleave sshd rewrites and rollbacks.
+		if _, loaded := running.LoadOrStore(id, struct{}{}); loaded {
+			c.JSON(http.StatusConflict, gin.H{"error": "hardening is already in progress for this server"})
+			return
+		}
+
+		sessionKey := hardenSessionKey(id)
+		logsManager.RemoveSession(sessionKey)
+		LogAudit(c, database, "instance.harden_ssh", id, "success", fmt.Sprintf("Started SSH hardening on %s:%d (user %s)", host, port, user))
+
+		params := ssh.HardenParams{
+			Host:          host,
+			Port:          port,
+			User:          user,
+			AuthType:      authType,
+			AuthSecret:    authSecret,
+			PublicKey:     pubKey,
+			PrivateKeyPEM: privKeyPEM,
+			// The password that used to work — after the reload the panel
+			// dials with it again and REQUIRES rejection.
+			TestPassword: func() string {
+				if authType == "password" {
+					return authSecret
+				}
+				return ""
+			}(),
+		}
+
+		go func() {
+			defer running.Delete(id)
+			defer logsManager.CompleteSession(sessionKey)
+			lw := &logWriter{instanceID: sessionKey, mgr: logsManager}
+			logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Initializing hardening on remote host %s:%d...\n", host, port)
+
+			if err := ssh.HardenSSH(params, lw); err != nil {
+				log.Printf("SSH hardening on instance %s failed: %v", id, err)
+				logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Error: %v\n", err)
+				return
+			}
+
+			// Persist the outcome: the panel now authenticates with the
+			// installed key; the password no longer works, so it is dropped.
+			instCopy, gerr := database.GetInstance(id)
+			if gerr != nil {
+				log.Printf("SSH hardening on instance %s succeeded but reloading the record failed: %v", id, gerr)
+				return
+			}
+			encPriv, eerr := registry.Encrypt([]byte(privKeyPEM), cryptoKey)
+			if eerr != nil {
+				log.Printf("SSH hardening on instance %s: failed to encrypt the new key: %v", id, eerr)
+				logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Warning: could not persist the new key (%v) — re-run hardening to repair the record.", eerr)
+				return
+			}
+			instCopy.SSHAuthType = "key"
+			instCopy.SSHKeyEncrypted = encPriv
+			instCopy.SSHPasswordEncrypted = nil
+			instCopy.SSHHardeningStatus = "hardened"
+			instCopy.SSHHardenedAt = time.Now().Unix()
+			instCopy.SSHKeyFingerprint = fingerprint
+			if serr := database.SaveInstance(*instCopy); serr != nil {
+				log.Printf("SSH hardening on instance %s: failed to save hardened state: %v", id, serr)
+				logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Warning: could not save the hardened state (%v).", serr)
+				return
+			}
+			log.Printf("SSH hardening on instance %s completed successfully", id)
+			logsManager.WriteLog(sessionKey, "[Dockpal Hardening] Hardening completed successfully — password authentication disabled.")
+		}()
+
+		c.JSON(http.StatusAccepted, gin.H{"message": "hardening started", "session": sessionKey})
+	}
+}
+
+func handleHardenSSHLogs(logsManager *InstallLogsManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		streamLogSession(c, logsManager, hardenSessionKey(c.Param("instance_id")), "[Dockpal Hardening]")
 	}
 }

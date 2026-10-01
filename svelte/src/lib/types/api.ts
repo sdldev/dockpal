@@ -66,6 +66,11 @@ export interface InstanceListItem {
   mode: string;
   status: string;
   last_seen: number;
+  /** SSH auth the panel holds for this server (absent for the local instance). */
+  ssh_auth_type?: 'password' | 'key';
+  /** "hardened" once key-only auth is verified and password login is disabled. */
+  ssh_hardening_status?: string;
+  ssh_hardened_at?: number;
 }
 
 // GET /api/instances/:id/system/info — merged HostInfo + HostStats.

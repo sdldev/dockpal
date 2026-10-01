@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { createFleetStore, isAdmin, isOperator, addToast, selectedInstance } from '../../lib/store';
+	import type { FleetInstance } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
 	import { updateInstance } from '../../lib/api/stacks';
 	import { formatBytes } from '../../lib/stats-history';
 	import { formatPorts } from '../../lib/format';
 	import { navigate } from '../../lib/router';
 	import AddServerPanel from '../fleet/AddServerPanel.svelte';
+	import SSHHardeningModal from '../fleet/SSHHardeningModal.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
@@ -25,6 +27,32 @@
 	let removing = $state(false);
 	let testingId = $state<string | null>(null);
 	let testResult = $state<{ id: string; ok: boolean; message: string } | null>(null);
+
+	// SSH hardening detail + run (admin-only, remote instances only).
+	let hardenTarget = $state<FleetInstance | null>(null);
+
+	// After a successful hardening run the modal's instance snapshot is stale
+	// (it still shows "password auth"). Pull the refreshed record from the
+	// fleet store so the modal reflects the new state immediately.
+	async function refreshAfterHarden() {
+		await fleet.fetchMetrics();
+		if (hardenTarget) {
+			hardenTarget = $fleet.instances.find((i) => i.id === hardenTarget?.id) ?? hardenTarget;
+		}
+	}
+
+	// Security badge for the Servers table: key-only auth (hardened) > key
+	// auth (panel uses a key, passwords may still be accepted) > password.
+	function securityBadge(inst: FleetInstance): { label: string; cls: string; clickable: boolean } {
+		if (inst.id === 'local') return { label: 'Local', cls: 'bg-zinc-800 text-zinc-500', clickable: false };
+		if (inst.ssh_hardening_status === 'hardened')
+			return { label: 'Hardened', cls: 'bg-green-500/10 text-green-400', clickable: true };
+		if (inst.ssh_auth_type === 'key')
+			return { label: 'Key auth', cls: 'bg-blue-500/10 text-blue-400', clickable: true };
+		if (inst.ssh_auth_type === 'password')
+			return { label: 'Password auth', cls: 'bg-amber-500/10 text-amber-400', clickable: true };
+		return { label: '—', cls: 'text-zinc-600', clickable: false };
+	}
 
 	// Edit (rename) modal state.
 	let editTarget = $state<{ id: string; name: string; host: string; port: number } | null>(null);
@@ -239,6 +267,21 @@
 	</div>
 {/snippet}
 
+{#snippet securityBadgeCell(inst: FleetInstance)}
+	{@const badge = securityBadge(inst)}
+	{#if badge.clickable && canManage(inst.id)}
+		<button
+			class={`text-xs font-semibold px-2 py-0.5 rounded ${badge.cls} hover:brightness-125 transition-all`}
+			title="SSH hardening details"
+			onclick={() => (hardenTarget = inst)}
+		>
+			{badge.label}
+		</button>
+	{:else}
+		<span class={`text-xs font-semibold px-2 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+	{/if}
+{/snippet}
+
 <div class="space-y-6">
 	<!-- Tabs (page title lives in the navheader now) -->
 	<div class="flex items-center justify-end">
@@ -289,10 +332,11 @@
 			<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
 				<table class="w-full">
 					<thead>
-						<tr class="border-b border-zinc-800 bg-zinc-950/20">
-							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Name</th>
-							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Status</th>
-							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">CPU</th>
+							<tr class="border-b border-zinc-800 bg-zinc-950/20">
+								<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Name</th>
+								<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Status</th>
+								<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Security</th>
+								<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">CPU</th>
 							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Memory</th>
 							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Disk</th>
 							<th class="text-left px-4 py-2.5 text-xs font-medium text-zinc-500">Containers</th>
@@ -348,8 +392,13 @@
 									{/if}
 								</td>
 
-								<!-- CPU / Memory / Disk -->
-								{#if online}
+	<!-- Security (SSH hardening) -->
+	<td class="px-4 py-3">
+		{@render securityBadgeCell(inst)}
+	</td>
+
+	<!-- CPU / Memory / Disk -->
+	{#if online}
 									<td class="px-4 py-3">
 										{@render gauge(inst.sysInfo?.cpu_percent || 0, 'bg-blue-500', `${inst.sysInfo?.cpu_cores ?? 0} cores`)}
 									</td>
@@ -409,6 +458,13 @@
 													>
 														<Icon name="settings" class="w-4 h-4" />
 														Edit server
+													</button>
+													<button
+														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
+														onclick={() => { instanceMenuOpen = null; hardenTarget = inst; }}
+													>
+														<Icon name="admin" class="w-4 h-4" />
+														SSH hardening
 													</button>
 													<button
 														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
@@ -645,6 +701,13 @@
 	busy={removing}
 	onconfirm={removeInstance}
 	onclose={() => (removeTarget = null)}
+/>
+
+<SSHHardeningModal
+	open={hardenTarget !== null}
+	instance={hardenTarget}
+	onclose={() => (hardenTarget = null)}
+	onchanged={refreshAfterHarden}
 />
 
 <Modal open={editTarget !== null} title={`Edit server — ${editTarget?.name ?? ''}`} size="sm" onclose={() => (editTarget = null)}>

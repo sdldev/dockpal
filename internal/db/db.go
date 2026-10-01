@@ -92,6 +92,13 @@ type Instance struct {
 	SSHAuthType          string `json:"ssh_auth_type,omitempty"` // "password" | "key"
 	SSHPasswordEncrypted []byte `json:"ssh_password_encrypted,omitempty"`
 	SSHKeyEncrypted      []byte `json:"ssh_key_encrypted,omitempty"`
+	// SSH hardening state, written by the harden-ssh job: key-only auth
+	// (passwords disabled in sshd) + when it happened + fingerprint of the
+	// installed key. SSHHardeningStatus is "hardened" or empty; failures are
+	// reported in the job log, not persisted.
+	SSHHardeningStatus string `json:"ssh_hardening_status,omitempty"`
+	SSHHardenedAt      int64  `json:"ssh_hardened_at,omitempty"`
+	SSHKeyFingerprint  string `json:"ssh_key_fingerprint,omitempty"`
 }
 
 type DB struct {
