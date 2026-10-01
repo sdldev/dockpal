@@ -49,6 +49,21 @@ sudo systemctl restart dockpal
 
 Access the panel at `http://<server-ip>:3012`.
 
+#### Reset the admin password
+
+If the first-run password was not captured (or you simply want a new one), reset
+it from the host. **The server must be stopped first** — a running server holds
+the BBolt database lock and the command will time out:
+
+```bash
+sudo systemctl stop dockpal
+sudo /usr/local/bin/dockpal reset-password --username admin --password '<new-password>'
+sudo systemctl start dockpal
+```
+
+This is the only way to change a password outside the UI; passwords set via the
+UI are preserved across updates.
+
 > ⚠️ **Remote servers**: when the host has a public (non-RFC-1918) IP address,
 > the installer and `dockpal install` **require** `DOCKPAL_INITIAL_ADMIN_PASSWORD`
 > to be set — an auto-generated password would otherwise leak to `journalctl` on
