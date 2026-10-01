@@ -1,21 +1,34 @@
 # Dockpal
 
-Self-hosted Docker management panel — single binary, embedded UI, no dependencies.
+**Self-hosted Docker management panel** — a single Go binary that embeds a
+Svelte 5 SPA and a BBolt database. Manage containers, images, compose stacks,
+domains, registries, and remote Docker hosts from one web UI.
 
-Manage containers, deploy compose stacks, monitor resources, control multiple remote Docker hosts from one dashboard.
+- Single static binary (Gin HTTP server + embedded SPA + BBolt) — no external DB
+- RBAC (admin / operator / viewer), JWT auth, audit log
+- Multi-host: manage remote Docker daemons (direct HTTP or edge WebSocket agent)
+- UI-driven system update with verified swap, automatic backup, and rollback
 
 ---
 
 ## Quick Start
 
-### Production Install (Debian/Ubuntu)
+### Production Install (Debian/Ubuntu, linux/amd64)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/installer.sh | sudo bash
 ```
 
-Installs Docker (if missing), provisions `/opt/dockpal`, and sets up the systemd
-service at `/etc/systemd/system/dockpal.service`.
+The installer:
+
+- Installs dependencies (`curl`, `lsof`, `jq`, `tar`) and Docker Engine if missing
+- Downloads the latest `dockpal-linux-amd64` binary to `/usr/local/bin/dockpal`
+- Provisions the `/opt/dockpal` data layout and deploy templates
+- Installs and starts `dockpal.service` (systemd, hardened) plus the
+  `dockpal-updater.path` unit used for in-UI updates
+- Prints the generated admin password on first run
+
+Pin a specific release with `DOCKPAL_VERSION=v2.1.0`.
 
 #### Post-install
 
@@ -24,45 +37,31 @@ service at `/etc/systemd/system/dockpal.service`.
 systemctl status dockpal
 
 # Read logs
-journalctl -u dockpal -f
+journalctl -u dockpal -n 100 --no-pager
 
 # Get admin password (first run only)
-journalctl -u dockpal | grep "generated password"
+journalctl -u dockpal --no-pager | grep "generated password"
 
 # Set a custom admin password (only before the first start)
-systemctl set-environment DOCKPAL_INITIAL_ADMIN_PASSWORD=mypassword
-systemctl start dockpal
+sudo systemctl set-environment DOCKPAL_INITIAL_ADMIN_PASSWORD=your-secure-password
+sudo systemctl restart dockpal
 ```
 
-The `DOCKPAL_INITIAL_ADMIN_PASSWORD` variable is only read when the `admin` user
-does not exist yet — it has no effect on later restarts. To change the password
-on an existing install, run:
-
-```bash
-dockpal reset-password --username admin --password mypassword
-```
+Access the panel at `http://<server-ip>:3012`.
 
 > ⚠️ **Remote servers**: when the host has a public (non-RFC-1918) IP address,
 > the installer and `dockpal install` **require** `DOCKPAL_INITIAL_ADMIN_PASSWORD`
-> to be set — an auto-generated password would otherwise be leaked to
-> `journalctl`/terminal history on a publicly reachable box. The installer prints
-> a warning with the exact `systemctl set-environment` commands when it detects
-> this.
-
-Update an existing installation with `update.sh`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
-```
+> to be set — an auto-generated password would otherwise leak to `journalctl` on
+> a publicly reachable box.
 
 ---
 
 ## Update
 
-Dockpal can be updated two ways: from the web UI (recommended) or from the
-host with `update.sh`. Both resolve the release, verify the download, back up
-the current binary and templates, and roll back automatically if the updated
-panel fails its health check.
+Dockpal can be updated two ways: from the web UI (recommended) or from the host
+with `update.sh`. Both resolve the release, verify the download (SHA-256 + ELF
+smoke check), back up the current binary and templates, and roll back
+automatically if the updated panel fails its health check.
 
 ### Update from the web UI
 
@@ -71,15 +70,11 @@ When a newer release is available, an **update badge** appears in the top bar
 From there an admin can review the changelog and click **Update** — no SSH
 required.
 
-Because the panel runs as the locked-down `dockpal` user (it cannot replace
-its own binary), a UI update works by writing a small trigger file that a
-root-owned `systemd` path unit consumes; that unit runs `update.sh` as root
-and restarts the panel. The installer sets this up automatically via
-`install_updater_units` (deploys `dockpal-updater.path` / `.service` and the
-`dockpal-update-helper`). If the updater units are missing, the UI button is
-inert and you should update from the host instead.
-
-Related configuration:
+Because the panel runs as the locked-down `dockpal` user (it cannot replace its
+own binary), a UI update works by writing a small trigger file that a root-owned
+`systemd` path unit consumes; that unit runs `update.sh` as root and restarts
+the panel. The installer sets this up automatically. If the updater units are
+missing, the UI button is inert — update from the host instead.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -89,29 +84,22 @@ Related configuration:
 
 ### Update from the host
 
-Update an existing installation with `update.sh`:
-
-**Manual update:**
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sudo bash
 ```
 
-**Daily update (cron):** save the script once, then schedule it.
+**Daily auto-update (cron):** save the script once, then schedule it.
 
 ```bash
 # Download the updater (one-time)
 sudo curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh \
   -o /opt/dockpal/update.sh && sudo chmod +x /opt/dockpal/update.sh
 
-# Edit crontab
-crontab -e
-
-# Add line (daily at 2 AM)
+# Add to root's crontab (daily at 2 AM)
 0 2 * * * /opt/dockpal/update.sh >> /var/log/dockpal-update.log 2>&1
 ```
 
-Optional environment variables:
+Optional environment variables for `update.sh`:
 
 | Variable | Default | Description |
 |---|---|---|
@@ -120,7 +108,8 @@ Optional environment variables:
 | `DOCKPAL_FORCE` | `0` | Force reinstall even if already up-to-date |
 | `DOCKPAL_UPDATE_TEMPLATES` | `1` | Refresh templates from release |
 
-Backup automatic on every update. Rollback happens automatically if health check fails.
+A backup is taken on every update; rollback happens automatically if the health
+check fails.
 
 ---
 
@@ -130,12 +119,22 @@ All via environment variables. No config file needed.
 
 | Variable | Default | Description |
 |---|---|---|
-| `DOCKPAL_DATA_DIR` | `/opt/dockpal/data` | Root directory for db, log, backups |
+| `DOCKPAL_DATA_DIR` | `/opt/dockpal/data` | Root directory for db, log, secret, backups |
+| `DOCKPAL_DB_PATH` | `<data>/dockpal.db` | BBolt database path |
+| `DOCKPAL_LOG_PATH` | `<data>/dockpal.log` | Rotating log path |
 | `PORT` | `3012` | Server listen port |
+| `JWT_SECRET` | — | Override the JWT signing key directly |
+| `DOCKPAL_TLS` | `false` | Enable TLS |
+| `DOCKPAL_TLS_CERT` / `DOCKPAL_TLS_KEY` | — | TLS cert/key paths |
 | `DOCKPAL_TLS_DOMAIN` | — | Domain for ACME/Let's Encrypt auto-cert |
 | `DOCKPAL_BACKUP_INTERVAL` | `24h` | Scheduled backup interval (`0` = disabled) |
 | `DOCKPAL_BACKUP_RETENTION` | `168h` | Backup retention window (7 days) |
+| `DOCKPAL_AUDIT_LOG_RETENTION` | `2160h` | Audit log retention (90 days) |
 | `DOCKPAL_INITIAL_ADMIN_PASSWORD` | random | Admin password (only on first startup; **required on remote hosts**) |
+| `DOCKPAL_UPDATE_ENABLED` | `true` | Enable the in-UI system update feature |
+| `DOCKPAL_UPDATE_CHECK_INTERVAL` | `6h` | Release-check interval (`0` = background check off) |
+| `DOCKPAL_REPO` | `sdldev/dockpal` | GitHub repo polled for releases |
+| `DOCKPAL_AGENT_IMAGE` | — | Image for remote agent install commands |
 
 ### TLS modes
 
@@ -147,86 +146,79 @@ All via environment variables. No config file needed.
 
 ## Development Mode
 
-Dockpal adalah satu binary Go dengan frontend Svelte 5 SPA yang ter-embed dan dilayani di `/`. Backend Go dan SPA berkomunikasi lewat API `/api`.
+Dockpal is a single Go binary with an embedded Svelte 5 SPA served at `/`. The
+Go backend and the SPA communicate over the `/api` API.
 
-### Prasyarat
+### Prerequisites
 
 - Go 1.26+
-- Node.js 22+ & npm (untuk frontend Svelte)
-- Docker daemon berjalan (sebagian test & fitur compose stacks)
-- **Docker Compose CLI plugin** (`docker compose version`) — wajib untuk fitur
-  Stacks (Dockge-style compose). Tanpa plugin ini, endpoint `/api/stacks*`
-  merespons `501 Not Implemented`. Stack disimpan sebagai
-  `<DOCKPAL_DATA_DIR>/../compose/<stack>/compose.yaml` (+ `.env` per stack dan
-  `global.env` bersama di direktori yang sama).
+- Node.js 24 LTS (engines allow `^22 || >=24`) & npm
+- A running Docker daemon (some tests and the compose stacks feature)
+- **Docker Compose CLI plugin** (`docker compose version`) — required for the
+  Stacks feature. Without it, `/api/stacks*` endpoints return
+  `501 Not Implemented`. Stacks are stored as
+  `<DOCKPAL_DATA_DIR>/../compose/<stack>/compose.yaml` (+ per-stack `.env` and a
+  shared `global.env`).
 
-### 1. Full-stack mode (binary tunggal) — untuk mengerjakan backend Go
+### 1. Full-stack mode (single binary) — for Go backend work
 
-Perubahan `.go` perlu rebuild.
+`.go` changes need a rebuild.
 
 ```bash
-make dev          # build + jalankan server di :3012, data di .data/
-make dev-watch    # hot reload backend via reflex (watch *.go, rebuild otomatis)
+make dev          # build + run the server on :3012, data in .data/
+make dev-watch    # hot-reload the backend via reflex (watch *.go, rebuild)
 ```
 
-- Server berjalan di `http://localhost:3012`
-- UI: `http://localhost:3012/` (SPA Svelte; route client-side seperti `/dashboard`, `/fleet`, `/containers/:id`)
-- Admin dibuat otomatis saat first-run; password tercetak di log, atau set lebih dulu:
+- Server at `http://localhost:3012`; the SPA at `http://localhost:3012/`
+- An admin user is created on first run; the password is printed to the log, or
+  set it first: `DOCKPAL_INITIAL_ADMIN_PASSWORD=dev123 make dev`
+
+> Dev data lives in `./.data/` (bbolt, log, backups) — delete it for a full
+> reset. `/opt/dockpal` is not used in dev mode.
+
+### 2. Svelte dev mode (HMR) — for SPA work
 
 ```bash
-DOCKPAL_INITIAL_ADMIN_PASSWORD=dev123 make dev
-```
-
-> Data dev ada di `./.data/` (bbolt, log, backups). Hapus folder ini untuk reset total. `/opt/dockpal` tidak dipakai di mode dev.
-
-### 2. Svelte dev mode (HMR) — untuk mengerjakan SPA
-
-Backend jalan seperti biasa, frontend dikembangkan lewat Vite dev server dengan hot module replacement:
-
-```bash
-# Terminal 1 — backend di :3012
+# Terminal 1 — backend on :3012
 make dev
 
-# Terminal 2 — Vite dev server di :5173 (proxy /api dan /ws ke :3012)
+# Terminal 2 — Vite dev server on :5173 (proxies /api and /ws to :3012)
 make svelte-dev
 ```
 
-Buka `http://localhost:5173/`. Semua panggilan API dari SPA di-proxies ke backend (lihat `proxy` di `svelte/vite.config.ts`), jadi tidak perlu rebuild saat mengubah komponen Svelte — browser langsung hot-reload.
+Open `http://localhost:5173/`. API calls are proxied to the backend (see `proxy`
+in `svelte/vite.config.ts`), so Svelte components hot-reload without a rebuild.
 
-Perubahan yang diambil Vite dev server mencakup: `svelte/src/**` (komponen, lib, store). Cache Vite ada di `svelte/node_modules/.vite` — hapus kalau resolusi import terasa basi.
-
-### 3. Setelah selesai mengubah SPA: embed + build produksi
-
-```bash
-make prod-build   # svelte-embed (vite build → copy ke web/svelteDist) + go build
-```
-
-Atau bertahap:
+### 3. After SPA changes: embed + production build
 
 ```bash
-make svelte-build   # vite build ke svelte/dist
-make svelte-embed   # copy svelte/dist → web/svelteDist (di-embed via go:embed)
-make build          # compile binary ./dockpal
+make prod-build   # svelte-embed (vite build → copy to web/svelteDist) + go build
 ```
 
-Binary `./dockpal` hasilnya menyajikan SPA terbaru di `/`.
-
-> Build multi-platform: `make cross` menghasilkan `dockpal-linux-amd64` +
-> `dockpal-linux-arm64` + `SHA256SUMS.txt` (ARM64 mendukung Raspberry Pi /
-> Graviton). macOS sengaja tidak di-support karena `internal/agent` memakai
-> syscall Linux-only (`syscall.Sysinfo`, `/proc`, cgroups).
-
-### Kualitas kode
+Or step by step:
 
 ```bash
-make test          # go test -race ./...
-make test-integration  # integration tests (build tag: integration) with -race
-make lint          # go vet ./...
-make svelte-check  # svelte-check (type check SPA)
-make svelte-test   # vitest (unit test SPA)
+make svelte-build   # vite build to svelte/dist
+make svelte-embed   # copy svelte/dist → web/svelteDist (embedded via go:embed)
+make build          # compile the ./dockpal binary
 ```
 
-Pre-commit hook menjalankan `go vet` + `go test` sebelum commit:
+> Cross-compile: `make cross` produces `dockpal-linux-amd64` +
+> `dockpal-linux-arm64` + `SHA256SUMS.txt`. macOS is intentionally unsupported
+> (`internal/agent` uses Linux-only syscalls).
+
+### Code quality
+
+```bash
+make test              # go test ./...
+make test-integration  # integration tests (build tag: integration)
+make lint              # go vet ./...
+make svelte-check      # SPA type check
+make svelte-test       # vitest unit tests
+```
+
+A pre-commit hook runs `go vet` + build + `go test` (plus `svelte-check` for SPA
+changes) before each commit:
 
 ```bash
 make install-hooks
@@ -234,13 +226,16 @@ make install-hooks
 
 ### Debugging tips
 
-- **Login "invalid credentials" padahal log mencetak password admin** — pesan "Generated initial admin password" hanya berlaku saat user admin **pertama kali dibuat** (first-run). User yang sudah ada tidak pernah diubah oleh restart; gunakan `./dockpal reset-password` untuk menggantinya.
-- **`dockpal install` gagal "remote installation requires DOCKPAL_INITIAL_ADMIN_PASSWORD"** — host terdeteksi punya IP publik (non-RFC-1918), sehingga password acak tidak diizinkan karena akan tercetak ke log/terminal di server yang bisa diakses publik. Set env var-nya lebih dulu, atau jalankan `dockpal install --password ...` eksplisit. Deteksi berbasis interface IP; di belakang NAT dengan IP privat lokal, pembatasan ini tidak berlaku.
-- **"instance not found" di halaman Stacks** — localStorage `dockpal_selected_instance` menunjuk instance yang sudah tidak ada; halaman otomatis fallback ke `local`, atau clear localStorage.
-- **Perubahan SPA tidak muncul di `/`** — Anda lupa `make svelte-embed` + rebuild binary; binary hanya menyajikan hasil embed (`web/svelteDist`).
-- **`go vet` gagal karena fake test client** — semua fake yang meng-implement `agent.AgentClient` harus menyediakan stub untuk seluruh method interface (termasuk stack operations).
-- **Compose stack gagal deploy: "service has neither an image nor a build context"** — service tanpa `image` di compose.yaml; isi image lewat form service sebelum deploy.
-- **`reset-password` gagal "timeout"** — server masih berjalan dan mengunci bbolt; matikan dulu (`pkill -f dockpal-dev` atau `systemctl stop dockpal`).
+- **"Invalid credentials" even though the log printed an admin password** — the
+  generated password only applies when the admin user is **first created**.
+  Existing users are never changed by a restart; use `./dockpal reset-password`.
+- **`dockpal install` fails "remote installation requires DOCKPAL_INITIAL_ADMIN_PASSWORD"** —
+  the host has a public IP, so a random password is refused. Set the env var, or
+  pass `--password` explicitly. Behind NAT (private IP) this does not apply.
+- **SPA changes don't appear at `/`** — you forgot `make svelte-embed` + rebuild;
+  the binary only serves the embedded `web/svelteDist`.
+- **`reset-password` fails with "timeout"** — the server is still running and
+  holds the bbolt lock; stop it first (`systemctl stop dockpal`).
 
 ---
 
@@ -255,6 +250,7 @@ Subcommands:
   restore           Restore database from backup
   install           First-time setup: create admin user (--username, --password)
   reset-password    Reset user password
+  rotate-secrets    Rotate the JWT secret and derived keys
   version           Print version
   help              Show help
 ```
@@ -268,21 +264,18 @@ Examples:
 # On-demand backup
 ./dockpal backup --output /tmp/backup.db
 
-# First-time setup on a fresh data dir (create admin without starting server)
+# First-time setup on a fresh data dir
 DOCKPAL_DB_PATH=/opt/dockpal/data/dockpal.db ./dockpal install --username admin --password NewPass123
 
-# On a remote host, DOCKPAL_INITIAL_ADMIN_PASSWORD is required:
-DOCKPAL_INITIAL_ADMIN_PASSWORD=NewPass123 DOCKPAL_DB_PATH=/opt/dockpal/data/dockpal.db \
-  ./dockpal install --username admin
-
-# Reset admin password (stop server first)
+# Reset admin password (stop the server first)
 ./dockpal reset-password --username admin --password NewPass123
 
 # View version
 ./dockpal version
 ```
 
-> Passwords set via UI are preserved across updates. Only reset-password CLI command changes them.
+> Passwords set via the UI are preserved across updates; only the
+> `reset-password` CLI command changes them.
 
 ---
 
@@ -290,29 +283,28 @@ DOCKPAL_INITIAL_ADMIN_PASSWORD=NewPass123 DOCKPAL_DB_PATH=/opt/dockpal/data/dock
 
 | Category | Details |
 |---|---|
-| **Containers** | List, start, stop, restart, delete, inspect, logs, stats |
-| **Deploy** | Compose YAML, Git repo, 38 built-in templates (PostgreSQL, MariaDB, Redis, Grafana, Adminer, …) |
-| **Images** | Pull, updates check, registry auth, prune |
-| **Files** | Browse, read, write, upload, download inside containers |
+| **Containers** | List, start, stop, restart, delete, inspect, logs, stats, terminal, file manager |
+| **Deploy** | Compose YAML, Git repo, built-in templates (PostgreSQL, MariaDB, Redis, Grafana, Adminer, …) |
+| **Stacks** | Dockge-style compose stacks: create, edit, deploy, update, env files |
+| **Images** | Pull, update checks, registry auth, prune |
 | **Domains** | Traefik integration, custom routing, SSL |
-| **Monitoring** | Prometheus metrics, real-time charts, health checks |
-| **Multi-host** | Manage remote Docker hosts (direct HTTP or edge WebSocket) |
+| **Monitoring** | Prometheus metrics, real-time charts, health checks, 30-day history |
+| **Multi-host** | Manage remote Docker hosts (direct HTTP or edge WebSocket agent) |
 | **Security** | RBAC (admin/operator/viewer), JWT auth, audit log, remote-deploy password enforcement |
+| **System update** | In-UI version check + one-click update with verified swap, backup, and auto-rollback |
 | **Backup** | Scheduled + manual, SHA-256 checksum, retention policy |
 
 ---
 
 ## Health & Metrics
 
-Endpoints:
-
 | Path | Description |
 |---|---|
 | `/health` | Full health report (HTTP 200/503) |
 | `/api/metrics` | Prometheus metrics (requires auth — JWT bearer or `X-API-Key`, viewer role or higher) |
-| `/api/docs` | API documentation UI |
+| `/api/docs` | API documentation UI (Redoc + OpenAPI) |
 
-Example metrics:
+Example Prometheus scrape config:
 
 ```yaml
 scrape_configs:
@@ -329,29 +321,32 @@ scrape_configs:
 ```
 dockpal/
 ├── main.go                    # Entry point + CLI subcommands
-├── Makefile                   # Build/test/dev targets (lihat: make help)
+├── Makefile                   # Build/test/dev targets (see: make help)
+├── installer.sh               # Production installer (Debian/Ubuntu)
+├── update.sh                  # Host self-updater (verify + backup + rollback)
 ├── internal/                  # Go packages
 │   ├── server/                # Gin routes, middleware, RBAC, stacks routes
 │   ├── agent/                 # AgentClient (local/direct/edge) + WS client helpers
+│   ├── update/                # System self-update: release checker + request manager
 │   ├── composecli/            # docker compose CLI runner (stacks engine)
 │   ├── docker/                # Moby client wrapper + stack store
 │   ├── auth/                  # JWT, login, passwords
 │   ├── security/              # Remote-host detection, deploy password enforcement
 │   ├── config/                # Env config loading + validation
-│   ├── integration/           # Integration tests (build tag: integration)
 │   ├── db/                    # BBolt persistence
-│   └── ...
-├── svelte/                    # SPA Svelte 5 source (served at /)
-│   ├── src/components/        # Pages + compose components
-│   ├── src/lib/               # API clients, yaml-sync, stores, router
-│   ├── tests/                 # Vitest unit tests
+│   └── ...                    # health, backup, metrics, git, ssh, traefik, tunnel, …
+├── packaging/                 # systemd units (dockpal-updater.path/.service)
+├── scripts/                   # dockpal-update-helper.sh (root update executor)
+├── svelte/                    # Svelte 5 SPA source (served at /)
+│   ├── src/components/        # Pages + UI components
+│   ├── src/lib/               # API clients, stores, router
 │   └── vite.config.ts         # Dev proxy /api → :3012
 ├── web/                       # Embedded SPA (web/svelteDist = vite build output)
-├── templates/                 # JSON deploy templates
-└── update.sh                  # Self-updater script
+└── templates/                 # JSON deploy templates
 ```
 
-> Panduan kontribusi untuk AI/editor (perintah, arsitektur, testing notes) ada di [AGENTS.md](AGENTS.md).
+> Contributor guide for AI/editors (commands, architecture, testing notes) lives
+> in [AGENTS.md](AGENTS.md).
 
 ---
 
