@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -18,7 +20,7 @@ const (
 var (
 	LoginRateLimit    = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 5}
 	WebhookRateLimit  = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 10}
-	ReadRateLimit     = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 60}
+	ReadRateLimit     = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: envReadRateLimit()}
 	MutationRateLimit = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 10}
 	// Agent connect: edge agents retry every ~5s while reconnecting (12
 	// attempts/min), so the login-level limit would permanently throttle
@@ -26,6 +28,20 @@ var (
 	// authentication after the upgrade; this only smooths floods.
 	AgentRateLimit = RateLimitPolicy{Window: rateLimitWindow, MaxRequests: 60}
 )
+
+// envReadRateLimit reads DOCKPAL_READ_RATE_LIMIT (requests per minute per
+// IP+path). The default of 60 is calibrated for single-shot page loads; the
+// Servers page's per-instance polling (system/info + containers + images
+// fanned out every poll) is the heaviest read consumer, so deployments with
+// several instances may need this raised. Default 60 when unset/invalid.
+func envReadRateLimit() int {
+	if v := os.Getenv("DOCKPAL_READ_RATE_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 60
+}
 
 type RateLimitPolicy struct {
 	Window      time.Duration

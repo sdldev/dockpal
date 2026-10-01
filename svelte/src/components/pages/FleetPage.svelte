@@ -73,7 +73,12 @@
 	>([]);
 
 	onMount(() => {
-		fleet.startPolling(5000);
+		// Poll at 15s, not 5s: fetchMetrics issues 3 requests per instance
+		// (system/info + containers + images), so a 5s cadence with a few
+		// instances already exceeds the backend's 60 req/min read limit and the
+		// gauges start rendering zeros from 429s. 15s keeps the dashboard fresh
+		// while staying well under the limit.
+		fleet.startPolling(15000);
 	});
 
 	onDestroy(() => {
