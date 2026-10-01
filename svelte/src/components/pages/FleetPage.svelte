@@ -41,10 +41,21 @@
 		}
 	}
 
-	// Security badge for the Servers table: key-only auth (hardened) > key
-	// auth (panel uses a key, passwords may still be accepted) > password.
+	// Security badge for the Servers table: detected state wins (it reflects
+	// the server's REAL sshd config), then the panel's hardening record, then
+	// the login type. Unknown detection = not verified = not green.
 	function securityBadge(inst: FleetInstance): { label: string; cls: string; clickable: boolean } {
 		if (inst.id === 'local') return { label: 'Local', cls: 'bg-zinc-800 text-zinc-500', clickable: false };
+		if (inst.sec_password_auth === 'no')
+			return { label: 'Hardened', cls: 'bg-green-500/10 text-green-400', clickable: true };
+		if (inst.sec_password_auth === 'yes') {
+			if (inst.ssh_auth_type === 'key')
+				return { label: 'Key auth', cls: 'bg-blue-500/10 text-blue-400', clickable: true };
+			return { label: 'Password auth', cls: 'bg-amber-500/10 text-amber-400', clickable: true };
+		}
+		if (inst.sec_password_auth === 'unknown' && inst.sec_checked_at)
+			return { label: 'Unreachable', cls: 'bg-red-500/10 text-red-400', clickable: true };
+		// No detection yet — fall back to the stored record.
 		if (inst.ssh_hardening_status === 'hardened')
 			return { label: 'Hardened', cls: 'bg-green-500/10 text-green-400', clickable: true };
 		if (inst.ssh_auth_type === 'key')
@@ -464,7 +475,7 @@
 														onclick={() => { instanceMenuOpen = null; hardenTarget = inst; }}
 													>
 														<Icon name="admin" class="w-4 h-4" />
-														SSH hardening
+														Security & hardening
 													</button>
 													<button
 														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"

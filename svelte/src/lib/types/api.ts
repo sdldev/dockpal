@@ -71,6 +71,10 @@ export interface InstanceListItem {
   /** "hardened" once key-only auth is verified and password login is disabled. */
   ssh_hardening_status?: string;
   ssh_hardened_at?: number;
+  /** Detected effective state (stale-able — see sec_checked_at). */
+  sec_password_auth?: string;
+  sec_fail2ban?: string;
+  sec_checked_at?: number;
 }
 
 // GET /api/instances/:id/system/info — merged HostInfo + HostStats.

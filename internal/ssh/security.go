@@ -1,0 +1,355 @@
+package ssh
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	cryptossh "golang.org/x/crypto/ssh"
+)
+
+// Server security management (Vito-parity): detect the EFFECTIVE sshd state
+// (sshd -T, not config files) and toggle password auth / root login /
+// fail2ban. All commands run over the panel's stored SSH credential.
+
+// SecurityState is the detected security posture of one server.
+type SecurityState struct {
+	PasswordAuth string `json:"password_auth"` // "yes" | "no" | "unknown"
+	RootLogin    string `json:"root_login"`    // "yes" | "no" | "prohibit-password" | "without-password" | "unknown"
+	Fail2ban     string `json:"fail2ban"`      // "active" | "inactive" | "unknown"
+}
+
+// DetectSecurity connects with the given credential and reads the effective
+// configuration. Fail-closed like Vito: anything unreadable reports
+// "unknown", which the UI treats as NOT secured.
+func DetectSecurity(host string, port int, user, authType, secret, expectedHostKey string, w io.Writer) (SecurityState, error) {
+	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown"}
+	client, err := dialSSH(host, port, user, authType, secret, expectedHostKey, w)
+	if err != nil {
+		return state, err
+	}
+	defer client.Close()
+	sudo := user != "root"
+
+	// Effective sshd config — reflects reality regardless of which file or
+	// drop-in set it. sshd -T needs root (host key readability).
+	var out strings.Builder
+	cmd := "SSHD=$(command -v sshd || echo /usr/sbin/sshd); " +
+		"if [ -x \"$SSHD\" ]; then" + sudoWrap(sudo, "$SSHD -T 2>/dev/null") + "; fi"
+	if err := runCommandTo(client, cmd, &out); err == nil {
+		state.PasswordAuth = parseSSHDValue(out.String(), "passwordauthentication")
+		state.RootLogin = parseSSHDValue(out.String(), "permitrootlogin")
+	}
+	if state.PasswordAuth == "" {
+		state.PasswordAuth = "unknown"
+	}
+	if state.RootLogin == "" {
+		state.RootLogin = "unknown"
+	}
+
+	// fail2ban: active only when the daemon process is actually running.
+	// A textual `service status | grep running` false-positives on
+	// "fail2ban is NOT running" — check the process instead.
+	var f2b strings.Builder
+	f2bCmd := "pgrep -x fail2ban-server >/dev/null && echo active || echo inactive"
+	if err := runCommandTo(client, f2bCmd, &f2b); err == nil {
+		v := strings.TrimSpace(f2b.String())
+		if v == "active" {
+			state.Fail2ban = "active"
+		} else if v == "inactive" {
+			state.Fail2ban = "inactive"
+		}
+	}
+	return state, nil
+}
+
+// parseSSHDValue extracts the value of `key value` from sshd -T output.
+func parseSSHDValue(out, key string) string {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && fields[0] == key {
+			// sshd -T prints the canonical alias "without-password" for
+			// prohibit-password — normalize so the UI sees one name.
+			if key == "permitrootlogin" && fields[1] == "without-password" {
+				return "prohibit-password"
+			}
+			return fields[1]
+		}
+	}
+	return ""
+}
+
+// sudoWrap prefixes a command with sudo (sh -c style) when needed.
+func sudoWrap(sudo bool, cmd string) string {
+	if sudo {
+		return " sudo sh -c " + shellQuote(cmd)
+	}
+	return " " + cmd
+}
+
+// SecurityUpdate describes one control change.
+type SecurityUpdate struct {
+	Control string // "password_auth" | "root_login" | "fail2ban"
+	Enabled bool
+	// TestPassword, when disabling password auth and the panel knows the old
+	// password, is used to verify rejection from the outside post-reload.
+	TestPassword string
+}
+
+// ApplySecurity connects and applies one control change, streaming progress.
+// password_auth: enabled=false → disable via drop-in (harden); enabled=true →
+// remove the Dockpal drop-in so the server's own config decides again.
+// root_login: enabled=false → PermitRootLogin no; enabled=true → stop
+// managing it (remove our line, server default applies).
+// fail2ban: install+enable, or stop+disable (package stays installed).
+func ApplySecurity(host string, port int, user, authType, secret, expectedHostKey string, update SecurityUpdate, w io.Writer) error {
+	if port == 0 {
+		port = 22
+	}
+	if user == "" {
+		user = "root"
+	}
+	sudo := user != "root"
+	step := func(format string, args ...interface{}) {
+		fmt.Fprintf(w, "[Dockpal Security] "+format+"\n", args...)
+	}
+
+	step("Connecting to %s:%d as %s...", host, port, user)
+	client, err := dialSSH(host, port, user, authType, secret, expectedHostKey, w)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	step("Connected.")
+
+	mode, err := configMode(client, sudo)
+	if err != nil {
+		return err
+	}
+
+	switch update.Control {
+	case "password_auth":
+		lines := securityDropInLines(!update.Enabled, "")
+		if err := applyDropInState(client, sudo, mode, lines, w); err != nil {
+			return err
+		}
+		if !update.Enabled {
+			// Prove the outcome end-to-end when we know the old password —
+			// same rule as hardening: no claim without outside evidence.
+			if update.TestPassword != "" {
+				if pwErr := passwordLoginSucceeds(host, port, user, update.TestPassword, expectedHostKey); pwErr == nil {
+					return fmt.Errorf("sshd still accepts password authentication after reload — not applied; retry later")
+				}
+				step("Password login rejected — verified.")
+			}
+		}
+	case "root_login":
+		rootLine := "no"
+		if update.Enabled {
+			// Unmanage: the server's own default applies again.
+			rootLine = ""
+		}
+		lines := securityDropInLines(false, rootLine)
+		if err := applyDropInState(client, sudo, mode, lines, w); err != nil {
+			return err
+		}
+	case "fail2ban":
+		if update.Enabled {
+			if err := enableFail2ban(client, sudo, w); err != nil {
+				return err
+			}
+		} else {
+			if err := disableFail2ban(client, sudo, w); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("unknown security control %q", update.Control)
+	}
+
+	state, derr := detectEffective(client, sudo)
+	if derr == nil {
+		step("Detected now: password_auth=%s root_login=%s fail2ban=%s", state.PasswordAuth, state.RootLogin, state.Fail2ban)
+	}
+	step("Update completed successfully.")
+	return nil
+}
+
+// detectEffective reads the effective state over an established connection
+// (same commands as DetectSecurity, no new dial).
+func detectEffective(client *cryptossh.Client, sudo bool) (SecurityState, error) {
+	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown"}
+	var out strings.Builder
+	cmd := "SSHD=$(command -v sshd || echo /usr/sbin/sshd); " +
+		"if [ -x \"$SSHD\" ]; then" + sudoWrap(sudo, "$SSHD -T 2>/dev/null") + "; fi"
+	if err := runCommandTo(client, cmd, &out); err == nil {
+		state.PasswordAuth = parseSSHDValue(out.String(), "passwordauthentication")
+		state.RootLogin = parseSSHDValue(out.String(), "permitrootlogin")
+	}
+	if state.PasswordAuth == "" {
+		state.PasswordAuth = "unknown"
+	}
+	if state.RootLogin == "" {
+		state.RootLogin = "unknown"
+	}
+	var f2b strings.Builder
+	if err := runCommandTo(client, "pgrep -x fail2ban-server >/dev/null && echo active || echo inactive", &f2b); err == nil {
+		if v := strings.TrimSpace(f2b.String()); v == "active" {
+			state.Fail2ban = "active"
+		} else {
+			state.Fail2ban = "inactive"
+		}
+	}
+	return state, nil
+}
+
+// securityDropInLines builds the drop-in body from the desired control state.
+// passwordAuthDisabled → PasswordAuthentication no + keyboard-interactive no.
+// rootLogin: "no" → PermitRootLogin no; "" → unmanaged (no line).
+func securityDropInLines(passwordAuthDisabled bool, rootLogin string) []string {
+	var lines []string
+	if passwordAuthDisabled {
+		lines = append(lines,
+			"# Managed by Dockpal SSH hardening — do not edit",
+			"PasswordAuthentication no",
+			pickKbdKeyword("")+" no",
+		)
+	}
+	if rootLogin != "" {
+		if len(lines) == 0 {
+			lines = append(lines, "# Managed by Dockpal SSH hardening — do not edit")
+		}
+		lines = append(lines, "PermitRootLogin "+rootLogin)
+	}
+	return lines
+}
+
+// applyDropInState writes the desired drop-in (or removes it when the desired
+// state manages nothing), validates with sshd -t, checks the effective config
+// for password auth when relevant, and reloads. Keyword variants are retried
+// exactly like hardening for old OpenSSH releases.
+func applyDropInState(client *cryptossh.Client, sudo bool, mode string, lines []string, w io.Writer) error {
+	if len(lines) == 0 {
+		fmt.Fprintln(w, "[Dockpal Security] Removing the Dockpal sshd drop-in (server defaults apply)...")
+		if err := removeDropIn(client, sudo, mode); err != nil {
+			return fmt.Errorf("failed to remove drop-in: %w", err)
+		}
+	} else {
+		if mode == "dropin" {
+			if err := writeDropIn(client, sudo, dropInPath, lines); err != nil {
+				return fmt.Errorf("failed to write drop-in: %w", err)
+			}
+		} else {
+			if err := writeManagedBlock(client, sudo, lines); err != nil {
+				return fmt.Errorf("failed to write managed block: %w", err)
+			}
+		}
+	}
+	if err := validateSSHD(client, sudo); err != nil {
+		// Retry with the legacy keyboard-interactive keyword before failing.
+		fixed := make([]string, len(lines))
+		for i, l := range lines {
+			fixed[i] = strings.Replace(l, "KbdInteractiveAuthentication", "ChallengeResponseAuthentication", 1)
+		}
+		if mode == "dropin" {
+			_ = writeDropIn(client, sudo, dropInPath, fixed)
+		} else {
+			_ = writeManagedBlock(client, sudo, fixed)
+		}
+		if err2 := validateSSHD(client, sudo); err2 != nil {
+			rollbackConfig(client, sudo, mode, w)
+			return fmt.Errorf("sshd config validation failed: %w", err2)
+		}
+	}
+	if err := reloadSSHD(client, sudo); err != nil {
+		return fmt.Errorf("failed to reload sshd: %w", err)
+	}
+	return nil
+}
+
+func removeDropIn(client *cryptossh.Client, sudo bool, mode string) error {
+	var cmd string
+	if mode == "dropin" {
+		cmd = "rm -f " + dropInPath + " " + legacyDropInPath
+	} else {
+		cmd = "sed -i '/^" + blockBegin + "$/,/^" + blockEnd + "$/d' /etc/ssh/sshd_config"
+	}
+	if sudo {
+		cmd = "sudo sh -c " + shellQuote(cmd)
+	}
+	return runCommand(client, cmd, io.Discard)
+}
+
+const fail2banJailPath = "/etc/fail2ban/jail.d/dockpal-sshd.local"
+
+// enableFail2ban installs fail2ban (apt/dnf/yum), writes an sshd jail and
+// enables the service. The jail uses the systemd backend when systemd exists
+// — Debian 12/Ubuntu 22.04+ often lack /var/log/auth.log, where the default
+// backend fails.
+func enableFail2ban(client *cryptossh.Client, sudo bool, w io.Writer) error {
+	s := ""
+	if sudo {
+		s = "sudo "
+	}
+	fmt.Fprintln(w, "[Dockpal Security] Installing fail2ban (apt/dnf/yum)...")
+	install := s + "sh -c 'command -v apt-get >/dev/null && apt-get install -y fail2ban || " +
+		"command -v dnf >/dev/null && dnf install -y fail2ban || " +
+		"command -v yum >/dev/null && yum install -y fail2ban || exit 1'"
+	if err := runCommand(client, install, w); err != nil {
+		return fmt.Errorf("failed to install fail2ban: %w", err)
+	}
+	fmt.Fprintln(w, "[Dockpal Security] Writing the Dockpal sshd jail...")
+	// systemd backend only when systemd is actually PID 1 — the mere
+	// presence of the systemctl binary made fail2ban watch a journal that
+	// does not exist and die right after start (non-systemd containers).
+	backend := "auto"
+	var sysd strings.Builder
+	if runCommandTo(client, "test -d /run/systemd/system && echo yes", &sysd) == nil &&
+		strings.Contains(sysd.String(), "yes") {
+		backend = "systemd"
+	}
+	jail := "[sshd]\nenabled = true\nbackend = " + backend + "\nmaxretry = 5\nbantime = 10m\nfindtime = 10m"
+	printfArgs := strings.Join(quoteAll(strings.Split(jail, "\n")), " ")
+	cmd := "mkdir -p /etc/fail2ban/jail.d && printf '%s\\n' " + printfArgs + " > " + fail2banJailPath
+	if sudo {
+		cmd = "sudo sh -c " + shellQuote(cmd)
+	}
+	if err := runCommand(client, cmd, io.Discard); err != nil {
+		return fmt.Errorf("failed to write the fail2ban jail: %w", err)
+	}
+	fmt.Fprintln(w, "[Dockpal Security] Enabling fail2ban...")
+	enable := s + "systemctl enable --now fail2ban 2>/dev/null || " + s + "service fail2ban start"
+	if err := runCommand(client, enable, w); err != nil {
+		// The daemon may already run from an earlier enable — verify below.
+		fmt.Fprintln(w, "[Dockpal Security] start command failed, verifying the process anyway...")
+	}
+	var st strings.Builder
+	if err := runCommandTo(client, "pgrep -x fail2ban-server >/dev/null && echo active || echo inactive", &st); err == nil &&
+		strings.TrimSpace(st.String()) == "active" {
+		fmt.Fprintln(w, "[Dockpal Security] fail2ban is active (sshd jail: maxretry=5, bantime=10m).")
+		return nil
+	}
+	return fmt.Errorf("fail2ban did not become active — check the service logs on the server")
+}
+
+// disableFail2ban stops and disables the service (package stays installed).
+func disableFail2ban(client *cryptossh.Client, sudo bool, w io.Writer) error {
+	s := ""
+	if sudo {
+		s = "sudo "
+	}
+	fmt.Fprintln(w, "[Dockpal Security] Disabling fail2ban...")
+	// `service stop` exits 1 when the daemon is already down (non-systemd
+	// hosts) — treat stopping as best-effort and verify by process.
+	cmd := s + "systemctl disable --now fail2ban 2>/dev/null; " + s + "service fail2ban stop >/dev/null 2>&1; exit 0"
+	if err := runCommand(client, cmd, w); err != nil {
+		return fmt.Errorf("failed to run the disable commands: %w", err)
+	}
+	var st strings.Builder
+	if err := runCommandTo(client, "pgrep -x fail2ban-server >/dev/null && echo active || echo inactive", &st); err == nil &&
+		strings.TrimSpace(st.String()) == "active" {
+		return fmt.Errorf("fail2ban is still running after the disable attempt")
+	}
+	fmt.Fprintln(w, "[Dockpal Security] fail2ban stopped.")
+	return nil
+}

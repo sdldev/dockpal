@@ -58,6 +58,11 @@ type InstanceResponse struct {
 	// secret and is shown so the operator can authorize it before install.
 	SSHPublicKey       string `json:"ssh_public_key,omitempty"`
 	SSHKeySetupCommand string `json:"ssh_key_setup_command,omitempty"`
+	// Detected server security state (see db.Instance).
+	SecPasswordAuth string `json:"sec_password_auth,omitempty"`
+	SecRootLogin    string `json:"sec_root_login,omitempty"`
+	SecFail2ban     string `json:"sec_fail2ban,omitempty"`
+	SecCheckedAt    int64  `json:"sec_checked_at,omitempty"`
 }
 
 type InstanceListItem struct {
@@ -72,6 +77,10 @@ type InstanceListItem struct {
 	SSHAuthType        string `json:"ssh_auth_type,omitempty"`
 	SSHHardeningStatus string `json:"ssh_hardening_status,omitempty"`
 	SSHHardenedAt      int64  `json:"ssh_hardened_at,omitempty"`
+	// Detected state (may be stale — see sec_checked_at).
+	SecPasswordAuth string `json:"sec_password_auth,omitempty"`
+	SecFail2ban     string `json:"sec_fail2ban,omitempty"`
+	SecCheckedAt    int64  `json:"sec_checked_at,omitempty"`
 }
 
 type UpdateInstanceRequest struct {
@@ -87,7 +96,7 @@ type TestResult struct {
 
 // RegisterInstanceRoutes adds instance CRUD and enrollment endpoints.
 func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string, logsManager *InstallLogsManager) {
-	hardenRunning := &sync.Map{} // instanceID -> struct{}{} while a harden job runs
+	hardenRunning := &sync.Map{} // instanceID -> struct{}{} while a harden/security job runs
 	g.POST("/instances", RequireRole(auth.RoleAdmin), handleCreateInstance(database, jwtSecret))
 	g.GET("/instances", RequireRole(auth.RoleViewer), handleListInstances(database))
 	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database, jwtSecret))
@@ -99,6 +108,9 @@ func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent
 	g.GET("/instances/:instance_id/install/logs", RequireRole(auth.RoleAdmin), handleInstallAgentLogs(logsManager))
 	g.POST("/instances/:instance_id/harden", RequireRole(auth.RoleAdmin), handleHardenSSH(database, jwtSecret, logsManager, hardenRunning))
 	g.GET("/instances/:instance_id/harden/logs", RequireRole(auth.RoleAdmin), handleHardenSSHLogs(logsManager))
+	g.GET("/instances/:instance_id/security", RequireRole(auth.RoleOperator), handleDetectSecurity(database, jwtSecret))
+	g.POST("/instances/:instance_id/security", RequireRole(auth.RoleAdmin), handleApplySecurity(database, jwtSecret, logsManager, hardenRunning))
+	g.GET("/instances/:instance_id/security/logs", RequireRole(auth.RoleAdmin), handleSecurityLogs(logsManager))
 }
 
 // handleCreateInstance creates a new instance with a generated agent token.
@@ -270,6 +282,9 @@ func handleListInstances(database *db.DB) gin.HandlerFunc {
 				SSHAuthType:        inst.SSHAuthType,
 				SSHHardeningStatus: inst.SSHHardeningStatus,
 				SSHHardenedAt:      inst.SSHHardenedAt,
+				SecPasswordAuth:    inst.SecPasswordAuth,
+				SecFail2ban:        inst.SecFail2ban,
+				SecCheckedAt:       inst.SecCheckedAt,
 			}
 		}
 
@@ -329,6 +344,10 @@ func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			SSHKeyFingerprint:  inst.SSHKeyFingerprint,
 			SSHPublicKey:       inst.SSHPublicKey,
 			SSHKeySetupCommand: generatePanelKeySetupCommand(inst.SSHPublicKey),
+			SecPasswordAuth:    inst.SecPasswordAuth,
+			SecRootLogin:       inst.SecRootLogin,
+			SecFail2ban:        inst.SecFail2ban,
+			SecCheckedAt:       inst.SecCheckedAt,
 		})
 	}
 }
@@ -962,46 +981,16 @@ func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogs
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive decryption key"})
 			return
 		}
-
-		authType := "password"
-		var authSecret string
-		if len(inst.SSHKeyEncrypted) > 0 {
-			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
-			if derr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt stored SSH key"})
-				return
-			}
-			authType = "key"
-			authSecret = string(plain)
-		} else if len(inst.SSHPasswordEncrypted) > 0 {
-			plain, derr := registry.Decrypt(inst.SSHPasswordEncrypted, cryptoKey)
-			if derr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt stored SSH password"})
-				return
-			}
-			authSecret = string(plain)
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no SSH credentials stored for this server — install the agent over SSH first"})
+		authType, authSecret, err := resolveInstanceSSHCreds(cryptoKey, inst)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Where to connect: the SSH endpoint recorded during install, falling
-		// back to the agent host for direct-mode instances.
-		host := inst.SSHHost
-		if host == "" && inst.Mode == "direct" {
-			host = inst.Host
-		}
-		if host == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no SSH host recorded for this server"})
+		host, port, user, err := resolveInstanceSSHTarget(inst)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
-		}
-		port := inst.SSHPort
-		if port == 0 {
-			port = 22
-		}
-		user := inst.SSHUser
-		if user == "" {
-			user = "root"
 		}
 
 		// The key that will remain on the server, in priority order:

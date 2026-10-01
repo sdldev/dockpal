@@ -105,6 +105,13 @@ type Instance struct {
 	// with its own key and no operator secret is needed. The private half
 	// lives in SSHKeyEncrypted.
 	SSHPublicKey string `json:"ssh_public_key,omitempty"`
+	// Detected server security state (effective sshd -T values), refreshed by
+	// the security check/toggle jobs. Empty = never checked. Fail-closed:
+	// "unknown" counts as not secured in the UI.
+	SecPasswordAuth string `json:"sec_password_auth,omitempty"` // "yes"|"no"|"unknown"
+	SecRootLogin    string `json:"sec_root_login,omitempty"`    // "yes"|"no"|"prohibit-password"|"without-password"|"unknown"
+	SecFail2ban     string `json:"sec_fail2ban,omitempty"`      // "active"|"inactive"|"unknown"
+	SecCheckedAt    int64  `json:"sec_checked_at,omitempty"`
 }
 
 type DB struct {
