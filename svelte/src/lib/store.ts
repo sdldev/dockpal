@@ -60,11 +60,6 @@ export interface SystemUpdateBadge {
 }
 export const systemUpdateBadge = writable<SystemUpdateBadge | null>(null);
 
-// Initial tab for the Administration tab set, set when arriving via the
-// sidebar's "update available" shortcut so it lands directly on the Update
-// sub-tab. Consumed and cleared by SettingsPage on mount.
-export const adminInitialTab = writable<string | null>(null);
-
 // Initial tab for the Containers page, set when arriving via the legacy
 // `/images` alias so old bookmarks land on the Images tab (not the default
 // Containers tab). Consumed and cleared by ContainersPage on mount.

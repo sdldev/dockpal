@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, clearToken } from '$lib/api/client';
-	import { currentUser, isAdmin, addToast, adminInitialTab } from '$lib/store';
+	import { currentUser, isAdmin, addToast } from '$lib/store';
 	import { navigate } from '$lib/router';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
@@ -12,15 +12,6 @@
 	const tabs = ['profile', 'admin'] as const;
 	type Tab = (typeof tabs)[number];
 	let activeTab = $state<Tab>('profile');
-
-	// A preset from the sidebar's update shortcut lands on Administration.
-	// AdminPage consumes and clears the store itself (it needs the value to
-	// pick its own sub-tab), so don't clear it here.
-	$effect(() => {
-		if ($adminInitialTab && $isAdmin) {
-			activeTab = 'admin';
-		}
-	});
 
 	let user = $state<{ username: string; role: string; created_at: number } | null>(null);
 	let loading = $state(true);

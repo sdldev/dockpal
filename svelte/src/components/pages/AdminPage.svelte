@@ -1,30 +1,16 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { get } from 'svelte/store';
-	import { adminInitialTab } from '$lib/store';
 	import UsersTab from '../admin/UsersTab.svelte';
 	import ApiKeysTab from '../admin/ApiKeysTab.svelte';
 	import AuditLogsTab from '../admin/AuditLogsTab.svelte';
 	import RegistriesTab from '../admin/RegistriesTab.svelte';
 	import BackupTab from '../admin/BackupTab.svelte';
 	import SystemInfoTab from '../admin/SystemInfoTab.svelte';
-	import SystemUpdateTab from '../admin/SystemUpdateTab.svelte';
 	import TunnelTab from '../admin/TunnelTab.svelte';
 
-	const tabs = ['users', 'api-keys', 'audit-logs', 'registries', 'backup', 'system', 'update', 'tunnel'] as const;
+	const tabs = ['users', 'api-keys', 'audit-logs', 'registries', 'backup', 'system', 'tunnel'] as const;
 	type Tab = (typeof tabs)[number];
 
-	const isTab = (v: string | null): v is Tab => !!v && (tabs as readonly string[]).includes(v);
-
 	let activeTab = $state<Tab>('users');
-
-	// Consume the sidebar's update shortcut: open directly on the requested
-	// sub-tab, then clear so later visits default to Users.
-	onMount(() => {
-		const preset = get(adminInitialTab);
-		if (isTab(preset)) activeTab = preset;
-		adminInitialTab.set(null);
-	});
 
 	const tabLabels: Record<Tab, string> = {
 		users: 'Users',
@@ -33,7 +19,6 @@
 		registries: 'Registries',
 		backup: 'Backup',
 		system: 'System',
-		update: 'Update',
 		tunnel: 'Tunnel'
 	};
 </script>
@@ -72,8 +57,6 @@
 		<BackupTab />
 	{:else if activeTab === 'system'}
 		<SystemInfoTab />
-	{:else if activeTab === 'update'}
-		<SystemUpdateTab />
 	{:else if activeTab === 'tunnel'}
 		<TunnelTab />
 	{/if}

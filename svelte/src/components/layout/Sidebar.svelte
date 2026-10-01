@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import type { ComponentProps } from 'svelte';
-  import { isAdmin, isOperator, selectedInstance, sidebarOpen, systemUpdateBadge, adminInitialTab } from '../../lib/store';
+  import { isAdmin, isOperator, selectedInstance, sidebarOpen, systemUpdateBadge } from '../../lib/store';
   import { navigate } from '../../lib/router';
   import { listInstances } from '$lib/api/stacks';
-  import { getUpdateStatus } from '$lib/api/system';
+  import { getUpdateStatus, checkForUpdate } from '$lib/api/system';
+  import { addToast } from '../../lib/store';
   import type { InstanceListItem } from '$lib/types/api';
   import Icon from '../ui/Icon.svelte';
+  import SystemUpdateModal from '../admin/SystemUpdateModal.svelte';
 
   interface Props {
     currentRoute?: string;
@@ -39,6 +41,8 @@
   // Update-check polling for the footer (release checks are infrequent, so a
   // 60s cadence is plenty). Failure leaves the previous summary untouched.
   let updateTimer: ReturnType<typeof setInterval> | null = null;
+  let checking = $state(false);
+  let showUpdateModal = $state(false);
 
   async function fetchUpdateSummary() {
     try {
@@ -53,6 +57,34 @@
     }
   }
 
+  // Manual "check now" — forces a fresh upstream query and toasts the result.
+  async function checkNow() {
+    checking = true;
+    try {
+      const s = await checkForUpdate();
+      systemUpdateBadge.set({
+        currentVersion: s.current_version,
+        updateAvailable: s.update_available,
+        latestVersion: s.latest_version
+      });
+      if (s.update_available) {
+        addToast(`Update available: v${s.latest_version}`, 'info');
+      } else {
+        addToast('Dockpal is up to date', 'success');
+      }
+    } catch (e) {
+      addToast(e instanceof Error ? e.message : 'Check failed', 'error');
+    } finally {
+      checking = false;
+    }
+  }
+
+  function onUpdateFinished(ok: boolean) {
+    // Refresh the footer summary; after a successful update the running
+    // version changes so the pill disappears on its own.
+    if (ok) void fetchUpdateSummary();
+  }
+
   onMount(() => {
     fetchUpdateSummary();
     updateTimer = setInterval(fetchUpdateSummary, 60000);
@@ -61,16 +93,6 @@
   onDestroy(() => {
     if (updateTimer) clearInterval(updateTimer);
   });
-
-  // Shortcut from the footer's "update available" pill straight to
-  // Settings → Administration → Update.
-  function gotoUpdate() {
-    adminInitialTab.set('update');
-    navigate('settings');
-    if (typeof window !== 'undefined' && window.innerWidth < 768) {
-      sidebarOpen.set(false);
-    }
-  }
 
   const showFleet = $derived(instances.length > 1);
 
@@ -188,29 +210,51 @@
     {/each}
   </nav>
 
-  <div class="border-t border-zinc-800 pt-3 mt-4 space-y-1.5">
-    {#if $systemUpdateBadge?.updateAvailable && $isAdmin}
-      <button
-        onclick={gotoUpdate}
-        class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-xs"
-        title={`Dockpal v${$systemUpdateBadge.latestVersion} is available — open the updater`}
-      >
-        <Icon name="download" class="w-3.5 h-3.5 shrink-0" />
-        <span class="font-medium">Update to v{$systemUpdateBadge.latestVersion}</span>
-      </button>
-    {:else if $systemUpdateBadge?.updateAvailable}
-      <div
-        class="flex items-center gap-2 px-2.5 py-1.5 rounded-sm text-xs text-zinc-500"
-        title={`Dockpal v${$systemUpdateBadge.latestVersion} is available (ask an admin to update)`}
-      >
-        <Icon name="download" class="w-3.5 h-3.5 shrink-0" />
-        <span>v{$systemUpdateBadge.latestVersion} available</span>
-      </div>
+  <div class="border-t border-zinc-800 pt-3 mt-4 space-y-2">
+    {#if $systemUpdateBadge?.updateAvailable}
+      {#if $isAdmin}
+        <button
+          onclick={() => (showUpdateModal = true)}
+          class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-xs"
+          title={`Update Dockpal to v${$systemUpdateBadge.latestVersion}`}
+        >
+          <Icon name="download" class="w-3.5 h-3.5 shrink-0" />
+          <span class="font-medium">Update to v{$systemUpdateBadge.latestVersion}</span>
+        </button>
+      {:else}
+        <div
+          class="flex items-center gap-2 px-2.5 py-1 text-xs text-zinc-500"
+          title={`Dockpal v${$systemUpdateBadge.latestVersion} is available (ask an admin to update)`}
+        >
+          <Icon name="download" class="w-3.5 h-3.5 shrink-0" />
+          <span>v{$systemUpdateBadge.latestVersion} available</span>
+        </div>
+      {/if}
     {/if}
-    <div class="px-2.5 flex items-center gap-2 text-xs text-zinc-600">
-      <span>🐳</span>
-      <span>Dockpal</span>
-      <span class="font-mono">{$systemUpdateBadge?.currentVersion ? `v${$systemUpdateBadge.currentVersion}` : '—'}</span>
+
+    <div class="px-2.5 py-0.5 flex items-center justify-between gap-2">
+      <span class="flex items-center gap-2 text-xs text-zinc-600 min-w-0" title="Dockpal version">
+        <span aria-hidden="true">🐳</span>
+        <span class="truncate">Dockpal</span>
+        <span class="font-mono shrink-0">{$systemUpdateBadge?.currentVersion ? `v${$systemUpdateBadge.currentVersion}` : '—'}</span>
+      </span>
+      <button
+        onclick={checkNow}
+        disabled={checking}
+        class="p-1 rounded-sm text-zinc-600 hover:text-white hover:bg-zinc-800 transition-colors disabled:opacity-50"
+        title="Check for updates"
+        aria-label="Check for updates"
+      >
+        <Icon name="refresh" class={`w-3.5 h-3.5 ${checking ? 'animate-spin' : ''}`} />
+      </button>
     </div>
   </div>
+
+  <SystemUpdateModal
+    open={showUpdateModal}
+    target={$systemUpdateBadge?.latestVersion ?? ''}
+    current={$systemUpdateBadge?.currentVersion ?? ''}
+    onfinished={onUpdateFinished}
+    onclose={() => (showUpdateModal = false)}
+  />
 </aside>
