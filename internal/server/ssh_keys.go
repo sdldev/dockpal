@@ -72,7 +72,15 @@ func HandleCreateSSHKey(database *db.DB, jwtSecret string) gin.HandlerFunc {
 
 		signer, err := cryptossh.ParsePrivateKey([]byte(req.PrivateKey))
 		if err != nil {
-			// Distinguish encrypted keys (common mistake) from corrupt input.
+			// Distinguish common mistakes: an encrypted key, and — the most
+			// frequent — someone uploading the PUBLIC half (.pub), which is a
+			// server-side artifact, not a credential the panel can use.
+			trimmed := strings.TrimSpace(req.PrivateKey)
+			if strings.HasPrefix(trimmed, "ssh-rsa ") || strings.HasPrefix(trimmed, "ssh-ed25519 ") ||
+				strings.HasPrefix(trimmed, "ecdsa-sha2-") || strings.HasPrefix(trimmed, "sk-ssh-") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "this is a PUBLIC key (.pub); upload the matching PRIVATE key file (e.g. id_rsa, not id_rsa.pub)"})
+				return
+			}
 			if strings.Contains(err.Error(), "contains an encrypted key") || strings.Contains(err.Error(), "passphrase") {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "key is passphrase-protected; remove the passphrase or use a key without one"})
 				return

@@ -78,7 +78,26 @@
 		formError = '';
 		const reader = new FileReader();
 		reader.onload = () => {
-			privateKey = String(reader.result ?? '');
+			const content = String(reader.result ?? '');
+			// A .pub file is a PUBLIC key — it belongs in authorized_keys on the
+			// server, never here. The agent installer needs the PRIVATE half to
+			// authenticate, and uploading a public key would only fail later.
+			if (file.name.endsWith('.pub') || content.includes('ssh-rsa ') || content.includes('ssh-ed25519 ')) {
+				formError =
+					'That looks like a PUBLIC key (.pub). Upload the PRIVATE key file instead — usually the same name without ".pub" (e.g. "id_rsa", not "id_rsa.pub"). The public key is installed on the server, not here.';
+				selectedFileName = '';
+				privateKey = '';
+				input.value = '';
+				return;
+			}
+			if (!content.includes('PRIVATE KEY')) {
+				formError = 'File does not look like a PEM private key (missing "PRIVATE KEY" header).';
+				selectedFileName = '';
+				privateKey = '';
+				input.value = '';
+				return;
+			}
+			privateKey = content;
 			selectedFileName = file.name;
 			if (!name.trim()) {
 				// Pre-fill a sensible name from the file (id_rsa → "id_rsa").
@@ -156,7 +175,7 @@
 						bind:this={fileInput}
 						onchange={onFileChosen}
 						class="hidden"
-						accept=".pem,.key,.rsa,.openssh,id_rsa,id_ed25519"
+						accept=".pem,.key,.rsa,.openssh"
 					/>
 				</div>
 				<textarea
@@ -164,9 +183,13 @@
 					bind:value={privateKey}
 					rows="8"
 					spellcheck="false"
-					placeholder={'Paste the key, or click "Upload file" above\n-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
+					placeholder={'Paste the PRIVATE key (e.g. ~/.ssh/id_rsa), or click "Upload file" above.\nThe PUBLIC key (.pub) is installed on the server, not here.\n-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
 					class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 				></textarea>
+				<p class="text-xs text-zinc-600 mt-1">
+					Upload the <span class="text-zinc-400">private</span> key (e.g. <code>~/.ssh/id_rsa</code>). Its matching
+					<code>.pub</code> is what goes in the server's <code>authorized_keys</code> — Dockpal needs the private half to connect.
+				</p>
 			</div>
 			{#if formError}
 				<div class="p-3 bg-red-500/10 border border-red-500/20 rounded-sm text-sm text-red-400">{formError}</div>
