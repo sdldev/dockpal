@@ -38,6 +38,9 @@
 	let panelAddress = $state('');
 	let installing = $state(false);
 	let logs = $state<string[]>([]);
+	// True when the install session ended with the installer's error marker;
+	// drives the "Retry install" affordance on the done step.
+	let installFailed = $state(false);
 	let showManualCommand = $state(false);
 	let testing = $state(false);
 	let testMessage = $state('');
@@ -69,9 +72,22 @@
 		installCommand = '';
 		sshSecret = '';
 		logs = [];
+		installFailed = false;
 		testMessage = '';
 		testOk = false;
 		showManualCommand = false;
+	}
+
+	// Go back to the install form (fields kept, including the SSH secret) so a
+	// failed install can be corrected and re-run without re-registering.
+	function retryInstall() {
+		socket?.close();
+		socket = null;
+		installFailed = false;
+		logs = [];
+		testMessage = '';
+		testOk = false;
+		step = 'created';
 	}
 
 	async function create() {
@@ -115,7 +131,12 @@
 			// The installer's last line is deterministic (error or success); the
 			// session manager never closes listener channels itself, so detect
 			// the final message here and end the stream.
-			if (line.includes('[Dockpal Installer] Error:') || line.includes('Installation completed successfully')) {
+			if (line.includes('[Dockpal Installer] Error:')) {
+				installFailed = true;
+				installing = false;
+				step = 'done';
+				socket?.close();
+			} else if (line.includes('Installation completed successfully')) {
 				installing = false;
 				step = 'done';
 				socket?.close();
@@ -407,15 +428,22 @@
 			{#if step === 'done'}
 				<div class="mt-3 flex items-center justify-between gap-3">
 					<div class="text-xs">
-						{#if testMessage}
+						{#if installFailed}
+							<span class="text-red-400">Install failed — fix the issue and retry.</span>
+						{:else if testMessage}
 							<span class={testOk ? 'text-emerald-400' : 'text-red-400'}>{testMessage}</span>
 						{:else}
 							<span class="text-zinc-500">Verify the agent connection:</span>
 						{/if}
 					</div>
-					<Button variant="secondary" size="sm" loading={testing} disabled={!canTest} onclick={testConnection}>
-						Test connection
-					</Button>
+					<div class="flex items-center gap-2">
+						{#if installFailed}
+							<Button variant="secondary" size="sm" onclick={retryInstall}>Retry install</Button>
+						{/if}
+						<Button variant="secondary" size="sm" loading={testing} disabled={!canTest} onclick={testConnection}>
+							Test connection
+						</Button>
+					</div>
 				</div>
 			{/if}
 		</div>

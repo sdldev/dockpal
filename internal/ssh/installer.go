@@ -204,10 +204,7 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 
 	// 4. Pull dockpal-agent image
 	fmt.Fprintf(w, "[Dockpal Installer] Pulling Agent Docker image: %s...\n", params.AgentImage)
-	pullCmd := fmt.Sprintf("docker pull %s", params.AgentImage)
-	if params.User != "root" {
-		pullCmd = "sudo " + pullCmd
-	}
+	pullCmd := withCleanDockerConfig(fmt.Sprintf("docker pull %s", params.AgentImage), params.User != "root")
 	if err := runCommand(client, pullCmd, w); err != nil {
 		return fmt.Errorf("failed to pull agent image: %w", err)
 	}
@@ -248,9 +245,11 @@ func InstallAgent(params InstallParams, w io.Writer) error {
 		)
 	}
 
-	if params.User != "root" {
-		runCmd = "sudo " + runCmd
-	}
+	// Wrap the run with a clean DOCKER_CONFIG too: if the image is ever
+	// missing locally, `docker run`'s implicit pull would hit the same
+	// credential-helper trap as the explicit pull above. This also applies
+	// the sudo elevation for non-root users (via `sudo env`).
+	runCmd = withCleanDockerConfig(runCmd, params.User != "root")
 
 	fmt.Fprintln(w, "[Dockpal Installer] Starting Dockpal Agent container...")
 	if err := runCommand(client, runCmd, w); err != nil {
@@ -273,4 +272,24 @@ func runCommand(client *ssh.Client, cmd string, w io.Writer) error {
 	session.Stderr = w
 
 	return session.Run(cmd)
+}
+
+// cleanDockerConfigDir is a scratch DOCKER_CONFIG used for docker CLI calls
+// on the target host. The host's ~/.docker/config.json may declare credential
+// helpers (credsStore/credHelpers, e.g. docker-credential-gh for ghcr.io)
+// whose binaries are not installed — the docker CLI then aborts even pulls of
+// public images with "executable file not found in $PATH" before ever trying
+// anonymous access. Pointing DOCKER_CONFIG at an empty scratch dir disables
+// the helpers; the agent image is public and needs no credentials.
+const cleanDockerConfigDir = "/tmp/.dockpal-docker-config"
+
+// withCleanDockerConfig wraps a docker CLI command so it runs against a clean
+// DOCKER_CONFIG (creating the scratch dir first). For non-root users the
+// docker command is elevated via `sudo env VAR=…`, which passes the variable
+// through sudo's env_reset (a plain `VAR=… sudo docker` would not).
+func withCleanDockerConfig(cmd string, sudo bool) string {
+	if sudo {
+		return fmt.Sprintf("mkdir -p %s && sudo env DOCKER_CONFIG=%s %s", cleanDockerConfigDir, cleanDockerConfigDir, cmd)
+	}
+	return fmt.Sprintf("mkdir -p %s && env DOCKER_CONFIG=%s %s", cleanDockerConfigDir, cleanDockerConfigDir, cmd)
 }
