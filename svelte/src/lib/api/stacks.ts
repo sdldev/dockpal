@@ -47,6 +47,14 @@ export function listInstances(): Promise<{ instances: InstanceListItem[] } | Ins
   return api.get<{ instances: InstanceListItem[] } | InstanceListItem[]>('/instances');
 }
 
+/** Update an instance's mutable fields (name, and host/port for direct mode). */
+export function updateInstance(
+  id: string,
+  fields: { name?: string; host?: string; port?: number }
+): Promise<InstanceListItem> {
+  return api.put<InstanceListItem>(`/instances/${encodeURIComponent(id)}`, fields);
+}
+
 export function listStacks(instanceId = 'local'): Promise<StackListResponse> {
   return api.get<StackListResponse>(stacksBasePath(instanceId));
 }

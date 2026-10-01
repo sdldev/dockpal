@@ -2,11 +2,14 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { createFleetStore, isAdmin, isOperator, addToast, selectedInstance } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
+	import { updateInstance } from '../../lib/api/stacks';
 	import { formatBytes } from '../../lib/stats-history';
 	import { formatPorts } from '../../lib/format';
 	import { navigate } from '../../lib/router';
 	import AddServerPanel from '../fleet/AddServerPanel.svelte';
 	import Icon from '../ui/Icon.svelte';
+	import Button from '../ui/Button.svelte';
+	import Modal from '../ui/Modal.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
 	const fleet = createFleetStore();
@@ -16,12 +19,18 @@
 
 	let containerSearch = $state('');
 
-	// Instance card actions (admin-only): remove + test connection.
+	// Instance card actions (admin-only): edit + remove + test connection.
 	let instanceMenuOpen = $state<string | null>(null);
 	let removeTarget = $state<{ id: string; name: string } | null>(null);
 	let removing = $state(false);
 	let testingId = $state<string | null>(null);
 	let testResult = $state<{ id: string; ok: boolean; message: string } | null>(null);
+
+	// Edit (rename) modal state.
+	let editTarget = $state<{ id: string; name: string; host: string; port: number } | null>(null);
+	let editName = $state('');
+	let editSaving = $state(false);
+	let editError = $state('');
 
 	function canManage(id: string): boolean {
 		return $isAdmin && id !== 'local';
@@ -33,6 +42,34 @@
 		selectedInstance.set(id);
 		localStorage.setItem('dockpal_selected_instance', id);
 		navigate('dashboard');
+	}
+
+	function openEdit(inst: { id: string; name: string; host?: string; port?: number }) {
+		editTarget = { id: inst.id, name: inst.name, host: inst.host ?? '', port: inst.port ?? 0 };
+		editName = inst.name;
+		editError = '';
+		instanceMenuOpen = null;
+	}
+
+	async function saveEdit() {
+		if (!editTarget) return;
+		const name = editName.trim();
+		if (!name) {
+			editError = 'Name is required';
+			return;
+		}
+		editSaving = true;
+		editError = '';
+		try {
+			await updateInstance(editTarget.id, { name });
+			addToast(`Server renamed to "${name}"`, 'success');
+			editTarget = null;
+			await fleet.fetchMetrics();
+		} catch (e) {
+			editError = e instanceof Error ? e.message : 'Failed to update server';
+		} finally {
+			editSaving = false;
+		}
 	}
 
 	async function removeInstance() {
@@ -368,6 +405,13 @@
 												<div class="absolute right-0 top-9 z-50 w-44 bg-zinc-900 border border-zinc-700 rounded-sm shadow-lg py-1 text-left">
 													<button
 														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
+														onclick={() => openEdit(inst)}
+													>
+														<Icon name="settings" class="w-4 h-4" />
+														Edit server
+													</button>
+													<button
+														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
 														disabled={testingId === inst.id}
 														onclick={() => testInstance(inst.id)}
 													>
@@ -602,3 +646,31 @@
 	onconfirm={removeInstance}
 	onclose={() => (removeTarget = null)}
 />
+
+<Modal open={editTarget !== null} title={`Edit server — ${editTarget?.name ?? ''}`} size="sm" onclose={() => (editTarget = null)}>
+	<form class="space-y-3" onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
+		<div>
+			<label for="edit-name" class="block text-xs font-medium text-zinc-400 mb-1">Display name</label>
+			<input
+				id="edit-name"
+				type="text"
+				bind:value={editName}
+				placeholder="server name"
+				class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+			/>
+		</div>
+		{#if editTarget?.host}
+			<p class="text-xs text-zinc-600">
+				Endpoint: <span class="text-zinc-400 font-mono">{editTarget.host}{editTarget.port ? `:${editTarget.port}` : ''}</span>
+				(change it by removing and re-adding the server)
+			</p>
+		{/if}
+		{#if editError}
+			<div class="p-3 bg-red-500/10 border border-red-500/20 rounded-sm text-sm text-red-400">{editError}</div>
+		{/if}
+		<div class="flex justify-end gap-2 pt-1">
+			<Button variant="secondary" size="sm" type="button" onclick={() => (editTarget = null)}>Cancel</Button>
+			<Button variant="primary" size="sm" type="submit" loading={editSaving} disabled={!editName.trim()}>Save</Button>
+		</div>
+	</form>
+</Modal>
