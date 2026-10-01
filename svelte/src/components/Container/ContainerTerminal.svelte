@@ -64,8 +64,11 @@
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.onData((data) => {
-      // emulator input → container stdin (binary frame)
-      socket?.send(new TextEncoder().encode(data));
+      // emulator input → container stdin (binary frame). Drop input while the
+      // socket isn't OPEN — xterm keeps firing onData on keystrokes, and a
+      // send on a closing/closed socket throws into the console.
+      if (socket?.readyState !== WebSocket.OPEN) return;
+      socket.send(new TextEncoder().encode(data));
     });
     term.onResize(({ cols, rows }) => sendResize(cols, rows));
 

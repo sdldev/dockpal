@@ -439,23 +439,29 @@ func handleInstanceContainerExec(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	// Auth: query token (browser WS) or first {token} message (API clients).
-	// The query value may be a single-use ws-ticket (what the browser sends)
-	// or a raw JWT.
-	authToken := c.Query("token")
-	if authToken == "" {
-		var msg agentMessage
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		_, raw, rerr := conn.ReadMessage()
-		conn.SetReadDeadline(time.Time{})
-		if rerr != nil || json.Unmarshal(raw, &msg) != nil || msg.Token == "" {
-			conn.WriteMessage(websocket.CloseMessage,
-				websocket.FormatCloseMessage(4001, "authentication required"))
-			return
+	// Auth: this route sits behind baseProtected, so AuthMiddleware has
+	// already authenticated the upgrade — consuming a ws-ticket or validating
+	// a query JWT — and left the role in the context. The explicit-token
+	// fallbacks below only run if this handler is ever mounted without the
+	// middleware (a second consumeWSTicket here would fail: tickets are
+	// single-use).
+	role := c.GetString("role")
+	if role == "" {
+		authToken := c.Query("token")
+		if authToken == "" {
+			var msg agentMessage
+			conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			_, raw, rerr := conn.ReadMessage()
+			conn.SetReadDeadline(time.Time{})
+			if rerr != nil || json.Unmarshal(raw, &msg) != nil || msg.Token == "" {
+				conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(4001, "authentication required"))
+				return
+			}
+			authToken = msg.Token
 		}
-		authToken = msg.Token
+		role = resolveWSQueryRole(c, authToken)
 	}
-	role := resolveWSQueryRole(c, authToken)
 	if role == "" || !auth.HasRole(role, auth.RoleOperator) {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(4003, "insufficient permissions"))
