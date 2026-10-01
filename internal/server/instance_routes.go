@@ -92,15 +92,39 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// Validate mode-specific fields
+		// Validate mode-specific fields. A port of 0 means "use the default
+		// (9273)" and is normalized below, so it is allowed here.
 		if req.Mode == "direct" {
 			if req.Host == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "host is required for direct mode"})
 				return
 			}
-			if req.Port < 1 || req.Port > 65535 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "port must be between 1 and 65535"})
+			if req.Port < 0 || req.Port > 65535 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "port must be between 0 (default 9273) and 65535"})
 				return
+			}
+		}
+
+		// Uniqueness checks. Registering the same direct host:port twice creates
+		// two records fighting over a single agent container (they desync each
+		// other's tokens — see the vps-schoolhub/vps-media duplicate); a name
+		// collision is almost as confusing in the UI. Reject both up front.
+		if existing, err := database.ListInstances(); err == nil {
+			normalizedHost := strings.ToLower(strings.TrimSpace(req.Host))
+			targetPort := req.Port
+			if req.Mode == "direct" && targetPort == 0 {
+				targetPort = 9273
+			}
+			for _, inst := range existing {
+				if strings.EqualFold(inst.Name, strings.TrimSpace(req.Name)) {
+					c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("an instance named %q already exists", req.Name)})
+					return
+				}
+				if req.Mode == "direct" && inst.Mode == "direct" &&
+					strings.ToLower(strings.TrimSpace(inst.Host)) == normalizedHost && inst.Port == targetPort {
+					c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("an instance for %s:%d already exists (%q)", req.Host, targetPort, inst.Name)})
+					return
+				}
 			}
 		}
 
