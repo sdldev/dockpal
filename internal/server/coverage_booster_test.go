@@ -107,6 +107,7 @@ func TestCoverageBooster_APIEndpoints(t *testing.T) {
 	// Setup router and services
 	jwtSecret := "test-secret-key-1234567890-abcdefg"
 	t.Setenv("JWT_SECRET", jwtSecret)
+	t.Setenv("DOCKPAL_UPDATE_CHECK_INTERVAL", "0") // no background release checks in tests
 
 	// We use the real Docker client for local testing if running with a Docker daemon
 	dockerClient, err := docker.NewClient()
@@ -471,6 +472,7 @@ func TestVerifyMockEndpoints_RuteRelay(t *testing.T) {
 
 	jwtSecret := "test-secret-key-1234567890-abcdefg"
 	t.Setenv("JWT_SECRET", jwtSecret)
+	t.Setenv("DOCKPAL_UPDATE_CHECK_INTERVAL", "0") // no background release checks in tests
 
 	dockerClient, err := docker.NewClient()
 	if err != nil {

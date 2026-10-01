@@ -1,0 +1,14 @@
+[Unit]
+Description=Dockpal updater trigger watcher
+# Start watching only after the panel's data directory exists.
+ConditionPathIsDirectory=/opt/dockpal
+
+[Path]
+# Fire whenever the panel (running as the unprivileged dockpal user) writes a
+# system-update request into its writable data tree. The helper removes the
+# file before acting so this does not re-trigger.
+PathExists=/opt/dockpal/update-request.json
+Unit=dockpal-updater.service
+
+[Install]
+WantedBy=multi-user.target

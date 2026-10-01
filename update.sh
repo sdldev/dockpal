@@ -21,6 +21,8 @@
 #   DOCKPAL_BACKUP_DIR         Backup directory (default: /opt/dockpal/backups)
 #   DOCKPAL_UPDATE_TEMPLATES   Refresh templates from release archive: 1/0 (default: 1)
 #   DOCKPAL_FORCE              Reinstall even if already on target version: 1/0 (default: 0)
+#   DOCKPAL_RESULT_FILE        If set, write a JSON outcome here (used by the
+#                              UI-triggered updater to report status)
 #
 # Exit codes:
 #   0 - Success
@@ -65,6 +67,25 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+# write_result records a JSON outcome when DOCKPAL_RESULT_FILE is set. The
+# UI-triggered updater (dockpal-update-helper) reads this to report status to
+# the panel after it restarts. Best effort — never aborts the script.
+write_result() {
+    local status="$1" exit_code="$2" message="$3"
+    [[ -z "${DOCKPAL_RESULT_FILE:-}" ]] && return 0
+    local tmp="${DOCKPAL_RESULT_FILE}.tmp"
+    jq -n \
+        --arg status "$status" \
+        --arg target "${TARGET_TAG:-}" \
+        --argjson exit_code "$exit_code" \
+        --arg message "$message" \
+        --argjson finished_at "$(date +%s)" \
+        '{status:$status, target:$target, exit_code:$exit_code, message:$message, finished_at:$finished_at}' \
+        > "$tmp" 2>/dev/null || return 0
+    chmod 644 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$DOCKPAL_RESULT_FILE" 2>/dev/null || true
+}
 
 cleanup_tmp() {
     if [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]]; then
@@ -459,13 +480,16 @@ main() {
     if ! verify_service; then
         if rollback; then
             log_error "Update failed; rollback succeeded"
+            write_result "failed" 6 "update failed health check; rolled back"
             exit 6
         fi
         log_error "Update failed and rollback failed"
         log_error "Check logs with: journalctl -u $SERVICE -n 100 --no-pager"
+        write_result "failed" 7 "update failed and rollback failed"
         exit 7
     fi
 
+    write_result "done" 0 "updated to $TARGET_TAG"
     print_success
 }
 

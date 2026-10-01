@@ -59,9 +59,37 @@ curl -fsSL https://raw.githubusercontent.com/sdldev/dockpal/main/update.sh | sud
 
 ## Update
 
-Update an existing installation with `update.sh`. It resolves the release,
-verifies the download, backs up the current binary and templates, and rolls back
-automatically if the updated panel fails its health check.
+Dockpal can be updated two ways: from the web UI (recommended) or from the
+host with `update.sh`. Both resolve the release, verify the download, back up
+the current binary and templates, and roll back automatically if the updated
+panel fails its health check.
+
+### Update from the web UI
+
+When a newer release is available, an **update badge** appears in the top bar
+(for admins) and the details land in **Settings → Administration → Update**.
+From there an admin can review the changelog and click **Update** — no SSH
+required.
+
+Because the panel runs as the locked-down `dockpal` user (it cannot replace
+its own binary), a UI update works by writing a small trigger file that a
+root-owned `systemd` path unit consumes; that unit runs `update.sh` as root
+and restarts the panel. The installer sets this up automatically via
+`install_updater_units` (deploys `dockpal-updater.path` / `.service` and the
+`dockpal-update-helper`). If the updater units are missing, the UI button is
+inert and you should update from the host instead.
+
+Related configuration:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DOCKPAL_UPDATE_ENABLED` | `true` | Master switch for the in-UI update feature |
+| `DOCKPAL_UPDATE_CHECK_INTERVAL` | `6h` | How often the panel checks for a new release (`0` = background check off) |
+| `DOCKPAL_REPO` | `sdldev/dockpal` | GitHub repository polled for releases |
+
+### Update from the host
+
+Update an existing installation with `update.sh`:
 
 **Manual update:**
 

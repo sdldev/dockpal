@@ -4,11 +4,14 @@
   // own heading + description.
   import { onMount, onDestroy } from 'svelte';
   import { api } from '$lib/api/client';
-  import { navTitle, navServerStatus, selectedInstance, sidebarOpen, type NavServerStatus } from '$lib/store';
+  import { navTitle, navServerStatus, selectedInstance, sidebarOpen, systemUpdateBadge, isAdmin, type NavServerStatus } from '$lib/store';
+  import { getUpdateStatus } from '$lib/api/system';
+  import { navigate } from '$lib/router';
   import type { SystemInfo } from '$lib/types/api';
   import Icon from '../ui/Icon.svelte';
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let updatePollTimer: ReturnType<typeof setInterval> | null = null;
   let lastGood: NavServerStatus | null = null;
 
   function statusPath(instanceId: string): string {
@@ -35,13 +38,28 @@
     }
   }
 
+  // Poll system-update availability at a slower cadence. The badge only
+  // surfaces for admins (they alone can act on it) and only when a newer
+  // release is known — a null/empty badge renders nothing.
+  async function fetchUpdateBadge() {
+    try {
+      const s = await getUpdateStatus();
+      systemUpdateBadge.set({ updateAvailable: s.update_available, latestVersion: s.latest_version });
+    } catch {
+      // Leave the previous badge untouched on transient failures.
+    }
+  }
+
   onMount(() => {
     fetchStatus();
     pollTimer = setInterval(fetchStatus, 10000);
+    fetchUpdateBadge();
+    updatePollTimer = setInterval(fetchUpdateBadge, 60000);
   });
 
   onDestroy(() => {
     if (pollTimer) clearInterval(pollTimer);
+    if (updatePollTimer) clearInterval(updatePollTimer);
   });
 </script>
 
@@ -60,8 +78,8 @@
     <h1 class="text-base font-semibold text-white truncate">{$navTitle}</h1>
   </div>
 
-  {#if $navServerStatus}
-    <div class="flex items-center gap-3 text-xs text-zinc-400 shrink-0">
+  <div class="flex items-center gap-3 text-xs text-zinc-400 shrink-0">
+    {#if $navServerStatus}
       <span class="hidden sm:flex items-center gap-1.5">
         <span
           class="w-1.5 h-1.5 rounded-full"
@@ -79,6 +97,16 @@
       <span class="hidden lg:inline">{$navServerStatus.cpuCores} cores</span>
       <span class="inline text-zinc-600">•</span>
       <span class="inline capitalize">{$selectedInstance === 'local' ? 'This Server' : $selectedInstance}</span>
-    </div>
-  {/if}
+    {/if}
+    {#if $isAdmin && $systemUpdateBadge?.updateAvailable}
+      <button
+        onclick={() => navigate('settings')}
+        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+        title={`Dockpal v${$systemUpdateBadge.latestVersion} is available — open Settings to update`}
+      >
+        <Icon name="download" class="w-3 h-3" />
+        <span class="hidden sm:inline">v{$systemUpdateBadge.latestVersion}</span>
+      </button>
+    {/if}
+  </div>
 </header>

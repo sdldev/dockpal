@@ -28,10 +28,16 @@ wrapper), `composecli` (Dockge-style stacks via the `docker compose` CLI plugin;
 `adapter` type exists to avoid an import cycle with `docker`, which defines the
 `stackCLI` seam), `registry` (creds encrypted with a key derived from the JWT secret),
 `health` (uses the injected `DBPinger` — never opens a second DB file), `backup`,
-`metrics`, `git`, `ssh`, `traefik`, `tunnel`, `logging`, `validator`, `config`.
+`metrics`, `git`, `ssh`, `traefik`, `tunnel`, `logging`, `validator`, `config`,
+`update` (system self-update: release checker + update-request manager).
 
-**Removed intentionally — do not re-add:** `internal/update` (self-update mechanism)
-and the `dockpal-agent/` subdirectory (agent client code lives in `internal/agent/`).
+**Removed intentionally — do not re-add:** the old in-process self-update
+mechanism (a former `internal/update` that tried to swap the binary from
+inside) and the `dockpal-agent/` subdirectory (agent client code lives in
+`internal/agent/`). The current `internal/update` is different: it only writes
+a trigger file under `/opt/dockpal` and lets a root `systemd` path unit run
+`update.sh`, because the hardened `dockpal` user cannot replace
+`/usr/local/bin/dockpal` itself.
 
 ## Commands
 
@@ -99,6 +105,9 @@ and rebuild. `make svelte-dev` is the loop that actually hot-reloads SPA changes
   | `DOCKPAL_TLS_CERT` / `DOCKPAL_TLS_KEY` | — | TLS cert/key paths |
   | `DOCKPAL_TLS_DOMAIN` | — | Domain for ACME auto-cert |
   | `DOCKPAL_AGENT_IMAGE` | — | Image for remote agent install commands |
+  | `DOCKPAL_UPDATE_ENABLED` | `true` | Master switch for in-UI system update |
+  | `DOCKPAL_UPDATE_CHECK_INTERVAL` | `6h` | Release-check interval (`0` = background check off) |
+  | `DOCKPAL_REPO` | `sdldev/dockpal` | GitHub repo polled for releases |
 
 ## Frontend conventions
 

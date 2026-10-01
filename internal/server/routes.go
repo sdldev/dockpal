@@ -27,6 +27,7 @@ import (
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
 	"github.com/sdldev/dockpal/internal/tunnel"
+	"github.com/sdldev/dockpal/internal/update"
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
@@ -83,6 +84,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	api.GET("/config", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"auto_update_enabled": globalAutoUpdateWorker.Enabled(),
+			"current_version":     version,
 		})
 	})
 
@@ -156,6 +158,62 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 	// Backup (admin only)
 	adminGroup.POST("/backup", HandleTriggerBackup(database, dataDir))
+
+	// System self-update wiring. The checker polls GitHub for the latest
+	// release in the background and caches it; the manager turns an admin's
+	// update request into a trigger file the privileged systemd updater unit
+	// consumes (the panel itself is too locked-down to replace its own
+	// binary). Both are reassigned per RegisterRoutes call for test isolation.
+	updateChecker := update.NewChecker(database, "", "", update.EnvCheckInterval())
+	updateChecker.Start(ctx)
+	updateManager := update.NewManager(database, updateChecker, dataDir, version)
+	updateManager.FinalizeOnBoot()
+	globalUpdateChecker = updateChecker
+	globalUpdateManager = updateManager
+
+	// Update status is readable by any authenticated user (the NavHeader
+	// badge polls it); checking for updates and triggering one are admin-only.
+	viewerGroup.GET("/system/update/status", func(c *gin.Context) {
+		status, err := updateManager.Status()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, status)
+	})
+	adminGroup.POST("/system/update/check", func(c *gin.Context) {
+		updateChecker.CheckNow(c.Request.Context())
+		status, err := updateManager.Status()
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, status)
+	})
+	adminGroup.POST("/system/update", func(c *gin.Context) {
+		var body struct {
+			Version string `json:"version"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.Version == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "version is required"})
+			return
+		}
+		username := c.GetString("username")
+		state, err := updateManager.RequestUpdate(body.Version, username)
+		if err != nil {
+			switch err {
+			case update.ErrUpdateInFlight:
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			case update.ErrInvalidTarget:
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			}
+			return
+		}
+		LogAudit(c, database, "system.update", "system", "success", "update to "+state.Target+" requested")
+		c.JSON(http.StatusAccepted, gin.H{"status": state.Status, "target": state.Target})
+	})
 
 	// Webhooks management
 	protected.GET("/webhooks", HandleListWebhooks(database))

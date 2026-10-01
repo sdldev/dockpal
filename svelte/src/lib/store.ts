@@ -50,6 +50,15 @@ export interface NavServerStatus {
 }
 export const navServerStatus = writable<NavServerStatus | null>(null);
 
+// System-update availability summary for the NavHeader badge. Polled at a
+// slower cadence than navServerStatus (release checks are infrequent); null
+// means "no update info yet" and renders nothing.
+export interface SystemUpdateBadge {
+	updateAvailable: boolean;
+	latestVersion?: string;
+}
+export const systemUpdateBadge = writable<SystemUpdateBadge | null>(null);
+
 // Template staged for a new stack (Stacks → Catalog → "New stack from this").
 // ComposePage consumes and clears it in add-mode.
 export const pendingTemplate = writable<Template | null>(null);

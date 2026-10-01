@@ -111,6 +111,7 @@ var (
 	bucketNotificationWebhooks = []byte("notification_webhooks")
 	bucketAPIKeys              = []byte("api_keys")
 	bucketMetrics              = []byte("metrics")
+	bucketSettings             = []byte("settings")
 )
 
 var (
@@ -129,7 +130,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys, bucketMetrics} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys, bucketMetrics, bucketSettings} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}
@@ -155,6 +156,44 @@ func (d *DB) View(fn func(tx *bbolt.Tx) error) error {
 // Update runs fn inside a read-write transaction.
 func (d *DB) Update(fn func(tx *bbolt.Tx) error) error {
 	return d.db.Update(fn)
+}
+
+// ErrSettingNotFound is returned by GetSetting when the key does not exist.
+var ErrSettingNotFound = errors.New("setting not found")
+
+// GetSetting returns the raw value stored under key in the settings bucket.
+// The settings bucket is a small key/value space for process-level state such
+// as the cached latest release and the system-update state machine.
+func (d *DB) GetSetting(key string) ([]byte, error) {
+	var out []byte
+	err := d.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketSettings)
+		v := b.Get([]byte(key))
+		if v == nil {
+			return ErrSettingNotFound
+		}
+		out = append([]byte(nil), v...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SetSetting stores value under key in the settings bucket.
+func (d *DB) SetSetting(key string, value []byte) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketSettings).Put([]byte(key), value)
+	})
+}
+
+// DeleteSetting removes key from the settings bucket. Missing keys are not an
+// error (bbolt Delete is idempotent).
+func (d *DB) DeleteSetting(key string) error {
+	return d.db.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketSettings).Delete([]byte(key))
+	})
 }
 
 // Users

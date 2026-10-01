@@ -303,6 +303,69 @@ SERVICEEOF
     log_info "Dockpal service started"
 }
 
+# Install the privileged side of the UI-driven self-update. The panel runs as
+# the locked-down dockpal user and cannot replace its own binary, so it writes
+# a trigger file; the .path unit below (root) runs a small helper which executes
+# update.sh. update.sh is staged locally so an update does not depend on
+# re-fetching it from the network at update time. Failures are non-fatal: the
+# panel still works, only the in-UI update button is degraded.
+install_updater_units() {
+    log_info "Installing updater helper and systemd path unit..."
+
+    local ref="$VERSION"
+    [ "$ref" = "latest" ] && ref="main"
+    local raw_base="https://raw.githubusercontent.com/$REPO/$ref"
+
+    # Stage update.sh under the data dir, invoked by the helper at update time.
+    if curl -fsSL --connect-timeout 15 --max-time 60 "$raw_base/update.sh" -o "$DATA_DIR/update.sh" 2>/dev/null; then
+        chmod 755 "$DATA_DIR/update.sh"
+        chown root:root "$DATA_DIR/update.sh" 2>/dev/null || true
+    else
+        log_warn "Could not download update.sh; in-UI updates will fail until present at $DATA_DIR/update.sh"
+    fi
+
+    # The root helper that consumes the trigger file.
+    if curl -fsSL --connect-timeout 15 --max-time 60 "$raw_base/scripts/dockpal-update-helper.sh" -o /usr/local/bin/dockpal-update-helper 2>/dev/null; then
+        chmod 755 /usr/local/bin/dockpal-update-helper
+        chown root:root /usr/local/bin/dockpal-update-helper 2>/dev/null || true
+    else
+        log_warn "Could not download dockpal-update-helper; in-UI update button will not work"
+        return 0
+    fi
+
+    # oneshot service that runs the helper.
+    cat > /etc/systemd/system/dockpal-updater.service << 'SERVICEEOF'
+[Unit]
+Description=Dockpal system update executor
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dockpal-update-helper
+TimeoutStartSec=300
+SERVICEEOF
+
+    # .path unit that fires when the panel writes update-request.json.
+    cat > /etc/systemd/system/dockpal-updater.path << 'PATHEOF'
+[Unit]
+Description=Dockpal updater trigger watcher
+ConditionPathIsDirectory=/opt/dockpal
+
+[Path]
+PathExists=/opt/dockpal/update-request.json
+Unit=dockpal-updater.service
+
+[Install]
+WantedBy=multi-user.target
+PATHEOF
+
+    chmod 644 /etc/systemd/system/dockpal-updater.service /etc/systemd/system/dockpal-updater.path
+    systemctl daemon-reload
+    systemctl enable --now dockpal-updater.path >/dev/null 2>&1 || true
+    log_info "Updater path unit installed and enabled"
+}
+
 verify_installation() {
     local max_wait=30
     local count=0
@@ -441,6 +504,7 @@ main() {
     install_templates
     download_binary
     setup_systemd
+    install_updater_units
 
     verify_installation
     open_firewall

@@ -19,6 +19,7 @@ import (
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
 	"github.com/sdldev/dockpal/internal/registry"
+	"github.com/sdldev/dockpal/internal/update"
 	"gopkg.in/yaml.v3"
 )
 
@@ -127,12 +128,23 @@ var (
 	globalRegistryManager    *registry.Manager
 )
 
+// globalUpdateChecker and globalUpdateManager back the system self-update
+// endpoints. They are reassigned on every RegisterRoutes call so test setups
+// stay isolated, following the same pattern as the globals above.
+var (
+	globalUpdateChecker *update.Checker
+	globalUpdateManager *update.Manager
+)
+
 func StopBackgroundWorkers() {
 	if globalAutoUpdateWorker != nil {
 		globalAutoUpdateWorker.Stop()
 	}
 	if globalImageUpdateMonitor != nil {
 		globalImageUpdateMonitor.Stop()
+	}
+	if globalUpdateChecker != nil {
+		globalUpdateChecker.Stop()
 	}
 }
 

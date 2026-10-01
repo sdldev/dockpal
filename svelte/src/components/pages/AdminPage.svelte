@@ -5,9 +5,10 @@
 	import RegistriesTab from '../admin/RegistriesTab.svelte';
 	import BackupTab from '../admin/BackupTab.svelte';
 	import SystemInfoTab from '../admin/SystemInfoTab.svelte';
+	import SystemUpdateTab from '../admin/SystemUpdateTab.svelte';
 	import TunnelTab from '../admin/TunnelTab.svelte';
 
-	const tabs = ['users', 'api-keys', 'audit-logs', 'registries', 'backup', 'system', 'tunnel'] as const;
+	const tabs = ['users', 'api-keys', 'audit-logs', 'registries', 'backup', 'system', 'update', 'tunnel'] as const;
 	type Tab = (typeof tabs)[number];
 
 	let activeTab = $state<Tab>('users');
@@ -19,6 +20,7 @@
 		registries: 'Registries',
 		backup: 'Backup',
 		system: 'System',
+		update: 'Update',
 		tunnel: 'Tunnel'
 	};
 </script>
@@ -57,6 +59,8 @@
 		<BackupTab />
 	{:else if activeTab === 'system'}
 		<SystemInfoTab />
+	{:else if activeTab === 'update'}
+		<SystemUpdateTab />
 	{:else if activeTab === 'tunnel'}
 		<TunnelTab />
 	{/if}

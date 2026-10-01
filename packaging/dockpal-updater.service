@@ -1,0 +1,13 @@
+[Unit]
+Description=Dockpal system update executor
+# Runs update.sh as root to swap the panel binary. oneshot, triggered by
+# dockpal-updater.path when the panel drops a trigger file.
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/dockpal-update-helper
+# update.sh downloads, verifies, backs up, swaps the binary and restarts the
+# panel; give it room for slow networks.
+TimeoutStartSec=300
