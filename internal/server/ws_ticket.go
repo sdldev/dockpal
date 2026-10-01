@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/sdldev/dockpal/internal/auth"
 )
 
 const wsTicketTTL = 60 * time.Second
@@ -77,4 +78,20 @@ func consumeWSTicket(ticket string) (wsTicket, bool) {
 		return wsTicket{}, false
 	}
 	return entry, true
+}
+
+// resolveWSQueryRole validates a ?token= value for a WS upgrade whose route is
+// NOT covered by AuthMiddleware (instance-scoped logs/exec, legacy local
+// logs). Browser clients send a single-use ws-ticket (audit-auth L1); older
+// API clients may still send a raw JWT. Mirrors AuthMiddleware's precedence:
+// ticket first, JWT fallback. Returns the caller's role, or "" when the
+// credential is invalid.
+func resolveWSQueryRole(c *gin.Context, token string) string {
+	if tkt, ok := consumeWSTicket(token); ok {
+		return tkt.role
+	}
+	if claims, err := auth.ValidateJWTWithVersionCheck(token, jwtSecretFromContext(c), databaseFromContext(c)); err == nil {
+		return claims.Role
+	}
+	return ""
 }

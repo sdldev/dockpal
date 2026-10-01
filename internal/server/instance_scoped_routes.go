@@ -391,10 +391,11 @@ func handleInstanceContainerLogs(c *gin.Context) {
 	defer conn.Close()
 
 	// Auth: query token (browser WS) or first {token} message (API clients) —
-	// same protocol as the exec handler below.
+	// same protocol as the exec handler below. The query value may be a
+	// single-use ws-ticket (what the browser sends) or a raw JWT.
 	if q := c.Query("token"); q != "" {
-		claims, aerr := auth.ValidateJWTWithVersionCheck(q, jwtSecretFromContext(c), databaseFromContext(c))
-		if aerr != nil || !auth.HasRole(claims.Role, auth.RoleViewer) {
+		role := resolveWSQueryRole(c, q)
+		if role == "" || !auth.HasRole(role, auth.RoleViewer) {
 			conn.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(4001, "authentication failed"))
 			return
@@ -439,6 +440,8 @@ func handleInstanceContainerExec(c *gin.Context) {
 	defer conn.Close()
 
 	// Auth: query token (browser WS) or first {token} message (API clients).
+	// The query value may be a single-use ws-ticket (what the browser sends)
+	// or a raw JWT.
 	authToken := c.Query("token")
 	if authToken == "" {
 		var msg agentMessage
@@ -452,8 +455,8 @@ func handleInstanceContainerExec(c *gin.Context) {
 		}
 		authToken = msg.Token
 	}
-	claims, err := auth.ValidateJWTWithVersionCheck(authToken, jwtSecretFromContext(c), databaseFromContext(c))
-	if err != nil || !auth.HasRole(claims.Role, auth.RoleOperator) {
+	role := resolveWSQueryRole(c, authToken)
+	if role == "" || !auth.HasRole(role, auth.RoleOperator) {
 		conn.WriteMessage(websocket.CloseMessage,
 			websocket.FormatCloseMessage(4003, "insufficient permissions"))
 		return

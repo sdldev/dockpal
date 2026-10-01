@@ -1047,10 +1047,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		defer conn.Close()
 
 		// Auth: query token (browser WS) or first {token} message (API clients) —
-		// same protocol as the instance-scoped logs handler.
+		// same protocol as the instance-scoped logs handler. The query value
+		// may be a single-use ws-ticket (what the browser sends) or a raw JWT.
 		if q := c.Query("token"); q != "" {
-			claims, aerr := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database)
-			if aerr != nil || !auth.HasRole(claims.Role, auth.RoleViewer) {
+			role := resolveWSQueryRole(c, q)
+			if role == "" || !auth.HasRole(role, auth.RoleViewer) {
 				conn.WriteMessage(websocket.CloseMessage,
 					websocket.FormatCloseMessage(4001, "authentication failed"))
 				return
