@@ -59,8 +59,19 @@ jobs:
             go build -ldflags "-s -w -X main.version=${VERSION}" \
             -o ${{ matrix.binary }} .
 
+      # Running the freshly built binary only works when its architecture
+      # matches the runner (ubuntu-latest is x86_64). Verifying the arm64
+      # binary this way fails with "Exec format error", so we only execute the
+      # amd64 build and just confirm the arm64 artifact was produced.
       - name: Verify binary reports the right version
+        if: matrix.goarch == 'amd64'
         run: ./${{ matrix.binary }} version
+
+      - name: Verify arm64 artifact exists (cannot execute on x86_64 runner)
+        if: matrix.goarch != 'amd64'
+        run: |
+          test -s "${{ matrix.binary }}" || { echo "missing ${{ matrix.binary }}"; exit 1; }
+          file "${{ matrix.binary }}" | grep -q 'ELF 64-bit' || { echo "not an ELF binary"; exit 1; }
 
       - name: Generate SHA256 checksum
         run: sha256sum ${{ matrix.binary }} > ${{ matrix.binary }}.sha256
