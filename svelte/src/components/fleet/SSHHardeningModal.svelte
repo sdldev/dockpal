@@ -41,6 +41,9 @@
 	let keySource = $state<'generate' | 'saved'>('generate');
 	let savedKeys = $state<SSHKeyInfo[]>([]);
 	let selectedKeyID = $state('');
+	// The operator's own public key(s) — without one, their own PC loses shell
+	// access the moment password auth is disabled (only the panel key remains).
+	let extraPublicKeys = $state('');
 	let confirmOpen = $state(false);
 	let socket: WebSocket | null = null;
 
@@ -49,6 +52,7 @@
 			phase = 'idle';
 			logs = [];
 			confirmOpen = false;
+			extraPublicKeys = '';
 			listSSHKeys()
 				.then((keys) => (savedKeys = keys))
 				.catch(() => (savedKeys = []));
@@ -85,7 +89,11 @@
 		logs = [];
 		try {
 			await api.post(`/instances/${instance.id}/harden`, {
-				ssh_key_id: keySource === 'saved' ? selectedKeyID : undefined
+				ssh_key_id: keySource === 'saved' ? selectedKeyID : undefined,
+				extra_public_keys: extraPublicKeys
+					.split('\n')
+					.map((l) => l.trim())
+					.filter(Boolean)
 			});
 			await openLogStream();
 		} catch (e) {
@@ -203,6 +211,25 @@
 				{/if}
 			</div>
 
+			<!-- Operator's own key: keeps their PC able to log in after hardening -->
+			<div>
+				<label for="harden-extra-keys" class="block text-xs font-medium text-zinc-400 mb-1">
+					Your public key <span class="text-zinc-600">(recommended)</span>
+				</label>
+				<textarea
+					id="harden-extra-keys"
+					bind:value={extraPublicKeys}
+					disabled={phase !== 'idle'}
+					rows="2"
+					placeholder="ssh-ed25519 AAAA... you@your-pc"
+					class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600"
+				></textarea>
+				<p class="text-xs text-zinc-600 mt-1">
+					Paste the output of <span class="font-mono text-zinc-400">cat ~/.ssh/id_ed25519.pub</span> from
+					your own machine — without it, only Dockpal can log in after passwords are disabled.
+				</p>
+			</div>
+
 			<!-- Run log -->
 			{#if logs.length > 0}
 				<div>
@@ -240,7 +267,7 @@
 <ConfirmDialog
 	open={confirmOpen}
 	title="Disable password login"
-	message={`Install the SSH key on "${displayName}" and disable password authentication in sshd? Key-only login is verified BEFORE passwords are turned off, and everything rolls back automatically on failure. Keep in mind you should still have access to the provider console as a last resort.`}
+	message={`Install the SSH key on "${displayName}" and disable password authentication in sshd? Key-only login is verified BEFORE passwords are turned off, and everything rolls back automatically on failure.${extraPublicKeys.trim() ? ' Your own public key will also be installed so you keep CLI access.' : ' Without your own public key, only Dockpal will be able to log in.'} Keep in mind you should still have access to the provider console as a last resort.`}
 	confirmLabel="Harden server"
 	busy={phase === 'running'}
 	onconfirm={start}

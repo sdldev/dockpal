@@ -129,6 +129,27 @@ func TestAuthorizedKeysCommandIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAuthorizedKeysInstallCommandMultiKey(t *testing.T) {
+	cmd := authorizedKeysInstallCommand([]string{
+		"ssh-ed25519 AAAA-panel dockpal-inst-x",
+		"ssh-rsa AAAA-user1 user@pc",
+		"",
+		"ssh-ed25519 AAAA-user2 other@laptop",
+	})
+	if n := strings.Count(cmd, "grep -qF"); n != 3 {
+		t.Errorf("expected 3 guarded appends (empty line skipped), got %d", n)
+	}
+	for _, want := range []string{"AAAA-panel", "AAAA-user1", "AAAA-user2"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command missing key %s", want)
+		}
+	}
+	// Permissions and directory setup must precede the appends.
+	if !strings.HasPrefix(cmd, "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600") {
+		t.Errorf("missing safe setup prefix: %q", cmd)
+	}
+}
+
 func TestGenerateKeyPairParsesWithSSHPackage(t *testing.T) {
 	_, priv, _, err := GenerateKeyPair("roundtrip")
 	if err != nil {

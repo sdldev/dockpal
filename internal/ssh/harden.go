@@ -37,6 +37,13 @@ type HardenParams struct {
 	PublicKey     string
 	PrivateKeyPEM string
 
+	// ExtraPublicKeys are the operator's own authorized_keys lines (e.g. the
+	// content of ~/.ssh/id_ed25519.pub on their PC). Without one of these the
+	// operator loses shell access the moment password auth is disabled — only
+	// the panel's own key remains. They are installed alongside PublicKey in
+	// step 2 and validated by the caller.
+	ExtraPublicKeys []string
+
 	// TestPassword is the password that used to work. After the reload the
 	// panel dials again with it and REQUIRES the server to reject it. Empty
 	// when the original auth was already a key (nothing to disprove).
@@ -83,16 +90,15 @@ func HardenSSH(params HardenParams, w io.Writer) error {
 		return fmt.Errorf("connected but could not run commands: %w", err)
 	}
 
-	// Step 2 — install the public key (additive, safe to leave behind even if
-	// a later step fails). ~ is the login user's own home, so no sudo here.
+	// Step 2 — install the public keys (additive, safe to leave behind even
+	// if a later step fails). ~ is the login user's own home, so no sudo here.
 	pubLine := strings.TrimSpace(params.PublicKey)
 	if pubLine == "" {
 		return fmt.Errorf("no public key to install")
 	}
-	step("Step 2/5: installing public key into ~/.ssh/authorized_keys...")
-	keysCmd := "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && " +
-		"grep -qF '" + pubLine + "' ~/.ssh/authorized_keys || echo '" + pubLine + "' >> ~/.ssh/authorized_keys"
-	if err := runCommand(client, keysCmd, io.Discard); err != nil {
+	allKeys := append([]string{pubLine}, params.ExtraPublicKeys...)
+	step("Step 2/5: installing %d public key(s) into ~/.ssh/authorized_keys...", len(allKeys))
+	if err := runCommand(client, authorizedKeysInstallCommand(allKeys), io.Discard); err != nil {
 		return fmt.Errorf("failed to install public key: %w", err)
 	}
 
@@ -184,6 +190,32 @@ func HardenSSH(params HardenParams, w io.Writer) error {
 	// record really changed.
 	step("All checks passed — the server now accepts key-only authentication.")
 	return nil
+}
+
+// ValidatePublicKeyLine reports whether line parses as an authorized_keys
+// entry (type + base64 blob). Used to reject typos before a hardening run
+// installs an operator key that could lock them out.
+func ValidatePublicKeyLine(line string) error {
+	if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// authorizedKeysInstallCommand returns one idempotent sh snippet that ensures
+// ~/.ssh/authorized_keys exists with safe permissions and contains every given
+// public key line (grep guard, no duplicates). Key lines are single-quoted;
+// ssh authorized_keys lines never contain single quotes (base64 + type).
+func authorizedKeysInstallCommand(pubs []string) string {
+	cmd := "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+	for _, pub := range pubs {
+		line := strings.TrimSpace(pub)
+		if line == "" {
+			continue
+		}
+		cmd += " && grep -qF '" + line + "' ~/.ssh/authorized_keys || echo '" + line + "' >> ~/.ssh/authorized_keys"
+	}
+	return cmd
 }
 
 // dialSSH opens an SSH connection with the given credential, mirroring the

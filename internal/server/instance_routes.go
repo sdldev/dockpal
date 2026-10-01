@@ -580,13 +580,13 @@ func generateInstallCommand(mode, serverHost, token string) string {
 }
 
 type InstallAgentRequest struct {
-	SSHHost       string `json:"ssh_host" binding:"required"`
-	SSHPort       int    `json:"ssh_port"`
-	SSHUser       string `json:"ssh_user"`
-	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key"`
+	SSHHost     string `json:"ssh_host" binding:"required"`
+	SSHPort     int    `json:"ssh_port"`
+	SSHUser     string `json:"ssh_user"`
+	SSHAuthType string `json:"ssh_auth_type" binding:"required,oneof=password key"`
 	// SSHSecret is the ad-hoc credential (password or pasted private key).
 	// Mutually exclusive with SSHKeyID — exactly one must be set.
-	SSHSecret     string `json:"ssh_secret"`
+	SSHSecret string `json:"ssh_secret"`
 	// SSHKeyID references a saved SSH key (Settings → Administration → SSH
 	// Keys); the handler resolves and decrypts it. Requires key auth.
 	SSHKeyID      string `json:"ssh_key_id"`
@@ -848,6 +848,11 @@ type HardenSSHRequest struct {
 	// SSHKeyID optionally selects a Saved SSH Key to install instead of the
 	// default fresh keypair generated for this instance.
 	SSHKeyID string `json:"ssh_key_id"`
+	// ExtraPublicKeys are the operator's own authorized_keys lines (e.g. the
+	// content of ~/.ssh/id_ed25519.pub on their PC). Without one, the
+	// operator's own machine loses shell access once passwords are disabled —
+	// only the panel's key remains. Each line must parse as a public key.
+	ExtraPublicKeys []string `json:"extra_public_keys"`
 }
 
 // handleHardenSSH starts the SSH hardening job: install a key, verify key
@@ -953,6 +958,22 @@ func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogs
 			pubKey, privKeyPEM, fingerprint = pub, priv, fp
 		}
 
+		// Validate the operator's own public keys BEFORE taking the in-flight
+		// slot: this returns synchronously, so a 400 here would otherwise leak
+		// the slot and every later run would get a false 409.
+		var extraKeys []string
+		for _, raw := range req.ExtraPublicKeys {
+			line := strings.TrimSpace(raw)
+			if line == "" {
+				continue
+			}
+			if err := ssh.ValidatePublicKeyLine(line); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid public key %q: %v", truncateForLog(line), err)})
+				return
+			}
+			extraKeys = append(extraKeys, line)
+		}
+
 		// One harden job per instance at a time — two concurrent runs would
 		// interleave sshd rewrites and rollbacks.
 		if _, loaded := running.LoadOrStore(id, struct{}{}); loaded {
@@ -965,13 +986,14 @@ func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogs
 		LogAudit(c, database, "instance.harden_ssh", id, "success", fmt.Sprintf("Started SSH hardening on %s:%d (user %s)", host, port, user))
 
 		params := ssh.HardenParams{
-			Host:          host,
-			Port:          port,
-			User:          user,
-			AuthType:      authType,
-			AuthSecret:    authSecret,
-			PublicKey:     pubKey,
-			PrivateKeyPEM: privKeyPEM,
+			Host:            host,
+			Port:            port,
+			User:            user,
+			AuthType:        authType,
+			AuthSecret:      authSecret,
+			PublicKey:       pubKey,
+			PrivateKeyPEM:   privKeyPEM,
+			ExtraPublicKeys: extraKeys,
 			// The password that used to work — after the reload the panel
 			// dials with it again and REQUIRES rejection.
 			TestPassword: func() string {
@@ -1030,4 +1052,12 @@ func handleHardenSSHLogs(logsManager *InstallLogsManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		streamLogSession(c, logsManager, hardenSessionKey(c.Param("instance_id")), "[Dockpal Hardening]")
 	}
+}
+
+// truncateForLog keeps validation error messages readable.
+func truncateForLog(s string) string {
+	if len(s) <= 40 {
+		return s
+	}
+	return s[:37] + "..."
 }
