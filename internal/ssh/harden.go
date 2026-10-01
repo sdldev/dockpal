@@ -381,12 +381,22 @@ func hardeningConfigLines(sudo bool, kbdKeyword string) []string {
 	return lines
 }
 
-const dropInPath = "/etc/ssh/sshd_config.d/99-dockpal-hardening.conf"
+// Drop-in naming matters: sshd keeps the FIRST obtained value per directive
+// and reads sshd_config.d/*.conf in lexical order, so cloud images shipping
+// e.g. 50-cloud-init.conf with "PasswordAuthentication yes" would beat a
+// 99- file. The 00- prefix makes Dockpal's directives win. (The Include must
+// also sit before any main-body directive — true for Ubuntu/Debian defaults.)
+const dropInPath = "/etc/ssh/sshd_config.d/00-dockpal-hardening.conf"
 
-// writeDropIn replaces the Dockpal drop-in file with the given lines.
+// legacyDropInPath is the pre-fix name; it must be removed on re-runs so a
+// stale file doesn't linger after an upgrade.
+const legacyDropInPath = "/etc/ssh/sshd_config.d/99-dockpal-hardening.conf"
+
+// writeDropIn replaces the Dockpal drop-in file with the given lines and
+// removes the legacy 99- file from earlier builds.
 func writeDropIn(client *ssh.Client, sudo bool, path string, lines []string) error {
 	printfArgs := strings.Join(quoteAll(lines), " ")
-	cmd := "printf '%s\\n' " + printfArgs + " > " + path
+	cmd := "rm -f " + legacyDropInPath + "; printf '%s\\n' " + printfArgs + " > " + path
 	if sudo {
 		cmd = "sudo sh -c " + shellQuote(cmd)
 	}
@@ -397,13 +407,18 @@ const blockBegin = "# BEGIN DOCKPAL SSH HARDENING"
 const blockEnd = "# END DOCKPAL SSH HARDENING"
 
 // writeManagedBlock replaces the Dockpal section inside sshd_config itself
-// (for distributions whose sshd_config has no Include directive).
+// (for distributions whose sshd_config has no Include directive). The block
+// is PREPENDED, not appended: with no Include, first-value-wins means an
+// appended block would lose to any earlier "PasswordAuthentication yes" in
+// the main file, while a block at the top beats everything after it.
 func writeManagedBlock(client *ssh.Client, sudo bool, lines []string) error {
 	body := strings.Join(lines, "\n")
 	printfArgs := strings.Join(quoteAll([]string{blockBegin, body, blockEnd}), " ")
 	inner := "cp -n /etc/ssh/sshd_config /etc/ssh/sshd_config.dockpal-bak 2>/dev/null || true; " +
 		"sed -i '/^" + blockBegin + "$/,/^" + blockEnd + "$/d' /etc/ssh/sshd_config; " +
-		"printf '%s\\n' " + printfArgs + " >> /etc/ssh/sshd_config"
+		"{ printf '%s\\n' " + printfArgs + "; cat /etc/ssh/sshd_config; } > /etc/ssh/sshd_config.dockpal-tmp && " +
+		"chmod --reference=/etc/ssh/sshd_config /etc/ssh/sshd_config.dockpal-tmp && " +
+		"mv /etc/ssh/sshd_config.dockpal-tmp /etc/ssh/sshd_config"
 	cmd := inner
 	if sudo {
 		cmd = "sudo sh -c " + shellQuote(inner)
@@ -417,7 +432,7 @@ func rollbackConfig(client *ssh.Client, sudo bool, mode string, w io.Writer) {
 	fmt.Fprintln(w, "[Dockpal Hardening] Rolling back sshd config changes...")
 	var cmd string
 	if mode == "dropin" {
-		cmd = "rm -f " + dropInPath
+		cmd = "rm -f " + dropInPath + " " + legacyDropInPath
 	} else {
 		cmd = "sed -i '/^" + blockBegin + "$/,/^" + blockEnd + "$/d' /etc/ssh/sshd_config"
 	}
