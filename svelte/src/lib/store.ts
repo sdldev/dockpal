@@ -50,14 +50,20 @@ export interface NavServerStatus {
 }
 export const navServerStatus = writable<NavServerStatus | null>(null);
 
-// System-update availability summary for the NavHeader badge. Polled at a
-// slower cadence than navServerStatus (release checks are infrequent); null
-// means "no update info yet" and renders nothing.
+// System-update summary for the sidebar footer (current version + update
+// availability). Polled by the Sidebar at a slow cadence; null means "no
+// update info yet" and renders just the version placeholder.
 export interface SystemUpdateBadge {
+	currentVersion?: string;
 	updateAvailable: boolean;
 	latestVersion?: string;
 }
 export const systemUpdateBadge = writable<SystemUpdateBadge | null>(null);
+
+// Initial tab for the Administration tab set, set when arriving via the
+// sidebar's "update available" shortcut so it lands directly on the Update
+// sub-tab. Consumed and cleared by SettingsPage on mount.
+export const adminInitialTab = writable<string | null>(null);
 
 // Initial tab for the Containers page, set when arriving via the legacy
 // `/images` alias so old bookmarks land on the Images tab (not the default

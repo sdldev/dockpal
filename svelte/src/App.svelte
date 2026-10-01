@@ -101,12 +101,12 @@
       <div
         class="fixed inset-y-0 left-0 z-50 w-64 md:sticky md:top-0 md:bottom-auto md:z-0"
       >
-        <Sidebar currentRoute={$currentPage} logout={logout} />
+        <Sidebar currentRoute={$currentPage} />
       </div>
     {/if}
 
     <div class="flex-1 flex flex-col min-w-0 min-h-screen">
-      <NavHeader />
+      <NavHeader logout={logout} />
       <main class="flex-1 p-4 sm:p-6 overflow-auto">
         <!-- Remount the current page when the selected instance changes so
              instance-scoped pages (Dashboard, Stacks, Compose...) re-fetch

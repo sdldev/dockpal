@@ -1,18 +1,18 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import type { ComponentProps } from 'svelte';
-  import { currentUser, isAdmin, isOperator, selectedInstance, sidebarOpen } from '../../lib/store';
+  import { isAdmin, isOperator, selectedInstance, sidebarOpen, systemUpdateBadge, adminInitialTab } from '../../lib/store';
   import { navigate } from '../../lib/router';
   import { listInstances } from '$lib/api/stacks';
+  import { getUpdateStatus } from '$lib/api/system';
   import type { InstanceListItem } from '$lib/types/api';
   import Icon from '../ui/Icon.svelte';
 
   interface Props {
     currentRoute?: string;
-    logout?: () => void;
   }
 
-  let { currentRoute = 'dashboard', logout }: Props = $props();
+  let { currentRoute = 'dashboard' }: Props = $props();
 
   // Instance list for the server selector — also drives Servers visibility:
   // single-server users (the majority) never need it, so the item only
@@ -35,6 +35,42 @@
       instances = [];
     }
   });
+
+  // Update-check polling for the footer (release checks are infrequent, so a
+  // 60s cadence is plenty). Failure leaves the previous summary untouched.
+  let updateTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function fetchUpdateSummary() {
+    try {
+      const s = await getUpdateStatus();
+      systemUpdateBadge.set({
+        currentVersion: s.current_version,
+        updateAvailable: s.update_available,
+        latestVersion: s.latest_version
+      });
+    } catch {
+      // Keep the previous summary on transient errors.
+    }
+  }
+
+  onMount(() => {
+    fetchUpdateSummary();
+    updateTimer = setInterval(fetchUpdateSummary, 60000);
+  });
+
+  onDestroy(() => {
+    if (updateTimer) clearInterval(updateTimer);
+  });
+
+  // Shortcut from the footer's "update available" pill straight to
+  // Settings → Administration → Update.
+  function gotoUpdate() {
+    adminInitialTab.set('update');
+    navigate('settings');
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      sidebarOpen.set(false);
+    }
+  }
 
   const showFleet = $derived(instances.length > 1);
 
@@ -84,10 +120,6 @@
       return true;
     })
   );
-
-  async function handleLogout() {
-    logout?.();
-  }
 
   // On mobile (< md, matching App.svelte) the sidebar is an overlay;
   // navigate should close it there. On desktop it pushes content instead.
@@ -156,23 +188,29 @@
     {/each}
   </nav>
 
-  <div class="border-t border-zinc-800 pt-4 mt-4">
-    {#if $currentUser}
-      <div class="px-3 mb-3">
-        <div class="text-sm font-medium text-white">{$currentUser.username}</div>
-        <div class="text-xs text-zinc-500 capitalize">{$currentUser.role}</div>
-      </div>
+  <div class="border-t border-zinc-800 pt-3 mt-4 space-y-1.5">
+    {#if $systemUpdateBadge?.updateAvailable && $isAdmin}
       <button
-        onclick={handleLogout}
-        class="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-zinc-400 hover:text-white rounded-sm hover:bg-zinc-800 transition-colors"
+        onclick={gotoUpdate}
+        class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-sm bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-xs"
+        title={`Dockpal v${$systemUpdateBadge.latestVersion} is available — open the updater`}
       >
-        <span class="shrink-0"><Icon name="logout" class="w-4.5 h-4.5" /></span>
-        <span>Logout</span>
+        <Icon name="download" class="w-3.5 h-3.5 shrink-0" />
+        <span class="font-medium">Update to v{$systemUpdateBadge.latestVersion}</span>
       </button>
-    {:else}
-      <a href="/login" class="block text-center px-3 py-2 rounded-sm bg-white text-zinc-900 hover:bg-zinc-200 transition-colors mt-4">
-        Login
-      </a>
+    {:else if $systemUpdateBadge?.updateAvailable}
+      <div
+        class="flex items-center gap-2 px-2.5 py-1.5 rounded-sm text-xs text-zinc-500"
+        title={`Dockpal v${$systemUpdateBadge.latestVersion} is available (ask an admin to update)`}
+      >
+        <Icon name="download" class="w-3.5 h-3.5 shrink-0" />
+        <span>v{$systemUpdateBadge.latestVersion} available</span>
+      </div>
     {/if}
+    <div class="px-2.5 flex items-center gap-2 text-xs text-zinc-600">
+      <span>🐳</span>
+      <span>Dockpal</span>
+      <span class="font-mono">{$systemUpdateBadge?.currentVersion ? `v${$systemUpdateBadge.currentVersion}` : '—'}</span>
+    </div>
   </div>
 </aside>
