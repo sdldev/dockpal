@@ -112,6 +112,7 @@ var (
 	bucketAPIKeys              = []byte("api_keys")
 	bucketMetrics              = []byte("metrics")
 	bucketSettings             = []byte("settings")
+	bucketSSHKeys              = []byte("ssh_keys")
 )
 
 var (
@@ -130,7 +131,7 @@ func New(path string) (*DB, error) {
 	}
 
 	if err := bdb.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys, bucketMetrics, bucketSettings} {
+		for _, bucket := range [][]byte{bucketUsers, bucketServices, bucketDomains, bucketRegistries, bucketInstances, bucketAuditLogs, bucketWebhooks, bucketAppUpdates, bucketAppUpdatesByID, bucketNotificationWebhooks, bucketAPIKeys, bucketMetrics, bucketSettings, bucketSSHKeys} {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
 				return err
 			}

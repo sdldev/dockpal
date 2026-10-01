@@ -535,7 +535,12 @@ type InstallAgentRequest struct {
 	SSHPort       int    `json:"ssh_port"`
 	SSHUser       string `json:"ssh_user"`
 	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key"`
-	SSHSecret     string `json:"ssh_secret" binding:"required"`
+	// SSHSecret is the ad-hoc credential (password or pasted private key).
+	// Mutually exclusive with SSHKeyID — exactly one must be set.
+	SSHSecret     string `json:"ssh_secret"`
+	// SSHKeyID references a saved SSH key (Settings → Administration → SSH
+	// Keys); the handler resolves and decrypts it. Requires key auth.
+	SSHKeyID      string `json:"ssh_key_id"`
 	InstallDocker bool   `json:"install_docker"`
 	// SSHHostKey pins the server's SSH host key as a SHA-256 fingerprint
 	// ("SHA256:...") for strict verification (audit-auth L6). Empty = TOFU:
@@ -602,8 +607,32 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 		// 128-char token that can never match, breaking every edge install.
 		token := string(tokenBytes)
 
+		// Credential: either an ad-hoc secret (password / pasted key) or a
+		// saved SSH key reference — exactly one must be provided.
+		sshSecret := req.SSHSecret
+		if req.SSHKeyID != "" {
+			if req.SSHAuthType != "key" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_key_id requires key auth"})
+				return
+			}
+			if strings.TrimSpace(sshSecret) != "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "provide either ssh_key_id or ssh_secret, not both"})
+				return
+			}
+			resolved, rerr := resolveSSHKeySecret(database, cryptoKey, req.SSHKeyID)
+			if rerr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+				return
+			}
+			sshSecret = resolved
+		}
+		if strings.TrimSpace(sshSecret) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_secret or ssh_key_id is required"})
+			return
+		}
+
 		// Encrypt SSH Secret (password or key)
-		encryptedSecret, err := registry.Encrypt([]byte(req.SSHSecret), cryptoKey)
+		encryptedSecret, err := registry.Encrypt([]byte(sshSecret), cryptoKey)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt SSH secret"})
 			return
@@ -663,7 +692,7 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 				Port:            req.SSHPort,
 				User:            req.SSHUser,
 				AuthType:        req.SSHAuthType,
-				AuthSecret:      req.SSHSecret,
+				AuthSecret:      sshSecret,
 				InstallDocker:   req.InstallDocker,
 				Mode:            inst.Mode,
 				Token:           token,

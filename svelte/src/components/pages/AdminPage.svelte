@@ -5,9 +5,10 @@
 	import RegistriesTab from '../admin/RegistriesTab.svelte';
 	import BackupTab from '../admin/BackupTab.svelte';
 	import SystemInfoTab from '../admin/SystemInfoTab.svelte';
+	import SshKeysTab from '../admin/SshKeysTab.svelte';
 	import TunnelTab from '../admin/TunnelTab.svelte';
 
-	const tabs = ['users', 'api-keys', 'audit-logs', 'registries', 'backup', 'system', 'tunnel'] as const;
+	const tabs = ['users', 'api-keys', 'ssh-keys', 'audit-logs', 'registries', 'backup', 'system', 'tunnel'] as const;
 	type Tab = (typeof tabs)[number];
 
 	let activeTab = $state<Tab>('users');
@@ -15,6 +16,7 @@
 	const tabLabels: Record<Tab, string> = {
 		users: 'Users',
 		'api-keys': 'API Keys',
+		'ssh-keys': 'SSH Keys',
 		'audit-logs': 'Audit Logs',
 		registries: 'Registries',
 		backup: 'Backup',
@@ -49,6 +51,8 @@
 		<UsersTab />
 	{:else if activeTab === 'api-keys'}
 		<ApiKeysTab />
+	{:else if activeTab === 'ssh-keys'}
+		<SshKeysTab />
 	{:else if activeTab === 'audit-logs'}
 		<AuditLogsTab />
 	{:else if activeTab === 'registries'}

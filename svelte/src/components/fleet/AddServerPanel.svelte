@@ -8,6 +8,7 @@
 	//   POST /api/instances/:id/test              → connectivity check
 	import { onDestroy } from 'svelte';
 	import { api, getToken } from '$lib/api/client';
+	import { listSSHKeys, type SSHKeyInfo } from '$lib/api/sshkeys';
 	import { addToast } from '$lib/store';
 	import Button from '../ui/Button.svelte';
 
@@ -31,6 +32,11 @@
 	let sshUser = $state('root');
 	let sshAuthType = $state<'password' | 'key'>('password');
 	let sshSecret = $state('');
+	// Key auth source: a saved key (uploaded in Administration → SSH Keys) or
+	// an ad-hoc paste. Defaults to saved keys when any exist.
+	let keySource = $state<'saved' | 'paste'>('paste');
+	let savedKeys = $state<SSHKeyInfo[]>([]);
+	let selectedKeyID = $state('');
 	let installDocker = $state(true);
 	// Address the agent should use to reach this panel (edge mode). Empty =
 	// use the browser's current host, which is wrong when the panel is
@@ -48,14 +54,35 @@
 
 	let socket: WebSocket | null = null;
 
+	// Saved keys feed the "Saved key" picker; if any exist, default to that
+	// source so admins stop pasting the same key on every install.
+	$effect(() => {
+		listSSHKeys()
+			.then((keys) => {
+				savedKeys = keys;
+				if (keys.length > 0 && !selectedKeyID) {
+					keySource = 'saved';
+					selectedKeyID = keys[0].id;
+				}
+			})
+			.catch(() => {
+				// Not an admin or endpoint unavailable — paste remains the path.
+			});
+	});
+
 	onDestroy(() => {
 		socket?.close();
 	});
 
 	const canCreate = $derived(name.trim() !== '' && !creating);
-	// Host is only meaningful for direct mode (edge agents dial the panel).
+	// Key auth with a saved key only needs the key picked; paste mode needs the
+	// secret textarea filled.
+	const keyCredentialOk = $derived(
+		sshAuthType === 'password' ||
+			(keySource === 'saved' ? selectedKeyID !== '' : sshSecret.trim() !== '')
+	);
 	const canInstall = $derived(
-		sshHost.trim() !== '' && sshSecret.trim() !== '' && !installing
+		sshHost.trim() !== '' && keyCredentialOk && !installing
 	);
 	const canTest = $derived(!testing);
 
@@ -155,6 +182,7 @@
 		if (!canInstall) return;
 		installing = true;
 		logs = [];
+		installFailed = false;
 		step = 'installing';
 		try {
 			await api.post(`/instances/${instanceId}/install`, {
@@ -162,7 +190,10 @@
 				ssh_port: sshPort ?? 22,
 				ssh_user: sshUser.trim() || 'root',
 				ssh_auth_type: sshAuthType,
-				ssh_secret: sshSecret,
+				// Saved keys are referenced by ID — the backend resolves and
+				// decrypts them; pasted keys travel inline as before.
+				ssh_secret: sshAuthType === 'key' && keySource === 'saved' ? '' : sshSecret,
+				ssh_key_id: sshAuthType === 'key' && keySource === 'saved' ? selectedKeyID : undefined,
 				install_docker: installDocker,
 				panel_address: panelAddress.trim() || undefined
 			});
@@ -330,28 +361,57 @@
 							<option value="key">Private key</option>
 						</select>
 					</div>
-					<div>
-						<label for="ssh-secret" class="block text-xs font-medium text-zinc-400 mb-1">
-							{sshAuthType === 'password' ? 'Password' : 'Private key'}
-						</label>
-						{#if sshAuthType === 'password'}
+					{#if sshAuthType === 'password'}
+						<div>
+							<label for="ssh-secret" class="block text-xs font-medium text-zinc-400 mb-1">Password</label>
 							<input
 								id="ssh-secret"
 								type="password"
 								bind:value={sshSecret}
 								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 							/>
-						{:else}
-							<textarea
-								id="ssh-secret"
-								bind:value={sshSecret}
-								rows="3"
-								placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600"
-							></textarea>
-						{/if}
-					</div>
+						</div>
+					{:else}
+						<div>
+							<label for="ssh-key-source" class="block text-xs font-medium text-zinc-400 mb-1">Key source</label>
+							<select
+								id="ssh-key-source"
+								bind:value={keySource}
+								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+							>
+								<option value="saved">Saved key</option>
+								<option value="paste">Paste key</option>
+							</select>
+						</div>
+					{/if}
 				</div>
+				{#if sshAuthType === 'key' && keySource === 'saved'}
+					<div>
+						<label for="ssh-saved-key" class="block text-xs font-medium text-zinc-400 mb-1">Saved key</label>
+						<select
+							id="ssh-saved-key"
+							bind:value={selectedKeyID}
+							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+						>
+							{#each savedKeys as k (k.id)}
+								<option value={k.id}>{k.name} — {k.key_type} {k.fingerprint.slice(0, 20)}…</option>
+							{:else}
+								<option value="">No saved keys — upload one in Settings → Administration → SSH Keys</option>
+							{/each}
+						</select>
+					</div>
+				{:else if sshAuthType === 'key'}
+					<div>
+						<label for="ssh-secret" class="block text-xs font-medium text-zinc-400 mb-1">Private key</label>
+						<textarea
+							id="ssh-secret"
+							bind:value={sshSecret}
+							rows="3"
+							placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600"
+						></textarea>
+					</div>
+				{/if}
 				<label class="flex items-center gap-2 text-xs text-zinc-400">
 					<input type="checkbox" bind:checked={installDocker} class="accent-blue-600" />
 					Install Docker if missing (via get.docker.com)

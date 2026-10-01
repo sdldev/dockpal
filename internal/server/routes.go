@@ -159,6 +159,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	// Backup (admin only)
 	adminGroup.POST("/backup", HandleTriggerBackup(database, dataDir))
 
+	// Saved SSH keys (admin only) — reused by the Add Server installer.
+	adminGroup.GET("/ssh-keys", HandleListSSHKeys(database))
+	adminGroup.POST("/ssh-keys", HandleCreateSSHKey(database, jwtSecret))
+	adminGroup.DELETE("/ssh-keys/:id", HandleDeleteSSHKey(database))
+
 	// System self-update wiring. The checker polls GitHub for the latest
 	// release in the background and caches it; the manager turns an admin's
 	// update request into a trigger file the privileged systemd updater unit
