@@ -8,13 +8,26 @@
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-	import { addToast, selectedInstance, isOperator } from '$lib/store';
+	import { addToast, selectedInstance, isOperator, containersInitialTab } from '$lib/store';
 	import ImagesPage from './ImagesPage.svelte';
+	import { get } from 'svelte/store';
+	import { onMount } from 'svelte';
 
 	// Images live here as a tab (infra view), keeping the sidebar focused.
 	const tabs = ['containers', 'images'] as const;
 	type Tab = (typeof tabs)[number];
 	let activeTab = $state<Tab>('containers');
+
+	// Honor the legacy `/images` alias: when the router flagged that we arrived
+	// via it, open on the Images tab. Consumed once and cleared so manual tab
+	// switches afterwards are unaffected.
+	onMount(() => {
+		const initial = get(containersInitialTab);
+		if (initial) {
+			activeTab = initial;
+			containersInitialTab.set(null);
+		}
+	});
 
 	// Instance-aware: list and mutate containers on the host picked in the
 	// sidebar, not always the local one (audit-stack-container C2). Recomputed

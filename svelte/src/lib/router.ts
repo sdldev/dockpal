@@ -2,7 +2,7 @@
 // SPA supports clean deep links (/dashboard, /fleet, /containers/:id) and
 // back/forward navigation — replacing the legacy Alpine router.
 import { writable } from 'svelte/store';
-import { currentPage } from './store';
+import { currentPage, containersInitialTab } from './store';
 
 export interface RouteParams {
 	id?: string;
@@ -56,7 +56,12 @@ export function pathToPage(path: string): { page: string; params: RouteParams } 
 	}
 
 	const base = '/' + parts[0];
-	if (legacyAliases[base]) return { page: legacyAliases[base], params: {} };
+	if (legacyAliases[base]) {
+		// The `/images` alias lands on the Containers page; flag it so the page
+		// opens on the Images tab rather than the default Containers tab.
+		containersInitialTab.set(base === '/images' ? 'images' : null);
+		return { page: legacyAliases[base], params: {} };
+	}
 
 	const entry = Object.entries(pagePaths).find(([, p]) => p === base);
 	if (entry) return { page: entry[0], params: {} };

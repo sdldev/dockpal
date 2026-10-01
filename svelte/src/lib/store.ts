@@ -59,6 +59,11 @@ export interface SystemUpdateBadge {
 }
 export const systemUpdateBadge = writable<SystemUpdateBadge | null>(null);
 
+// Initial tab for the Containers page, set when arriving via the legacy
+// `/images` alias so old bookmarks land on the Images tab (not the default
+// Containers tab). Consumed and cleared by ContainersPage on mount.
+export const containersInitialTab = writable<'containers' | 'images' | null>(null);
+
 // Template staged for a new stack (Stacks → Catalog → "New stack from this").
 // ComposePage consumes and clears it in add-mode.
 export const pendingTemplate = writable<Template | null>(null);

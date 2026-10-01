@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import Button from '../ui/Button.svelte';
   import { api, getToken } from '../../lib/api/client';
-  import { addToast } from '../../lib/store';
+  import { addToast, currentStackName } from '../../lib/store';
   import { navigate } from '../../lib/router';
   import { buildCustomCompose, type CustomEnvRow, type CustomPortRow, type CustomVolumeRow } from '../../lib/compose-builder';
   import type { Template } from '../../lib/types/api';
@@ -246,22 +246,43 @@
     socket = new WebSocket(wsUrl);
     socket.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as { message?: string; status?: string; done?: boolean };
+        // The backend streams DeployEvent { step, message, status, time }.
+        // Terminal success is { step: "complete", status: "done" }; failures
+        // arrive as status: "error" events before the stream closes. There is
+        // no `done` boolean field, so match on step/status — not data.done.
+        const data = JSON.parse(event.data) as { step?: string; message?: string; status?: string; time?: string };
         if (data.message) addLog(data.message, data.status || 'info');
-        if (data.done) {
-          addLog('Deployment complete', 'done');
+
+        if (data.status === 'error') {
+          deployError = data.message ?? 'Deployment failed';
+          addToast(deployError, 'error');
+          deploying = false;
+          return;
+        }
+
+        if (data.step === 'complete' && data.status === 'done') {
           deploying = false;
           addToast(`${serviceName} deployed`, 'success');
           socket?.close();
+          // Auto-close the modal and take the user to the new stack so the
+          // outcome is unambiguous (per UX report: the modal used to linger).
+          currentStackName.set(serviceName);
+          ondone();
+          navigate('compose');
         }
       } catch {
         addLog(String(event.data));
       }
     };
     socket.onclose = () => {
+      // If the stream closes while still "deploying" and we never saw a
+      // terminal event, treat it as a failure rather than silently resetting —
+      // otherwise a crashed deploy looks identical to a success-without-toast.
       if (deploying) {
         deploying = false;
-        addLog('Log stream closed');
+        deployError = 'Connection to the deploy stream closed before completion.';
+        addLog('Log stream closed before completion', 'error');
+        addToast('Deploy stream closed unexpectedly', 'error');
       }
     };
     socket.onerror = () => {
