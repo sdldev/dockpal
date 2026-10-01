@@ -61,13 +61,17 @@
 	let extraPublicKeys = $state('');
 	let selectedExtraKeyIDs = $state<string[]>([]);
 	let confirmOpen = $state(false);
+	let confirmApply = $state(false);
 	let socket: WebSocket | null = null;
 	// Live detected state.
 	let secState = $state<SecState | null>(null);
 	let secError = $state('');
 	let secChecking = $state(false);
-	// Pending control toggle awaiting confirmation.
-	let pendingControl = $state<{ control: string; enabled: boolean } | null>(null);
+	// Toggle model: the desired end state, seeded from detection; Apply
+	// converges the server to it. Undefined until detection has run.
+	let wantPasswordAuth = $state<boolean | undefined>(undefined);
+	let wantRootLogin = $state<boolean | undefined>(undefined);
+	let wantFail2ban = $state<boolean | undefined>(undefined);
 
 	$effect(() => {
 		if (open) {
@@ -75,6 +79,7 @@
 			secJob = 'idle';
 			logs = [];
 			confirmOpen = false;
+			confirmApply = false;
 			extraPublicKeys = '';
 			selectedExtraKeyIDs = [];
 			secState = instance
@@ -107,6 +112,13 @@
 			);
 			secState = res.security;
 			secError = res.error ?? '';
+			// Seed the switches once; later detections only refresh the
+			// readout, not the operator's half-set toggles.
+			if (wantPasswordAuth === undefined) {
+				wantPasswordAuth = res.security.password_auth !== 'no';
+				wantRootLogin = res.security.root_login !== 'no';
+				wantFail2ban = res.security.fail2ban === 'active';
+			}
 		} catch (e) {
 			secError = e instanceof Error ? e.message : 'Security check failed';
 		} finally {
@@ -175,20 +187,29 @@
 		}
 	}
 
-	// ---- security controls ----
-	function askControl(control: string, enabled: boolean) {
-		pendingControl = { control, enabled };
-	}
+	// ---- security controls (toggle model) ----
+	const togglesReady = $derived(
+		wantPasswordAuth !== undefined && wantRootLogin !== undefined && wantFail2ban !== undefined
+	);
+	const togglesDirty = $derived(
+		togglesReady &&
+			secState !== null &&
+			(wantPasswordAuth !== (secState.password_auth !== 'no') ||
+				wantRootLogin !== (secState.root_login !== 'no') ||
+				wantFail2ban !== (secState.fail2ban === 'active'))
+	);
 
-	async function startControl() {
-		if (!instance || !pendingControl || busy) return;
-		const { control, enabled } = pendingControl;
-		pendingControl = null;
+	async function applyState() {
+		if (!instance || !togglesReady || busy) return;
 		secJob = 'running';
 		logSource = 'security';
 		logs = [];
 		try {
-			await api.post(`/instances/${instance.id}/security`, { control, enabled });
+			await api.post(`/instances/${instance.id}/security`, {
+				password_auth: wantPasswordAuth,
+				root_login: wantRootLogin,
+				fail2ban: wantFail2ban
+			});
 			await openLogStream('security');
 		} catch (e) {
 			secJob = 'failed';
@@ -282,38 +303,59 @@
 				{/if}
 			</div>
 
-			<!-- Controls -->
+			<!-- Controls (toggle model: set the switches, then Apply) -->
 			<div class="space-y-2">
-				<h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Controls</h4>
-				<div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-					<Button
-						variant="secondary"
-						size="sm"
-						disabled={busy || secChecking}
-						onclick={() => askControl('password_auth', secState?.password_auth === 'no')}
-					>
-						{secState?.password_auth === 'no' ? 'Re-enable password login' : 'Disable password login'}
-					</Button>
-					<Button
-						variant="secondary"
-						size="sm"
-						disabled={busy || secChecking}
-						onclick={() => askControl('root_login', secState?.root_login === 'no')}
-					>
-						{secState?.root_login === 'no' ? 'Allow root login (default)' : 'Disable root login'}
-					</Button>
-					<Button
-						variant="secondary"
-						size="sm"
-						disabled={busy || secChecking}
-						onclick={() => askControl('fail2ban', secState?.fail2ban !== 'active')}
-					>
-						{secState?.fail2ban === 'active' ? 'Disable fail2ban' : 'Install & enable fail2ban'}					</Button>
+				<div class="flex items-center justify-between">
+					<h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Controls</h4>
+					{#if togglesDirty}
+						<span class="text-[11px] text-amber-400">unsaved changes</span>
+					{/if}
+				</div>
+				<div class="divide-y divide-zinc-800/60 rounded-sm border border-zinc-800/60 bg-zinc-950/40">
+					<label class="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer">
+						<span>
+							<span class="block text-sm text-zinc-200">Password login</span>
+							<span class="block text-xs text-zinc-600">allow SSH passwords for this server</span>
+						</span>
+						<input
+							type="checkbox"
+							checked={wantPasswordAuth}
+							disabled={busy || secChecking || wantPasswordAuth === undefined}
+							onchange={(e) => (wantPasswordAuth = e.currentTarget.checked)}
+							class="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-zinc-700 checked:bg-green-600 transition-colors relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-transform checked:before:translate-x-4"
+						/>
+					</label>
+					<label class="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer">
+						<span>
+							<span class="block text-sm text-zinc-200">Root login</span>
+							<span class="block text-xs text-zinc-600">PermitRootLogin no when off — needs a non-root key user first</span>
+						</span>
+						<input
+							type="checkbox"
+							checked={wantRootLogin}
+							disabled={busy || secChecking || wantRootLogin === undefined}
+							onchange={(e) => (wantRootLogin = e.currentTarget.checked)}
+							class="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-zinc-700 checked:bg-green-600 transition-colors relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-transform checked:before:translate-x-4"
+						/>
+					</label>
+					<label class="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer">
+						<span>
+							<span class="block text-sm text-zinc-200">fail2ban</span>
+							<span class="block text-xs text-zinc-600">brute-force protection (sshd jail, maxretry=5, bantime=10m)</span>
+						</span>
+						<input
+							type="checkbox"
+							checked={wantFail2ban}
+							disabled={busy || secChecking || wantFail2ban === undefined}
+							onchange={(e) => (wantFail2ban = e.currentTarget.checked)}
+							class="h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-zinc-700 checked:bg-green-600 transition-colors relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition-transform checked:before:translate-x-4"
+						/>
+					</label>
 				</div>
 				<p class="text-xs text-zinc-600">
-					Changes edit sshd via a Dockpal drop-in, validate with <span class="font-mono">sshd -t</span>, verify
-					the effective config, then reload. Disabling password login is proven from the outside when the old
-					password is still known.
+					Apply converges the server to these switches: sshd changes go through one drop-in write,
+					<span class="font-mono">sshd -t</span> + effective-config check + reload; only differences vs the
+					detected state are touched.
 				</p>
 			</div>
 
@@ -430,8 +472,20 @@
 
 			<div class="flex justify-end gap-2 pt-1">
 				<Button variant="secondary" size="sm" onclick={close}>Close</Button>
+				{#if secJob === 'running'}
+					<Button variant="secondary" size="sm" loading={true}>Applying…</Button>
+				{:else}
+					<Button
+						variant="secondary"
+						size="sm"
+						disabled={!togglesDirty || busy}
+						onclick={() => (confirmApply = true)}
+					>
+						Apply
+					</Button>
+				{/if}
 				{#if phase !== 'running'}
-					<Button variant="primary" size="sm" disabled={!canStart} onclick={() => (confirmOpen = true)}>
+					<Button variant="primary" size="sm" disabled={!canStart || busy} onclick={() => (confirmOpen = true)}>
 						{isHardened ? 'Re-run hardening' : 'Install key & disable password login'}
 					</Button>
 				{:else}
@@ -453,23 +507,11 @@
 />
 
 <ConfirmDialog
-	open={pendingControl !== null}
-	title="Server security change"
-	message={
-		pendingControl?.control === 'password_auth'
-			? pendingControl?.enabled
-				? `Re-enable password authentication on "${displayName}"? The Dockpal drop-in is removed and the server's own sshd config decides again.`
-				: `Disable password authentication on "${displayName}"? The change is validated with sshd -t and the effective config, then proven from the outside when possible. Keep provider console access as a fallback.`
-			: pendingControl?.control === 'root_login'
-				? pendingControl?.enabled
-					? `Stop managing root login on "${displayName}"? The server's own sshd default applies again.`
-					: `Disable root login on "${displayName}" (PermitRootLogin no)? Make sure a non-root user with keys exists.`
-				: pendingControl?.enabled
-					? `Install and enable fail2ban on "${displayName}" with an sshd jail (maxretry=5, bantime=10m)?`
-					: `Disable fail2ban on "${displayName}"? The package stays installed.`
-	}
-	confirmLabel="Apply"
+	open={confirmApply}
+	title="Apply security changes"
+	message={`Converge "${displayName}" to the selected state? Only the differences vs the detected state are applied — sshd edits are validated and reloaded, and disabling password login is verified from the outside when possible. Keep provider console access as a fallback.`}
+	confirmLabel="Apply changes"
 	busy={secJob === 'running'}
-	onconfirm={startControl}
-	onclose={() => (pendingControl = null)}
+	onconfirm={applyState}
+	onclose={() => (confirmApply = false)}
 />

@@ -127,15 +127,17 @@ func handleDetectSecurity(database *db.DB, jwtSecret string) gin.HandlerFunc {
 	}
 }
 
-// SecurityControlRequest asks for one control change.
-type SecurityControlRequest struct {
-	Control string `json:"control" binding:"required,oneof=password_auth root_login fail2ban"`
-	Enabled *bool  `json:"enabled" binding:"required"`
+// SecurityApplyRequest is the desired end state of all three controls (the
+// UI's toggle model: set the switches, then Apply once).
+type SecurityApplyRequest struct {
+	PasswordAuth *bool `json:"password_auth" binding:"required"`
+	RootLogin    *bool `json:"root_login" binding:"required"`
+	Fail2ban     *bool `json:"fail2ban" binding:"required"`
 }
 
-// handleApplySecurity starts a background job applying one control change.
-// Shares the in-flight map with hardening: two concurrent sshd-rewriting
-// jobs on one instance would interleave writes and rollbacks.
+// handleApplySecurity starts a background job converging the server to the
+// requested state. Shares the in-flight map with hardening: two concurrent
+// sshd-rewriting jobs on one instance would interleave writes and rollbacks.
 func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *InstallLogsManager, running *sync.Map) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("instance_id")
@@ -143,7 +145,7 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 			c.JSON(http.StatusBadRequest, gin.H{"error": "the local instance is not managed over SSH"})
 			return
 		}
-		var req SecurityControlRequest
+		var req SecurityApplyRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request: %v", err)})
 			return
@@ -177,7 +179,7 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 		// Disabling password auth can be verified end-to-end when the panel
 		// still holds the old password.
 		testPassword := ""
-		if req.Control == "password_auth" && !*req.Enabled && len(inst.SSHPasswordEncrypted) > 0 {
+		if !*req.PasswordAuth && len(inst.SSHPasswordEncrypted) > 0 {
 			if plain, derr := registry.Decrypt(inst.SSHPasswordEncrypted, cryptoKey); derr == nil {
 				testPassword = string(plain)
 			}
@@ -191,11 +193,12 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 		sessionKey := securitySessionKey(id)
 		logsManager.RemoveSession(sessionKey)
 		LogAudit(c, database, "instance.security", id, "success",
-			fmt.Sprintf("Security change: control=%s enabled=%t on %s:%d", req.Control, *req.Enabled, host, port))
+			fmt.Sprintf("Security apply: password_auth=%t root_login=%t fail2ban=%t on %s:%d", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, host, port))
 
 		update := ssh.SecurityUpdate{
-			Control:      req.Control,
-			Enabled:      *req.Enabled,
+			PasswordAuth: *req.PasswordAuth,
+			RootLogin:    *req.RootLogin,
+			Fail2ban:     *req.Fail2ban,
 			TestPassword: testPassword,
 		}
 
@@ -203,7 +206,7 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 			defer running.Delete(id)
 			defer logsManager.CompleteSession(sessionKey)
 			lw := &logWriter{instanceID: sessionKey, mgr: logsManager}
-			logsManager.WriteLogf(sessionKey, "[Dockpal Security] Applying %s (enabled=%t) on %s:%d...\n", req.Control, *req.Enabled, host, port)
+			logsManager.WriteLogf(sessionKey, "[Dockpal Security] Applying desired state (password_auth=%t root_login=%t fail2ban=%t) on %s:%d...\n", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, host, port)
 
 			if err := ssh.ApplySecurity(host, port, user, authType, secret, "", update, lw); err != nil {
 				log.Printf("Security update on instance %s failed: %v", id, err)

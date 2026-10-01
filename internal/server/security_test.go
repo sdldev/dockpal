@@ -48,31 +48,18 @@ func TestDetectSecurity_NoStoredCredentials(t *testing.T) {
 	}
 }
 
-func TestApplySecurity_InvalidControlRejected(t *testing.T) {
+func TestApplySecurity_MissingFieldsRejected(t *testing.T) {
 	database := newTestDB(t)
 	hardenTestInstance(t, database, "inst-sec", true)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), &sync.Map{}))
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/instances/inst-sec/security", bytes.NewBufferString(`{"control":"reboot","enabled":true}`))
+	// fail2ban missing — all three toggles are required (desired-state model).
+	req := httptest.NewRequest(http.MethodPost, "/instances/inst-sec/security", bytes.NewBufferString(`{"password_auth":false,"root_login":true}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for unknown control, got %d", w.Code)
-	}
-}
-
-func TestApplySecurity_EnabledRequired(t *testing.T) {
-	database := newTestDB(t)
-	hardenTestInstance(t, database, "inst-sec2", true)
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), &sync.Map{}))
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/instances/inst-sec2/security", bytes.NewBufferString(`{"control":"password_auth"}`))
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 without enabled, got %d", w.Code)
+		t.Fatalf("expected 400 for missing toggles, got %d", w.Code)
 	}
 }
 
@@ -85,7 +72,7 @@ func TestApplySecurity_ConflictsWithHardenJob(t *testing.T) {
 	r := gin.New()
 	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), running))
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/instances/inst-busy-sec/security", bytes.NewBufferString(`{"control":"fail2ban","enabled":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/instances/inst-busy-sec/security", bytes.NewBufferString(`{"password_auth":false,"root_login":false,"fail2ban":true}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409 while another job runs, got %d", w.Code)

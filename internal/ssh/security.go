@@ -87,10 +87,13 @@ func sudoWrap(sudo bool, cmd string) string {
 	return " " + cmd
 }
 
-// SecurityUpdate describes one control change.
+// SecurityUpdate describes the DESIRED end state of all three controls (the
+// UI's toggle model). Only differences vs the current state are applied, in
+// one sshd rewrite + one reload where possible.
 type SecurityUpdate struct {
-	Control string // "password_auth" | "root_login" | "fail2ban"
-	Enabled bool
+	PasswordAuth bool // true = passwords allowed, false = disabled (key-only)
+	RootLogin    bool // true = unmanaged (server default), false = PermitRootLogin no
+	Fail2ban     bool // true = installed and running, false = stopped
 	// TestPassword, when disabling password auth and the panel knows the old
 	// password, is used to verify rejection from the outside post-reload.
 	TestPassword string
@@ -122,18 +125,37 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 	defer client.Close()
 	step("Connected.")
 
+	// Establish what the server looks like NOW so we only change what the
+	// operator actually toggled.
+	current, err := detectEffective(client, sudo)
+	if err != nil {
+		return fmt.Errorf("failed to read the current security state: %w", err)
+	}
+	step("Current: password_auth=%s root_login=%s fail2ban=%s", current.PasswordAuth, current.RootLogin, current.Fail2ban)
 	mode, err := configMode(client, sudo)
 	if err != nil {
 		return err
 	}
 
-	switch update.Control {
-	case "password_auth":
-		lines := securityDropInLines(!update.Enabled, "")
+	// --- sshd controls (password auth + root login share one drop-in) ---
+	currentPWOff := current.PasswordAuth == "no"
+	wantPWOff := !update.PasswordAuth
+	// Root: current "no" maps to managed-off; anything else (yes / prohibit /
+	// unknown) is treated as not-managed-by-us.
+	currentRootOff := current.RootLogin == "no"
+	wantRootOff := !update.RootLogin
+	if currentPWOff != wantPWOff || currentRootOff != wantRootOff {
+		// Off → manage with PermitRootLogin no; on → unmanage ("" removes
+		// the line so the server's own default applies).
+		rootLine := "no"
+		if !wantRootOff {
+			rootLine = ""
+		}
+		lines := securityDropInLines(wantPWOff, rootLine)
 		if err := applyDropInState(client, sudo, mode, lines, w); err != nil {
 			return err
 		}
-		if !update.Enabled {
+		if wantPWOff {
 			// Prove the outcome end-to-end when we know the old password —
 			// same rule as hardening: no claim without outside evidence.
 			if update.TestPassword != "" {
@@ -143,28 +165,21 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 				step("Password login rejected — verified.")
 			}
 		}
-	case "root_login":
-		rootLine := "no"
-		if update.Enabled {
-			// Unmanage: the server's own default applies again.
-			rootLine = ""
-		}
-		lines := securityDropInLines(false, rootLine)
-		if err := applyDropInState(client, sudo, mode, lines, w); err != nil {
+	} else {
+		step("sshd already in the desired state — no config change needed.")
+	}
+
+	// --- fail2ban ---
+	if update.Fail2ban && current.Fail2ban != "active" {
+		if err := enableFail2ban(client, sudo, w); err != nil {
 			return err
 		}
-	case "fail2ban":
-		if update.Enabled {
-			if err := enableFail2ban(client, sudo, w); err != nil {
-				return err
-			}
-		} else {
-			if err := disableFail2ban(client, sudo, w); err != nil {
-				return err
-			}
+	} else if !update.Fail2ban && current.Fail2ban == "active" {
+		if err := disableFail2ban(client, sudo, w); err != nil {
+			return err
 		}
-	default:
-		return fmt.Errorf("unknown security control %q", update.Control)
+	} else {
+		step("fail2ban already in the desired state.")
 	}
 
 	state, derr := detectEffective(client, sudo)
@@ -297,20 +312,25 @@ func enableFail2ban(client *cryptossh.Client, sudo bool, w io.Writer) error {
 	// which does not exist on Ubuntu → exit 1 → the whole job failed even
 	// though fail2ban had just installed fine (seen live on vps-media).
 	install := s + "sh -c " + shellQuote(
-		"if command -v apt-get >/dev/null 2>&1; then apt-get install -y fail2ban; " +
-			"elif command -v dnf >/dev/null 2>&1; then dnf install -y fail2ban; " +
-			"elif command -v yum >/dev/null 2>&1; then yum install -y fail2ban; " +
+		"if command -v apt-get >/dev/null 2>&1; then apt-get install -y fail2ban; "+
+			"elif command -v dnf >/dev/null 2>&1; then dnf install -y fail2ban; "+
+			"elif command -v yum >/dev/null 2>&1; then yum install -y fail2ban; "+
 			"else echo 'no supported package manager found (apt/dnf/yum)' >&2; exit 1; fi")
 	if err := runCommand(client, install, w); err != nil {
 		return fmt.Errorf("failed to install fail2ban: %w", err)
 	}
 	fmt.Fprintln(w, "[Dockpal Security] Writing the Dockpal sshd jail...")
-	// systemd backend only when systemd is actually PID 1 — the mere
-	// presence of the systemctl binary made fail2ban watch a journal that
-	// does not exist and die right after start (non-systemd containers).
-	backend := "auto"
+	// Backend selection decides whether fail2ban can even start:
+	//   - systemd (read journald) when journald answers — the standard case
+	//     on real servers (Ubuntu 20.04+/Debian 11+ with rsyslog often gone);
+	//   - polling on /var/log/auth.log otherwise (containers without
+	//     systemd): backend "auto" still validates the DEFAULT logpath at
+	//     startup and dies with "Have not found any log file for sshd jail"
+	//     when /var/log/auth.log does not exist — forcing the log file here
+	//     is what keeps non-systemd hosts workable when rsyslog runs.
+	backend := "polling\nlogpath = /var/log/auth.log"
 	var sysd strings.Builder
-	if runCommandTo(client, "test -d /run/systemd/system && echo yes", &sysd) == nil &&
+	if runCommandTo(client, "journalctl -n 1 -q --no-pager >/dev/null 2>&1 && echo yes", &sysd) == nil &&
 		strings.Contains(sysd.String(), "yes") {
 		backend = "systemd"
 	}
