@@ -99,6 +99,12 @@ type Instance struct {
 	SSHHardeningStatus string `json:"ssh_hardening_status,omitempty"`
 	SSHHardenedAt      int64  `json:"ssh_hardened_at,omitempty"`
 	SSHKeyFingerprint  string `json:"ssh_key_fingerprint,omitempty"`
+	// SSHPublicKey is the public half of the panel's own management keypair,
+	// generated at create time. Shown to the operator to authorize on the
+	// server (ssh-copy-id style) before installing — the panel then connects
+	// with its own key and no operator secret is needed. The private half
+	// lives in SSHKeyEncrypted.
+	SSHPublicKey string `json:"ssh_public_key,omitempty"`
 }
 
 type DB struct {

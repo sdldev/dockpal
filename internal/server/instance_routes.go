@@ -54,6 +54,10 @@ type InstanceResponse struct {
 	SSHHardeningStatus string `json:"ssh_hardening_status,omitempty"`
 	SSHHardenedAt      int64  `json:"ssh_hardened_at,omitempty"`
 	SSHKeyFingerprint  string `json:"ssh_key_fingerprint,omitempty"`
+	// Panel-generated keypair (Phase 1 bootstrap): the public half is not a
+	// secret and is shown so the operator can authorize it before install.
+	SSHPublicKey       string `json:"ssh_public_key,omitempty"`
+	SSHKeySetupCommand string `json:"ssh_key_setup_command,omitempty"`
 }
 
 type InstanceListItem struct {
@@ -178,6 +182,22 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			port = 9273
 		}
 
+		// Generate the panel's dedicated management keypair NOW, at create
+		// time: the public half is shown so the operator can authorize it on
+		// the server (ssh-copy-id style) BEFORE the install — then the panel
+		// connects with its own key and no operator password or private key
+		// is ever needed.
+		panelPub, panelPriv, panelFP, err := ssh.GenerateKeyPair("dockpal-" + instanceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate panel SSH key"})
+			return
+		}
+		encPanelKey, err := registry.Encrypt([]byte(panelPriv), cryptoKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt panel SSH key"})
+			return
+		}
+
 		// Create instance record
 		instance := db.Instance{
 			ID:                  instanceID,
@@ -189,6 +209,9 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			AgentTokenEncrypted: encryptedToken,
 			Status:              "enrolling",
 			CreatedAt:           time.Now().Unix(),
+			SSHKeyEncrypted:     encPanelKey,
+			SSHPublicKey:        panelPub,
+			SSHKeyFingerprint:   panelFP,
 		}
 
 		if err := database.SaveInstance(instance); err != nil {
@@ -203,16 +226,26 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 		installCmd := generateInstallCommand(req.Mode, serverHost, token)
 
 		c.JSON(http.StatusCreated, InstanceResponse{
-			ID:             instanceID,
-			Name:           req.Name,
-			Host:           req.Host,
-			Port:           port,
-			Mode:           req.Mode,
-			Status:         "enrolling",
-			CreatedAt:      instance.CreatedAt,
-			InstallCommand: installCmd,
+			ID:                 instanceID,
+			Name:               req.Name,
+			Host:               req.Host,
+			Port:               port,
+			Mode:               req.Mode,
+			Status:             "enrolling",
+			CreatedAt:          instance.CreatedAt,
+			InstallCommand:     installCmd,
+			SSHPublicKey:       panelPub,
+			SSHKeyFingerprint:  panelFP,
+			SSHKeySetupCommand: generatePanelKeySetupCommand(panelPub),
 		})
 	}
+}
+
+// generatePanelKeySetupCommand builds the one-liner the operator runs ON the
+// new server (directly, via provider console, or through cloud-init) to
+// authorize the panel's public key — the ssh-copy-id equivalent.
+func generatePanelKeySetupCommand(pubLine string) string {
+	return fmt.Sprintf(`ssh user@your-server "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"`, pubLine)
 }
 
 // handleListInstances returns all instances with summary fields.
@@ -294,6 +327,8 @@ func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			SSHHardeningStatus: inst.SSHHardeningStatus,
 			SSHHardenedAt:      inst.SSHHardenedAt,
 			SSHKeyFingerprint:  inst.SSHKeyFingerprint,
+			SSHPublicKey:       inst.SSHPublicKey,
+			SSHKeySetupCommand: generatePanelKeySetupCommand(inst.SSHPublicKey),
 		})
 	}
 }
@@ -580,13 +615,13 @@ func generateInstallCommand(mode, serverHost, token string) string {
 }
 
 type InstallAgentRequest struct {
-	SSHHost     string `json:"ssh_host" binding:"required"`
-	SSHPort     int    `json:"ssh_port"`
-	SSHUser     string `json:"ssh_user"`
-	SSHAuthType string `json:"ssh_auth_type" binding:"required,oneof=password key"`
+	SSHHost       string `json:"ssh_host" binding:"required"`
+	SSHPort       int    `json:"ssh_port"`
+	SSHUser       string `json:"ssh_user"`
+	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key panel_key"`
 	// SSHSecret is the ad-hoc credential (password or pasted private key).
 	// Mutually exclusive with SSHKeyID — exactly one must be set.
-	SSHSecret string `json:"ssh_secret"`
+	SSHSecret     string `json:"ssh_secret"`
 	// SSHKeyID references a saved SSH key (Settings → Administration → SSH
 	// Keys); the handler resolves and decrypts it. Requires key auth.
 	SSHKeyID      string `json:"ssh_key_id"`
@@ -656,10 +691,29 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 		// 128-char token that can never match, breaking every edge install.
 		token := string(tokenBytes)
 
-		// Credential: either an ad-hoc secret (password / pasted key) or a
-		// saved SSH key reference — exactly one must be provided.
+		// Credential resolution by auth type:
+		//   panel_key — the keypair the panel generated at create time; the
+		//     operator already authorized its public half on the server. No
+		//     secret travels in the request at all.
+		//   key — an ad-hoc pasted private key or a legacy saved private key.
+		//   password — bootstrap password.
 		sshSecret := req.SSHSecret
-		if req.SSHKeyID != "" {
+		if req.SSHAuthType == "panel_key" {
+			if req.SSHKeyID != "" || strings.TrimSpace(sshSecret) != "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "panel_key auth takes no ssh_secret or ssh_key_id"})
+				return
+			}
+			if len(inst.SSHKeyEncrypted) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "this instance has no panel key — create a new server or use password auth"})
+				return
+			}
+			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+			if derr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
+				return
+			}
+			sshSecret = string(plain)
+		} else if req.SSHKeyID != "" {
 			if req.SSHAuthType != "key" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_key_id requires key auth"})
 				return
@@ -697,13 +751,22 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 		if inst.SSHUser == "" {
 			inst.SSHUser = "root"
 		}
-		inst.SSHAuthType = req.SSHAuthType
-		if req.SSHAuthType == "key" {
+		switch req.SSHAuthType {
+		case "panel_key":
+			// The stored key IS the credential — keep it as-is and never
+			// keep a password alongside it.
+			inst.SSHAuthType = "key"
+			inst.SSHPasswordEncrypted = nil
+		case "key":
+			inst.SSHAuthType = "key"
 			inst.SSHKeyEncrypted = encryptedSecret
 			inst.SSHPasswordEncrypted = nil
-		} else {
+		default:
+			inst.SSHAuthType = "password"
 			inst.SSHPasswordEncrypted = encryptedSecret
-			inst.SSHKeyEncrypted = nil
+			// The panel key generated at create time stays stored: hardening
+			// installs exactly that key when disabling passwords, so the
+			// instance keeps a single panel key for its whole life.
 		}
 		inst.Status = "enrolling"
 
@@ -736,11 +799,17 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 				agentImg = "ghcr.io/sdldev/dockpal-agent:latest"
 			}
 
+			// The installer only knows "password" and "key" — panel_key IS key
+			// auth (the panel's own generated keypair resolved above).
+			installAuthType := req.SSHAuthType
+			if installAuthType == "panel_key" {
+				installAuthType = "key"
+			}
 			params := ssh.InstallParams{
 				Host:            req.SSHHost,
 				Port:            req.SSHPort,
 				User:            req.SSHUser,
-				AuthType:        req.SSHAuthType,
+				AuthType:        installAuthType,
 				AuthSecret:      sshSecret,
 				InstallDocker:   req.InstallDocker,
 				Mode:            inst.Mode,
@@ -853,6 +922,9 @@ type HardenSSHRequest struct {
 	// operator's own machine loses shell access once passwords are disabled —
 	// only the panel's key remains. Each line must parse as a public key.
 	ExtraPublicKeys []string `json:"extra_public_keys"`
+	// ExtraKeyIDs references saved PUBLIC keys (Settings → Administration →
+	// SSH Keys) to install alongside — the picker alternative to pasting.
+	ExtraKeyIDs []string `json:"extra_key_ids"`
 }
 
 // handleHardenSSH starts the SSH hardening job: install a key, verify key
@@ -932,9 +1004,13 @@ func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogs
 			user = "root"
 		}
 
-		// The key that will remain on the server: a chosen saved key, or by
-		// default a fresh keypair dedicated to this instance (one leaked key
-		// must not unlock the rest of the fleet).
+		// The key that will remain on the server, in priority order:
+		//   1. a chosen saved key,
+		//   2. the key the panel already holds for this instance — either
+		//      the credential it connects with (key auth) or the panel key
+		//      generated at create time (password bootstrap). One key per
+		//      instance for its whole life, no orphans,
+		//   3. a fresh keypair (instances created before panel keys existed).
 		privKeyPEM := authSecret
 		var pubKey, fingerprint string
 		if req.SSHKeyID != "" {
@@ -949,6 +1025,23 @@ func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogs
 				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
 				return
 			}
+		} else if authType == "key" {
+			// The credential we just connected with — already installed.
+			pubKey, fingerprint, err = ssh.PublicKeyFromPrivate(privKeyPEM)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		} else if len(inst.SSHKeyEncrypted) > 0 && strings.TrimSpace(inst.SSHPublicKey) != "" {
+			// Password bootstrap, but the panel key already exists: install it.
+			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+			if derr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
+				return
+			}
+			privKeyPEM = string(plain)
+			pubKey = strings.TrimSpace(inst.SSHPublicKey)
+			fingerprint = inst.SSHKeyFingerprint
 		} else {
 			pub, priv, fp, gerr := ssh.GenerateKeyPair("dockpal-" + id)
 			if gerr != nil {
@@ -969,6 +1062,14 @@ func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogs
 			}
 			if err := ssh.ValidatePublicKeyLine(line); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid public key %q: %v", truncateForLog(line), err)})
+				return
+			}
+			extraKeys = append(extraKeys, line)
+		}
+		for _, keyID := range req.ExtraKeyIDs {
+			line, rerr := resolveSSHPublicLine(database, cryptoKey, keyID)
+			if rerr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
 				return
 			}
 			extraKeys = append(extraKeys, line)

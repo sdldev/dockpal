@@ -43,7 +43,9 @@
 	let selectedKeyID = $state('');
 	// The operator's own public key(s) — without one, their own PC loses shell
 	// access the moment password auth is disabled (only the panel key remains).
+	// Pick saved public keys and/or paste ad-hoc lines.
 	let extraPublicKeys = $state('');
+	let selectedExtraKeyIDs = $state<string[]>([]);
 	let confirmOpen = $state(false);
 	let socket: WebSocket | null = null;
 
@@ -53,8 +55,11 @@
 			logs = [];
 			confirmOpen = false;
 			extraPublicKeys = '';
+			selectedExtraKeyIDs = [];
 			listSSHKeys()
-				.then((keys) => (savedKeys = keys))
+				.then((keys) => {
+					savedKeys = keys.filter((k) => k.secret_type === 'public');
+				})
 				.catch(() => (savedKeys = []));
 		}
 	});
@@ -82,18 +87,28 @@
 		onclose();
 	}
 
+	function toggleExtraKey(id: string) {
+		selectedExtraKeyIDs = selectedExtraKeyIDs.includes(id)
+			? selectedExtraKeyIDs.filter((x) => x !== id)
+			: [...selectedExtraKeyIDs, id];
+	}
+
 	async function start() {
 		if (!instance || !canStart) return;
 		confirmOpen = false;
 		phase = 'running';
 		logs = [];
 		try {
+			const savedLines = selectedExtraKeyIDs
+				.map((id) => savedKeys.find((k) => k.id === id)?.public_key?.trim())
+				.filter((l): l is string => !!l);
+			const pastedLines = extraPublicKeys
+				.split('\n')
+				.map((l) => l.trim())
+				.filter(Boolean);
 			await api.post(`/instances/${instance.id}/harden`, {
 				ssh_key_id: keySource === 'saved' ? selectedKeyID : undefined,
-				extra_public_keys: extraPublicKeys
-					.split('\n')
-					.map((l) => l.trim())
-					.filter(Boolean)
+				extra_public_keys: [...savedLines, ...pastedLines]
 			});
 			await openLogStream();
 		} catch (e) {
@@ -213,20 +228,36 @@
 
 			<!-- Operator's own key: keeps their PC able to log in after hardening -->
 			<div>
-				<label for="harden-extra-keys" class="block text-xs font-medium text-zinc-400 mb-1">
+				<span class="block text-xs font-medium text-zinc-400 mb-1">
 					Your public key <span class="text-zinc-600">(recommended)</span>
-				</label>
+				</span>
+				{#if savedKeys.length > 0}
+					<div class="flex flex-wrap gap-2 mb-2">
+						{#each savedKeys as k (k.id)}
+							<button
+								type="button"
+								disabled={phase !== 'idle'}
+								onclick={() => toggleExtraKey(k.id)}
+								class={`text-xs px-2 py-1 rounded-sm border font-mono transition-colors ${selectedExtraKeyIDs.includes(k.id) ? 'bg-blue-600/20 border-blue-600 text-blue-300' : 'bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+								title={k.fingerprint}
+							>
+								{selectedExtraKeyIDs.includes(k.id) ? '✓' : '+'} {k.name}
+							</button>
+						{/each}
+					</div>
+				{/if}
 				<textarea
 					id="harden-extra-keys"
 					bind:value={extraPublicKeys}
 					disabled={phase !== 'idle'}
 					rows="2"
-					placeholder="ssh-ed25519 AAAA... you@your-pc"
+					placeholder={'ssh-ed25519 AAAA... you@your-pc (one per line — from cat ~/.ssh/id_ed25519.pub)'}
 					class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600"
 				></textarea>
 				<p class="text-xs text-zinc-600 mt-1">
-					Paste the output of <span class="font-mono text-zinc-400">cat ~/.ssh/id_ed25519.pub</span> from
-					your own machine — without it, only Dockpal can log in after passwords are disabled.
+					Pick a saved key above or paste the output of
+					<span class="font-mono text-zinc-400">cat ~/.ssh/id_ed25519.pub</span> from your own
+					machine — without it, only Dockpal can log in after passwords are disabled.
 				</p>
 			</div>
 

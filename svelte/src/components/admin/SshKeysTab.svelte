@@ -1,7 +1,9 @@
 <script lang="ts">
-	// SSH Keys tab (Administration): upload private keys once so they can be
-	// picked by name when adding servers, instead of pasting key material on
-	// every install. Keys are encrypted at rest; only fingerprints are listed.
+	// SSH Keys tab (Administration): upload PUBLIC keys (id_ed25519.pub /
+	// id_rsa.pub) so they can be installed into servers' authorized_keys when
+	// hardening — the private half stays on the operator's PC, following the
+	// ssh-copy-id convention. Private keys are no longer accepted: the panel
+	// generates and manages its own per-server keypair for connecting.
 	import { createSSHKey, deleteSSHKey, listSSHKeys, type SSHKeyInfo } from '$lib/api/sshkeys';
 	import { addToast } from '$lib/store';
 	import Button from '../ui/Button.svelte';
@@ -12,7 +14,7 @@
 	let error = $state('');
 
 	let name = $state('');
-	let privateKey = $state('');
+	let publicKey = $state('');
 	let uploading = $state(false);
 	let formError = $state('');
 	let showForm = $state(false);
@@ -42,16 +44,16 @@
 			formError = 'Name is required';
 			return;
 		}
-		if (!privateKey.trim()) {
-			formError = 'Private key is required';
+		if (!publicKey.trim()) {
+			formError = 'Public key is required';
 			return;
 		}
 		uploading = true;
 		try {
-			await createSSHKey(name.trim(), privateKey);
+			await createSSHKey(name.trim(), publicKey);
 			addToast(`SSH key "${name.trim()}" saved`, 'success');
 			name = '';
-			privateKey = '';
+			publicKey = '';
 			selectedFileName = '';
 			showForm = false;
 			await load();
@@ -62,7 +64,7 @@
 		}
 	}
 
-	// File-based alternative to pasting: read the chosen key file locally and
+	// File-based alternative to pasting: read the chosen .pub file locally and
 	// drop its content into the textarea (nothing is sent until "Save key").
 	let fileInput = $state<HTMLInputElement | undefined>(undefined);
 	let selectedFileName = $state('');
@@ -79,29 +81,29 @@
 		const reader = new FileReader();
 		reader.onload = () => {
 			const content = String(reader.result ?? '');
-			// A .pub file is a PUBLIC key — it belongs in authorized_keys on the
-			// server, never here. The agent installer needs the PRIVATE half to
-			// authenticate, and uploading a public key would only fail later.
-			if (file.name.endsWith('.pub') || content.includes('ssh-rsa ') || content.includes('ssh-ed25519 ')) {
+			if (content.includes('PRIVATE KEY')) {
 				formError =
-					'That looks like a PUBLIC key (.pub). Upload the PRIVATE key file instead — usually the same name without ".pub" (e.g. "id_rsa", not "id_rsa.pub"). The public key is installed on the server, not here.';
+					'That is a PRIVATE key — never upload it here. Upload the PUBLIC key file instead (the same name with ".pub", e.g. "id_ed25519.pub"). Your private key must stay on your PC.';
 				selectedFileName = '';
-				privateKey = '';
+				publicKey = '';
 				input.value = '';
 				return;
 			}
-			if (!content.includes('PRIVATE KEY')) {
-				formError = 'File does not look like a PEM private key (missing "PRIVATE KEY" header).';
+			const isPublicKey =
+				file.name.endsWith('.pub') ||
+				/^(ssh-(rsa|dss|ed25519)|ecdsa-sha2-|sk-(ssh|ecdsa)-)/.test(content.trim());
+			if (!isPublicKey) {
+				formError = 'File does not look like an SSH public key (expected "ssh-ed25519 AAAA..." or a .pub file).';
 				selectedFileName = '';
-				privateKey = '';
+				publicKey = '';
 				input.value = '';
 				return;
 			}
-			privateKey = content;
+			publicKey = content.trim();
 			selectedFileName = file.name;
 			if (!name.trim()) {
-				// Pre-fill a sensible name from the file (id_rsa → "id_rsa").
-				name = file.name.replace(/\.(pem|key|rsa)$/, '');
+				// Pre-fill a sensible name from the file (id_ed25519.pub → "id_ed25519").
+				name = file.name.replace(/\.pub$/, '');
 			}
 		};
 		reader.onerror = () => {
@@ -130,6 +132,8 @@
 	function formatDate(unix: number) {
 		return new Date(unix * 1000).toLocaleDateString();
 	}
+
+	const isLegacyPrivate = (key: SSHKeyInfo) => key.secret_type !== 'public';
 </script>
 
 <div class="space-y-4">
@@ -141,10 +145,12 @@
 
 	<div class="flex justify-between items-center">
 		<p class="text-xs text-zinc-500">
-			Upload private keys used to install the agent on new servers. Keys are encrypted at rest; only the fingerprint is shown.
+			Upload <span class="text-zinc-300">public</span> keys — they get installed into your servers'
+			authorized_keys when hardening, while the private half stays on your PC. Dockpal connects to
+			servers with its own generated key, so it never needs your private key.
 		</p>
 		<Button variant="primary" size="sm" onclick={() => (showForm = !showForm)}>
-			{showForm ? 'Cancel' : '+ Upload key'}
+			{showForm ? 'Cancel' : '+ Upload public key'}
 		</Button>
 	</div>
 
@@ -162,33 +168,33 @@
 			</div>
 			<div>
 				<div class="flex items-center justify-between mb-1">
-					<label for="sshkey-material" class="block text-xs font-medium text-zinc-400">Private key</label>
+					<label for="sshkey-material" class="block text-xs font-medium text-zinc-400">Public key</label>
 					<button
 						type="button"
 						onclick={pickFile}
 						class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
 					>
-						{selectedFileName ? `📄 ${selectedFileName} (change)` : '📄 Upload file'}
+						{selectedFileName ? `📄 ${selectedFileName} (change)` : '📄 Upload .pub file'}
 					</button>
 					<input
 						type="file"
 						bind:this={fileInput}
 						onchange={onFileChosen}
 						class="hidden"
-						accept=".pem,.key,.rsa,.openssh"
+						accept=".pub"
 					/>
 				</div>
 				<textarea
 					id="sshkey-material"
-					bind:value={privateKey}
-					rows="8"
+					bind:value={publicKey}
+					rows="3"
 					spellcheck="false"
-					placeholder={'Paste the PRIVATE key (e.g. ~/.ssh/id_rsa), or click "Upload file" above.\nThe PUBLIC key (.pub) is installed on the server, not here.\n-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'}
+					placeholder={'Paste the PUBLIC key (e.g. the content of ~/.ssh/id_ed25519.pub), or click "Upload .pub file" above.\nssh-ed25519 AAAA... you@your-pc'}
 					class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs font-mono text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 				></textarea>
 				<p class="text-xs text-zinc-600 mt-1">
-					Upload the <span class="text-zinc-400">private</span> key (e.g. <code>~/.ssh/id_rsa</code>). Its matching
-					<code>.pub</code> is what goes in the server's <code>authorized_keys</code> — Dockpal needs the private half to connect.
+					Run <code class="text-zinc-400">cat ~/.ssh/id_ed25519.pub</code> on your PC and paste the
+					output. The matching <span class="text-zinc-400">private</span> key never leaves your machine.
 				</p>
 			</div>
 			{#if formError}
@@ -203,7 +209,9 @@
 	{#if loading && !keys}
 		<p class="text-sm text-zinc-500 text-center py-8">Loading SSH keys...</p>
 	{:else if keys.length === 0}
-		<p class="text-sm text-zinc-500 text-center py-8">No saved keys yet. Upload one to reuse it when adding servers.</p>
+		<p class="text-sm text-zinc-500 text-center py-8">
+			No saved keys yet. Upload your public key to reuse it when hardening servers.
+		</p>
 	{:else}
 		<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
 			<table class="w-full text-sm">
@@ -219,7 +227,15 @@
 				<tbody>
 					{#each keys as key (key.id)}
 						<tr class="border-b border-zinc-800/50 last:border-0">
-							<td class="px-4 py-2.5 text-white">{key.name}</td>
+							<td class="px-4 py-2.5 text-white">
+								{key.name}
+								{#if isLegacyPrivate(key)}
+									<span
+										class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 uppercase font-mono"
+										title="Legacy private key — still usable for installs it was referenced by; private-key uploads are no longer accepted"
+									>legacy private</span>
+								{/if}
+							</td>
 							<td class="px-4 py-2.5 text-zinc-400 font-mono text-xs">{key.key_type}</td>
 							<td class="px-4 py-2.5 text-zinc-400 font-mono text-xs truncate max-w-56" title={key.fingerprint}>{key.fingerprint}</td>
 							<td class="px-4 py-2.5 text-zinc-500 text-xs">{formatDate(key.created_at)}</td>

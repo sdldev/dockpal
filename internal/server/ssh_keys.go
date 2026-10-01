@@ -18,6 +18,7 @@ import (
 
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/registry"
+	"github.com/sdldev/dockpal/internal/ssh"
 )
 
 // keyListItem is the API shape of a stored key — no private material.
@@ -26,7 +27,11 @@ type keyListItem struct {
 	Name        string `json:"name"`
 	Fingerprint string `json:"fingerprint"`
 	KeyType     string `json:"key_type"`
-	CreatedAt   int64  `json:"created_at"`
+	SecretType  string `json:"secret_type"` // "public" | "private"; "" = legacy private
+	// PublicKeyLine is set for public-type keys only — the authorized_keys
+	// line itself is not a secret, and pickers (hardening) need it directly.
+	PublicKeyLine string `json:"public_key,omitempty"`
+	CreatedAt     int64  `json:"created_at"`
 }
 
 // HandleListSSHKeys returns the saved keys for pickers and management lists.
@@ -39,29 +44,44 @@ func HandleListSSHKeys(database *db.DB) gin.HandlerFunc {
 		}
 		out := make([]keyListItem, 0, len(keys))
 		for _, k := range keys {
-			out = append(out, keyListItem{
+			item := keyListItem{
 				ID:          k.ID,
 				Name:        k.Name,
 				Fingerprint: k.Fingerprint,
 				KeyType:     k.KeyType,
+				SecretType:  k.SecretType,
 				CreatedAt:   k.CreatedAt,
-			})
+			}
+			if k.SecretType == "public" {
+				item.PublicKeyLine = k.PublicKey
+			}
+			out = append(out, item)
 		}
 		c.JSON(http.StatusOK, out)
 	}
 }
 
-// HandleCreateSSHKey validates and stores a private key. The key is parsed
-// server-side so a typo never becomes a stored unusable secret, and the
-// fingerprint is derived from the parsed public half.
+// HandleCreateSSHKey validates and stores a PUBLIC key (e.g. the content of
+// ~/.ssh/id_ed25519.pub on the operator's PC). Private keys are no longer
+// accepted: the panel generates and manages its own per-instance keypair for
+// connecting, so the operator's private key must never leave their machine —
+// matching the upstream convention (ssh-copy-id / Vito's public-only keys).
+// Keys uploaded before this change (legacy private) keep working.
 func HandleCreateSSHKey(database *db.DB, jwtSecret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Name       string `json:"name" binding:"required"`
-			PrivateKey string `json:"private_key" binding:"required"`
+			Name       string `json:"name"`
+			PublicKey  string `json:"public_key"`
+			PrivateKey string `json:"private_key"` // legacy field — rejected with guidance
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "name and private_key are required"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		if strings.TrimSpace(req.PrivateKey) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "Dockpal no longer accepts PRIVATE keys — upload the PUBLIC key (.pub) instead; your private key stays on your PC and the panel connects with its own generated key",
+			})
 			return
 		}
 		req.Name = strings.TrimSpace(req.Name)
@@ -69,45 +89,29 @@ func HandleCreateSSHKey(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name must be 1-64 characters"})
 			return
 		}
-
-		signer, err := cryptossh.ParsePrivateKey([]byte(req.PrivateKey))
-		if err != nil {
-			// Distinguish common mistakes: an encrypted key, and — the most
-			// frequent — someone uploading the PUBLIC half (.pub), which is a
-			// server-side artifact, not a credential the panel can use.
-			trimmed := strings.TrimSpace(req.PrivateKey)
-			if strings.HasPrefix(trimmed, "ssh-rsa ") || strings.HasPrefix(trimmed, "ssh-ed25519 ") ||
-				strings.HasPrefix(trimmed, "ecdsa-sha2-") || strings.HasPrefix(trimmed, "sk-ssh-") {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "this is a PUBLIC key (.pub); upload the matching PRIVATE key file (e.g. id_rsa, not id_rsa.pub)"})
-				return
-			}
-			if strings.Contains(err.Error(), "contains an encrypted key") || strings.Contains(err.Error(), "passphrase") {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "key is passphrase-protected; remove the passphrase or use a key without one"})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid SSH private key: " + err.Error()})
+		line := strings.TrimSpace(req.PublicKey)
+		if line == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "public_key is required"})
 			return
 		}
-		pub := signer.PublicKey()
-
-		cryptoKey, err := registry.DeriveKey(jwtSecret)
-		if err != nil {
-			internalError(c, err)
+		if err := ssh.ValidatePublicKeyLine(line); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid SSH public key: " + err.Error()})
 			return
 		}
-		enc, err := registry.Encrypt([]byte(req.PrivateKey), cryptoKey)
+		parsed, _, _, _, err := cryptossh.ParseAuthorizedKey([]byte(line))
 		if err != nil {
-			internalError(c, err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "not a valid SSH public key: " + err.Error()})
 			return
 		}
 
 		key := db.SSHKey{
-			ID:            generateID("sshkey"),
-			Name:          req.Name,
-			Fingerprint:   cryptossh.FingerprintSHA256(pub),
-			KeyType:       pub.Type(),
-			PrivateKeyEnc: enc,
-			CreatedAt:     time.Now().Unix(),
+			ID:          generateID("sshkey"),
+			Name:        req.Name,
+			Fingerprint: cryptossh.FingerprintSHA256(parsed),
+			KeyType:     parsed.Type(),
+			SecretType:  "public",
+			PublicKey:   line,
+			CreatedAt:   time.Now().Unix(),
 		}
 		if err := database.SaveSSHKey(key); err != nil {
 			internalError(c, err)
@@ -115,11 +119,13 @@ func HandleCreateSSHKey(database *db.DB, jwtSecret string) gin.HandlerFunc {
 		}
 		LogAudit(c, database, "sshkey.create", key.ID, "success", "name="+key.Name+" fingerprint="+key.Fingerprint)
 		c.JSON(http.StatusCreated, keyListItem{
-			ID:          key.ID,
-			Name:        key.Name,
-			Fingerprint: key.Fingerprint,
-			KeyType:     key.KeyType,
-			CreatedAt:   key.CreatedAt,
+			ID:            key.ID,
+			Name:          key.Name,
+			Fingerprint:   key.Fingerprint,
+			KeyType:       key.KeyType,
+			SecretType:    key.SecretType,
+			PublicKeyLine: key.PublicKey,
+			CreatedAt:     key.CreatedAt,
 		})
 	}
 }
@@ -153,4 +159,32 @@ func resolveSSHKeySecret(database *db.DB, cryptoKey []byte, keyID string) (strin
 		return "", fmt.Errorf("failed to decrypt saved ssh key")
 	}
 	return string(plain), nil
+}
+
+// resolveSSHPublicLine returns the authorized_keys line for a saved key.
+// Public-type keys store it plaintext; legacy private keys have it derived
+// from their (decrypted) private half.
+func resolveSSHPublicLine(database *db.DB, cryptoKey []byte, keyID string) (string, error) {
+	key, err := database.GetSSHKey(keyID)
+	if err != nil {
+		if errors.Is(err, db.ErrSSHKeyNotFound) {
+			return "", fmt.Errorf("saved ssh key %q not found", keyID)
+		}
+		return "", err
+	}
+	if key.SecretType == "public" {
+		if strings.TrimSpace(key.PublicKey) == "" {
+			return "", fmt.Errorf("saved key %q has no public key line", key.Name)
+		}
+		return strings.TrimSpace(key.PublicKey), nil
+	}
+	plain, err := registry.Decrypt(key.PrivateKeyEnc, cryptoKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt saved ssh key")
+	}
+	pub, _, err := ssh.PublicKeyFromPrivate(string(plain))
+	if err != nil {
+		return "", fmt.Errorf("failed to derive public key from saved key %q", key.Name)
+	}
+	return pub, nil
 }

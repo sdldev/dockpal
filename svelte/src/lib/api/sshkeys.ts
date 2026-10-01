@@ -1,7 +1,13 @@
-// Saved SSH keys client (Settings → Administration → SSH Keys). Private key
-// material is uploaded once, encrypted at rest by the backend, and referenced
-// by ID from the Add Server installer — the list endpoints never return the
-// secret.
+// Saved SSH keys client (Settings → Administration → SSH Keys).
+//
+// Two flavors exist:
+//   - public keys (secret_type "public"): the operator's own public keys
+//     (id_ed25519.pub / id_rsa.pub). They are installed into servers'
+//     authorized_keys when hardening — the private half stays on the PC.
+//   - legacy private keys (secret_type "private"): uploaded before public
+//     keys existed so the panel could authenticate as the operator during
+//     agent installs. Upload is no longer possible; existing entries keep
+//     working for instances that reference them.
 
 import { api } from './client';
 
@@ -10,6 +16,10 @@ export interface SSHKeyInfo {
 	name: string;
 	fingerprint: string;
 	key_type: string;
+	/** "public" | "private"; legacy entries may return "" (treat as private). */
+	secret_type?: string;
+	/** authorized_keys line — public-type keys only. */
+	public_key?: string;
 	created_at: number;
 }
 
@@ -19,9 +29,9 @@ export async function listSSHKeys(): Promise<SSHKeyInfo[]> {
 	return Array.isArray(res) ? res : [];
 }
 
-/** Upload a private key. The backend validates it parses and stores it encrypted. */
-export async function createSSHKey(name: string, privateKey: string): Promise<SSHKeyInfo> {
-	return api.post<SSHKeyInfo>('/ssh-keys', { name, private_key: privateKey });
+/** Upload a PUBLIC key (e.g. the content of ~/.ssh/id_ed25519.pub). */
+export async function createSSHKey(name: string, publicKey: string): Promise<SSHKeyInfo> {
+	return api.post<SSHKeyInfo>('/ssh-keys', { name, public_key: publicKey });
 }
 
 /** Delete a saved key. Instances already installed keep their own copy. */

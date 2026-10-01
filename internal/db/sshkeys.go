@@ -7,17 +7,29 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-// SSHKey is a stored private SSH key the admin can reuse when installing the
-// agent on new servers. The private key material is encrypted at rest
-// (PrivateKeyEnc, AES-256-GCM — the handler encrypts before calling
-// SaveSSHKey); only the fingerprint is stored plaintext so the UI can show
-// which key is which without ever exposing the secret.
+// SSHKey is a stored SSH key the admin can reuse. Two flavors exist:
+//
+//   - public keys (SecretType "public"): the operator's own public keys
+//     (e.g. the content of ~/.ssh/id_ed25519.pub). They are installed into
+//     servers' authorized_keys when hardening — the private half never
+//     leaves the operator's PC.
+//   - private keys (SecretType "private", legacy): uploaded before public
+//     keys existed so the panel could authenticate as the operator during
+//     agent installs. New uploads are rejected; old entries keep working
+//     for instances that already reference them.
+//
+// Secret material is encrypted at rest (AES-256-GCM — the handler encrypts
+// before calling SaveSSHKey); only the fingerprint is stored plaintext so
+// the UI can show which key is which without exposing the secret. A public
+// key line is itself public and stored plaintext in PublicKey.
 type SSHKey struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Fingerprint   string `json:"fingerprint"` // "SHA256:..." of the public key
 	KeyType       string `json:"key_type"`    // ssh-rsa, ssh-ed25519, ecdsa-...
-	PrivateKeyEnc []byte `json:"private_key_encrypted"`
+	SecretType    string `json:"secret_type"` // "public" | "private"; "" = legacy private
+	PrivateKeyEnc []byte `json:"private_key_encrypted,omitempty"`
+	PublicKey     string `json:"public_key,omitempty"` // authorized_keys line, public-type only
 	CreatedAt     int64  `json:"created_at"`
 }
 

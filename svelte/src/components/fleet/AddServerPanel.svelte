@@ -27,13 +27,20 @@
 	// --- step 2/3: install + logs ---
 	let instanceId = $state('');
 	let installCommand = $state('');
+	// Panel key bootstrap: the panel generates a keypair at create time; the
+	// operator authorizes the public half on the server (ssh-copy-id style),
+	// then the install connects with the panel key — no password, no private
+	// key from this PC ever uploaded.
+	let panelPublicKey = $state('');
+	let panelKeyFingerprint = $state('');
+	let panelKeySetupCommand = $state('');
 	let sshHost = $state('');
 	let sshPort = $state<number | null>(22);
 	let sshUser = $state('root');
-	let sshAuthType = $state<'password' | 'key'>('password');
+	let sshAuthType = $state<'panel_key' | 'password' | 'key'>('panel_key');
 	let sshSecret = $state('');
-	// Key auth source: a saved key (uploaded in Administration → SSH Keys) or
-	// an ad-hoc paste. Defaults to saved keys when any exist.
+	// Key auth source: a saved LEGACY private key or an ad-hoc paste. (Saved
+	// keys are now public-only for hardening; private ones are legacy.)
 	let keySource = $state<'saved' | 'paste'>('paste');
 	let savedKeys = $state<SSHKeyInfo[]>([]);
 	let selectedKeyID = $state('');
@@ -48,21 +55,22 @@
 	// drives the "Retry install" affordance on the done step.
 	let installFailed = $state(false);
 	let showManualCommand = $state(false);
+	let showPanelKeyDetails = $state(true);
 	let testing = $state(false);
 	let testMessage = $state('');
 	let testOk = $state(false);
 
 	let socket: WebSocket | null = null;
 
-	// Saved keys feed the "Saved key" picker; if any exist, default to that
-	// source so admins stop pasting the same key on every install.
+	// Saved keys feed the legacy "Saved private key" picker only — public keys
+	// cannot authenticate the installer (only hardening uses those).
 	$effect(() => {
 		listSSHKeys()
 			.then((keys) => {
-				savedKeys = keys;
-				if (keys.length > 0 && !selectedKeyID) {
+				savedKeys = keys.filter((k) => k.secret_type !== 'public');
+				if (savedKeys.length > 0 && !selectedKeyID) {
 					keySource = 'saved';
-					selectedKeyID = keys[0].id;
+					selectedKeyID = savedKeys[0].id;
 				}
 			})
 			.catch(() => {
@@ -75,10 +83,11 @@
 	});
 
 	const canCreate = $derived(name.trim() !== '' && !creating);
-	// Key auth with a saved key only needs the key picked; paste mode needs the
-	// secret textarea filled.
+	// Panel-key auth needs no secret at all; key auth with a saved key only
+	// needs the key picked; paste mode needs the secret textarea filled.
 	const keyCredentialOk = $derived(
-		sshAuthType === 'password' ||
+		sshAuthType === 'panel_key' ||
+			sshAuthType === 'password' ||
 			(keySource === 'saved' ? selectedKeyID !== '' : sshSecret.trim() !== '')
 	);
 	const canInstall = $derived(
@@ -97,12 +106,16 @@
 		createError = '';
 		instanceId = '';
 		installCommand = '';
+		panelPublicKey = '';
+		panelKeyFingerprint = '';
+		panelKeySetupCommand = '';
 		sshSecret = '';
 		logs = [];
 		installFailed = false;
 		testMessage = '';
 		testOk = false;
 		showManualCommand = false;
+		showPanelKeyDetails = true;
 	}
 
 	// Go back to the install form (fields kept, including the SSH secret) so a
@@ -122,7 +135,13 @@
 		creating = true;
 		createError = '';
 		try {
-			const res = await api.post<{ id: string; install_command?: string }>('/instances', {
+			const res = await api.post<{
+				id: string;
+				install_command?: string;
+				ssh_public_key?: string;
+				ssh_key_fingerprint?: string;
+				ssh_key_setup_command?: string;
+			}>('/instances', {
 				name: name.trim(),
 				host: mode === 'direct' ? host.trim() : '',
 				port: mode === 'direct' ? (port ?? 0) : 0,
@@ -130,6 +149,9 @@
 			});
 			instanceId = res.id;
 			installCommand = res.install_command ?? '';
+			panelPublicKey = res.ssh_public_key ?? '';
+			panelKeyFingerprint = res.ssh_key_fingerprint ?? '';
+			panelKeySetupCommand = res.ssh_key_setup_command ?? '';
 			step = 'created';
 			addToast(`Instance "${name.trim()}" created`, 'success');
 		} catch (e) {
@@ -190,9 +212,11 @@
 				ssh_port: sshPort ?? 22,
 				ssh_user: sshUser.trim() || 'root',
 				ssh_auth_type: sshAuthType,
-				// Saved keys are referenced by ID — the backend resolves and
-				// decrypts them; pasted keys travel inline as before.
-				ssh_secret: sshAuthType === 'key' && keySource === 'saved' ? '' : sshSecret,
+				// Panel-key auth needs no secret — the panel uses its own
+				// generated keypair. Saved keys are referenced by ID (legacy
+				// private keys only); pasted keys travel inline as before.
+				ssh_secret:
+					sshAuthType === 'key' && keySource === 'paste' ? sshSecret : undefined,
 				ssh_key_id: sshAuthType === 'key' && keySource === 'saved' ? selectedKeyID : undefined,
 				install_docker: installDocker,
 				panel_address: panelAddress.trim() || undefined
@@ -316,6 +340,65 @@
 
 			<!-- SSH auto-install -->
 			<div class="space-y-3">
+				<!-- Panel key bootstrap: authorize the panel's public key on the
+				     server, then install without any password or private key. -->
+				{#if panelPublicKey}
+					<div class="bg-zinc-950 border border-zinc-800/60 rounded-sm p-4 space-y-2">
+						<div class="flex items-center justify-between">
+							<h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+								Panel public key <span class="text-emerald-400 normal-case">(recommended login method)</span>
+							</h4>
+							<button
+								class="text-xs text-zinc-500 hover:text-zinc-300"
+								onclick={() => (showPanelKeyDetails = !showPanelKeyDetails)}
+							>
+								{showPanelKeyDetails ? '▾ hide' : '▸ show'}
+							</button>
+						</div>
+						{#if showPanelKeyDetails}
+							<p class="text-xs text-zinc-500">
+								Authorize this key on the new server (pick any one method), then choose
+								<span class="text-zinc-300">"Panel key"</span> below — no password needed and
+								your own private key never leaves your PC.
+							</p>
+							<div>
+								<div class="flex items-center justify-between mb-1">
+									<span class="text-[11px] text-zinc-500">1 · run on the server (or via provider console / cloud-init)</span>
+									<button
+										class="text-xs text-blue-400 hover:text-blue-300"
+										onclick={() => {
+											const cmd = panelKeySetupCommand.replace('user@your-server', `${sshUser.trim() || 'root'}@${sshHost.trim() || 'your-server'}`);
+											navigator.clipboard?.writeText(cmd);
+											addToast('Setup command copied', 'success');
+										}}
+									>
+										Copy command
+									</button>
+								</div>
+								<pre class="p-2 bg-black border border-zinc-800 rounded-sm text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all overflow-auto max-h-24">{panelKeySetupCommand}</pre>
+							</div>
+							<div>
+								<div class="flex items-center justify-between mb-1">
+									<span class="text-[11px] text-zinc-500">2 · or paste into the provider's "SSH keys" field at VPS creation</span>
+									<button
+										class="text-xs text-blue-400 hover:text-blue-300"
+										onclick={() => {
+											navigator.clipboard?.writeText(panelPublicKey);
+											addToast('Public key copied', 'success');
+										}}
+									>
+										Copy public key
+									</button>
+								</div>
+								<pre class="p-2 bg-black border border-zinc-800 rounded-sm text-[11px] text-zinc-400 font-mono whitespace-pre-wrap break-all overflow-auto max-h-16">{panelPublicKey}</pre>
+							</div>
+							{#if panelKeyFingerprint}
+								<p class="text-[11px] text-zinc-600 font-mono">fingerprint: {panelKeyFingerprint}</p>
+							{/if}
+						{/if}
+					</div>
+				{/if}
+
 				<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
 					<div>
 						<label for="ssh-host" class="block text-xs font-medium text-zinc-400 mb-1">SSH host</label>
@@ -357,6 +440,7 @@
 							bind:value={sshAuthType}
 							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 						>
+							<option value="panel_key">Panel key (recommended)</option>
 							<option value="password">Password</option>
 							<option value="key">Private key</option>
 						</select>
@@ -371,7 +455,7 @@
 								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 							/>
 						</div>
-					{:else}
+					{:else if sshAuthType === 'key'}
 						<div>
 							<label for="ssh-key-source" class="block text-xs font-medium text-zinc-400 mb-1">Key source</label>
 							<select
@@ -379,15 +463,21 @@
 								bind:value={keySource}
 								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 							>
-								<option value="saved">Saved key</option>
+								<option value="saved">Saved private key (legacy)</option>
 								<option value="paste">Paste key</option>
 							</select>
+						</div>
+					{:else}
+						<div class="flex items-end">
+							<p class="text-xs text-zinc-600 pb-2">
+								Uses the panel key above — nothing to type.
+							</p>
 						</div>
 					{/if}
 				</div>
 				{#if sshAuthType === 'key' && keySource === 'saved'}
 					<div>
-						<label for="ssh-saved-key" class="block text-xs font-medium text-zinc-400 mb-1">Saved key</label>
+						<label for="ssh-saved-key" class="block text-xs font-medium text-zinc-400 mb-1">Saved private key (legacy)</label>
 						<select
 							id="ssh-saved-key"
 							bind:value={selectedKeyID}
@@ -396,11 +486,11 @@
 							{#each savedKeys as k (k.id)}
 								<option value={k.id}>{k.name} — {k.key_type} {k.fingerprint.slice(0, 20)}…</option>
 							{:else}
-								<option value="">No saved keys — upload one in Settings → Administration → SSH Keys</option>
+								<option value="">No legacy private keys — use "Panel key" or "Password" instead</option>
 							{/each}
 						</select>
 					</div>
-				{:else if sshAuthType === 'key'}
+				{:else if sshAuthType === 'key' && keySource === 'paste'}
 					<div>
 						<label for="ssh-secret" class="block text-xs font-medium text-zinc-400 mb-1">Private key</label>
 						<textarea
@@ -445,7 +535,8 @@
 					</Button>
 				</div>
 				<p class="text-xs text-zinc-600">
-					SSH credentials are encrypted at rest and used once by the installer — they are not stored in plaintext.
+					SSH credentials are encrypted at rest and used once by the installer. With "Panel key"
+					auth nothing sensitive is typed at all — the panel connects with its own key.
 				</p>
 			</div>
 
