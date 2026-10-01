@@ -292,9 +292,15 @@ func enableFail2ban(client *cryptossh.Client, sudo bool, w io.Writer) error {
 		s = "sudo "
 	}
 	fmt.Fprintln(w, "[Dockpal Security] Installing fail2ban (apt/dnf/yum)...")
-	install := s + "sh -c 'command -v apt-get >/dev/null && apt-get install -y fail2ban || " +
-		"command -v dnf >/dev/null && dnf install -y fail2ban || " +
-		"command -v yum >/dev/null && yum install -y fail2ban || exit 1'"
+	// Real if/elif/else — a `A && B || C && D` chain is NOT an else-if: after
+	// a successful apt install the `&&` fell through into `dnf install`,
+	// which does not exist on Ubuntu → exit 1 → the whole job failed even
+	// though fail2ban had just installed fine (seen live on vps-media).
+	install := s + "sh -c " + shellQuote(
+		"if command -v apt-get >/dev/null 2>&1; then apt-get install -y fail2ban; " +
+			"elif command -v dnf >/dev/null 2>&1; then dnf install -y fail2ban; " +
+			"elif command -v yum >/dev/null 2>&1; then yum install -y fail2ban; " +
+			"else echo 'no supported package manager found (apt/dnf/yum)' >&2; exit 1; fi")
 	if err := runCommand(client, install, w); err != nil {
 		return fmt.Errorf("failed to install fail2ban: %w", err)
 	}
