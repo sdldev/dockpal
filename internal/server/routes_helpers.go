@@ -409,10 +409,20 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 
 		c.Set("jwt_secret", jwtSecret)
 		c.Set("database", database)
-		// Auth: ?token= query param (browser WS can't set headers) or, as a
-		// fallback for API clients, a JSON {token} first message. Both paths
-		// enforce the viewer role, same as the middleware on this route.
-		if q := c.Query("token"); q != "" {
+		// Auth: when AuthMiddleware already authenticated this upgrade
+		// (Bearer header, JWT query token, or a single-use WS ticket), the
+		// role is in the context — verify it and skip re-validation. Only
+		// when the middleware let the request through unauthenticated (e.g.
+		// ticket-less first-message protocol clients) do we authenticate
+		// in-handler.
+		if role := c.GetString("role"); role != "" {
+			if !auth.HasRole(role, auth.RoleViewer) {
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
+				return
+			}
+		} else if q := c.Query("token"); q != "" {
+			// Legacy path: this route was once registered without the
+			// middleware, so the query token is validated here directly.
 			claims, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database)
 			if err != nil {
 				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
@@ -427,32 +437,16 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 		}
 
 		// Each reader gets its own subscription — events are fanned out, not
-		// consumed competitively, so concurrent WS clients each see the full
-		// stream (audit-stack-container M2).
+		// consumed competitively, and history is replayed so a client that
+		// connects after a fast deploy still sees every event (audit M2).
 		events := session.Subscribe()
 		defer session.Unsubscribe(events)
 
-		for {
-			select {
-			case event, ok := <-events:
-				if !ok {
-					// Subscription closed: session ended.
-					return
-				}
-				if err := conn.WriteJSON(event); err != nil {
-					return
-				}
-			case <-session.Done:
-				// Producer finished; drain the buffer then close.
-				for {
-					select {
-					case event := <-events:
-						conn.WriteJSON(event)
-					default:
-						return
-					}
-				}
+		for event := range events {
+			if err := conn.WriteJSON(event); err != nil {
+				return
 			}
 		}
+		// Channel closed by the session: stream ended.
 	}
 }

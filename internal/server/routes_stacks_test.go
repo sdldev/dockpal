@@ -386,23 +386,20 @@ func TestDeployStackReturnsSessionID(t *testing.T) {
 // failed deploy emit — the regression net for the silent-failure fix (H1)
 // and the never-closed stream fix (C1).
 func TestDeployStackEventSequence(t *testing.T) {
+	// drainEvents consumes the session the same way the WS handler does —
+	// via Subscribe(). History replay must deliver every event even when the
+	// producer already finished (the C1/H1 regression net).
 	drainEvents := func(session *docker.DeploySession) []docker.DeployEvent {
 		var events []docker.DeployEvent
+		eventsCh := session.Subscribe()
 		timeout := time.After(5 * time.Second)
 		for {
 			select {
-			case ev := <-session.Events:
-				events = append(events, ev)
-			case <-session.Done:
-				// Drain whatever remains after the producer closed.
-				for {
-					select {
-					case ev := <-session.Events:
-						events = append(events, ev)
-					default:
-						return events
-					}
+			case ev, ok := <-eventsCh:
+				if !ok {
+					return events // session closed: stream ended
 				}
+				events = append(events, ev)
 			case <-timeout:
 				t.Fatal("session never closed — stream would hang forever")
 				return nil

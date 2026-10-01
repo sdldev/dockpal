@@ -20,37 +20,50 @@ type DeployEvent struct {
 
 // DeploySession tracks an active deployment and its event stream.
 //
-// Events is the legacy single shared channel — events are delivered to every
-// registered subscriber (fan-out), not consumed competitively, so multiple
-// WebSocket readers each see the full stream (audit-stack-container M2).
-// Events is still fed for backward compatibility, but new readers should
-// Subscribe().
+// Events are delivered to every registered subscriber (fan-out), not consumed
+// competitively, so multiple WebSocket readers each see the full stream
+// (audit-stack-container M2). Events emitted before a reader subscribes are
+// replayed from the session history, so a client connecting after a fast
+// deploy still sees every event (this was the "modal does nothing" bug: a
+// sub-second deploy finished before the WS connected).
 type DeploySession struct {
 	ID     string
-	Events chan DeployEvent
+	Events chan DeployEvent // legacy: only pre-Subscribe replay writes here
 	Done   chan struct{}
 
 	closeOnce sync.Once
 
-	subsMu   sync.Mutex
-	subs     map[chan DeployEvent]struct{}
-	dropped  uint64
-	closed   bool
-	pumpOnce sync.Once
+	subsMu  sync.Mutex
+	subs    map[chan DeployEvent]struct{}
+	history []DeployEvent
+	dropped uint64
+	closed  bool
 }
 
-// Subscribe registers a new event receiver (buffered). The channel receives
-// every event emitted after subscription and is closed when the session
-// closes. Callers must unsubscribe with Unsubscribe.
+// Subscribe registers a new event receiver. All events emitted so far are
+// replayed into it first (the buffer is sized to hold the full history, so
+// replay never drops and never blocks while the lock is held), then live
+// events follow; the channel is closed when the session closes (or
+// immediately after replay if it already closed). Callers must unsubscribe
+// with Unsubscribe.
+//
+// IMPORTANT: never drain a closed subscription channel with a
+// `select { case ev := <-ch: …; default: return }` loop — a closed channel
+// yields zero values forever and `default` is never reached (this caused a
+// hot loop). `for range ch` terminates correctly and is the only supported
+// consumption pattern.
 func (s *DeploySession) Subscribe() chan DeployEvent {
-	ch := make(chan DeployEvent, 50)
 	s.subsMu.Lock()
+	defer s.subsMu.Unlock()
+	ch := make(chan DeployEvent, len(s.history)+64)
+	for _, ev := range s.history {
+		ch <- ev
+	}
 	if s.closed {
 		close(ch)
 	} else {
 		s.subs[ch] = struct{}{}
 	}
-	s.subsMu.Unlock()
 	return ch
 }
 
@@ -157,13 +170,10 @@ func (s *DeploySession) Emit(step, message, status string) {
 // EmitEvent delivers a pre-built event to every receiver. Use this when the
 // event already exists (e.g. bridged from a remote agent's stream) instead of
 // writing to the Events channel directly, which would bypass the fan-out.
+// Events are appended to the session history so late subscribers replay them.
 func (s *DeploySession) EmitEvent(ev DeployEvent) {
-	select {
-	case s.Events <- ev:
-	default:
-		// Legacy channel full, skip
-	}
 	s.subsMu.Lock()
+	s.history = append(s.history, ev)
 	for ch := range s.subs {
 		select {
 		case ch <- ev:
