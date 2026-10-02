@@ -289,15 +289,15 @@ func TestProperty_SystemInfoRouteEquivalence(t *testing.T) {
 	f := func() bool {
 		// Create mock system info response
 		mockSystemInfo := map[string]interface{}{
-			"hostname":        "test-host",
-			"os":              "linux",
-			"cpu_cores":       4,
-			"docker_version":  "24.0.0",
-			"cpu_percent":     25.5,
-			"used_ram":        8192,
-			"total_ram":       16384,
-			"used_disk":       51200,
-			"total_disk":      102400,
+			"hostname":       "test-host",
+			"os":             "linux",
+			"cpu_cores":      4,
+			"docker_version": "24.0.0",
+			"cpu_percent":    25.5,
+			"used_ram":       8192,
+			"total_ram":      16384,
+			"used_disk":      51200,
+			"total_disk":     102400,
 		}
 
 		existingJSON, err := json.Marshal(mockSystemInfo)
@@ -349,9 +349,9 @@ func TestProperty_SystemInfoRouteEquivalence(t *testing.T) {
 func TestProperty_RouteDelegationConsistency(t *testing.T) {
 	// List of all routes that should delegate to LocalClient for "local" instance
 	routes := []struct {
-		path             string
-		method           string
-		usesLocalClient  bool
+		path            string
+		method          string
+		usesLocalClient bool
 	}{
 		// Container routes
 		{"/api/containers", "GET", true},
@@ -480,8 +480,8 @@ func TestProperty_ResponseFormatConsistency(t *testing.T) {
 		case "system_info":
 			// Both should return system info object
 			mockResponse := map[string]interface{}{
-				"hostname":        "host",
-				"os":              "linux",
+				"hostname":       "host",
+				"os":             "linux",
 				"docker_version": "24.0",
 			}
 			data, _ := json.Marshal(mockResponse)
@@ -560,10 +560,10 @@ func containsHelper(s, substr string) bool {
 // the same HTTP status codes for similar scenarios.
 func TestProperty_HTTPStatusCodePatterns(t *testing.T) {
 	scenarios := []struct {
-		name             string
-		successStatus    int
-		notFoundStatus   int
-		errorStatus      int
+		name           string
+		successStatus  int
+		notFoundStatus int
+		errorStatus    int
 	}{
 		{
 			name:           "container_operations",

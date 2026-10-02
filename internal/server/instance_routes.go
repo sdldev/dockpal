@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -106,8 +105,6 @@ func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent
 	g.POST("/instances/:instance_id/rotate-token", RequireRole(auth.RoleAdmin), handleRotateToken(database, jwtSecret))
 	g.POST("/instances/:instance_id/install", RequireRole(auth.RoleAdmin), handleInstallAgent(database, jwtSecret, logsManager))
 	g.GET("/instances/:instance_id/install/logs", RequireRole(auth.RoleAdmin), handleInstallAgentLogs(logsManager))
-	g.POST("/instances/:instance_id/harden", RequireRole(auth.RoleAdmin), handleHardenSSH(database, jwtSecret, logsManager, hardenRunning))
-	g.GET("/instances/:instance_id/harden/logs", RequireRole(auth.RoleAdmin), handleHardenSSHLogs(logsManager))
 	g.GET("/instances/:instance_id/security", RequireRole(auth.RoleOperator), handleDetectSecurity(database, jwtSecret))
 	g.POST("/instances/:instance_id/security", RequireRole(auth.RoleAdmin), handleApplySecurity(database, jwtSecret, logsManager, hardenRunning))
 	g.GET("/instances/:instance_id/security/logs", RequireRole(auth.RoleAdmin), handleSecurityLogs(logsManager))
@@ -634,13 +631,13 @@ func generateInstallCommand(mode, serverHost, token string) string {
 }
 
 type InstallAgentRequest struct {
-	SSHHost       string `json:"ssh_host" binding:"required"`
-	SSHPort       int    `json:"ssh_port"`
-	SSHUser       string `json:"ssh_user"`
-	SSHAuthType   string `json:"ssh_auth_type" binding:"required,oneof=password key panel_key"`
+	SSHHost     string `json:"ssh_host" binding:"required"`
+	SSHPort     int    `json:"ssh_port"`
+	SSHUser     string `json:"ssh_user"`
+	SSHAuthType string `json:"ssh_auth_type" binding:"required,oneof=password key panel_key"`
 	// SSHSecret is the ad-hoc credential (password or pasted private key).
 	// Mutually exclusive with SSHKeyID — exactly one must be set.
-	SSHSecret     string `json:"ssh_secret"`
+	SSHSecret string `json:"ssh_secret"`
 	// SSHKeyID references a saved SSH key (Settings → Administration → SSH
 	// Keys); the handler resolves and decrypts it. Requires key auth.
 	SSHKeyID      string `json:"ssh_key_id"`
@@ -923,231 +920,4 @@ func streamLogSession(c *gin.Context, logsManager *InstallLogsManager, sessionKe
 			}
 		}
 	}
-}
-
-// hardenSessionKey namespaces the hardening job's log session so it can never
-// collide with an install session for the same instance.
-func hardenSessionKey(instanceID string) string {
-	return "harden-" + instanceID
-}
-
-// HardenSSHRequest carries optional hardening options.
-type HardenSSHRequest struct {
-	// SSHKeyID optionally selects a Saved SSH Key to install instead of the
-	// default fresh keypair generated for this instance.
-	SSHKeyID string `json:"ssh_key_id"`
-	// ExtraPublicKeys are the operator's own authorized_keys lines (e.g. the
-	// content of ~/.ssh/id_ed25519.pub on their PC). Without one, the
-	// operator's own machine loses shell access once passwords are disabled —
-	// only the panel's key remains. Each line must parse as a public key.
-	ExtraPublicKeys []string `json:"extra_public_keys"`
-	// ExtraKeyIDs references saved PUBLIC keys (Settings → Administration →
-	// SSH Keys) to install alongside — the picker alternative to pasting.
-	ExtraKeyIDs []string `json:"extra_key_ids"`
-}
-
-// handleHardenSSH starts the SSH hardening job: install a key, verify key
-// login from a fresh connection, then disable password auth in sshd. Runs in
-// the background; progress streams over /harden/logs like the installer.
-func handleHardenSSH(database *db.DB, jwtSecret string, logsManager *InstallLogsManager, running *sync.Map) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Param("instance_id")
-
-		if id == "local" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "the local instance is not managed over SSH"})
-			return
-		}
-
-		var req HardenSSHRequest
-		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request: %v", err)})
-			return
-		}
-
-		inst, err := database.GetInstance(id)
-		if err != nil {
-			if errors.Is(err, db.ErrInstanceNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get instance"})
-			return
-		}
-
-		// The credential the panel currently holds for this instance — the
-		// installer stored it encrypted when the server was added.
-		cryptoKey, err := registry.DeriveKey(jwtSecret)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive decryption key"})
-			return
-		}
-		authType, authSecret, err := resolveInstanceSSHCreds(cryptoKey, inst)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		host, port, user, err := resolveInstanceSSHTarget(inst)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// The key that will remain on the server, in priority order:
-		//   1. a chosen saved key,
-		//   2. the key the panel already holds for this instance — either
-		//      the credential it connects with (key auth) or the panel key
-		//      generated at create time (password bootstrap). One key per
-		//      instance for its whole life, no orphans,
-		//   3. a fresh keypair (instances created before panel keys existed).
-		privKeyPEM := authSecret
-		var pubKey, fingerprint string
-		if req.SSHKeyID != "" {
-			resolved, rerr := resolveSSHKeySecret(database, cryptoKey, req.SSHKeyID)
-			if rerr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
-				return
-			}
-			privKeyPEM = resolved
-			pubKey, fingerprint, rerr = ssh.PublicKeyFromPrivate(privKeyPEM)
-			if rerr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
-				return
-			}
-		} else if authType == "key" {
-			// The credential we just connected with — already installed.
-			pubKey, fingerprint, err = ssh.PublicKeyFromPrivate(privKeyPEM)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-		} else if len(inst.SSHKeyEncrypted) > 0 && strings.TrimSpace(inst.SSHPublicKey) != "" {
-			// Password bootstrap, but the panel key already exists: install it.
-			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
-			if derr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
-				return
-			}
-			privKeyPEM = string(plain)
-			pubKey = strings.TrimSpace(inst.SSHPublicKey)
-			fingerprint = inst.SSHKeyFingerprint
-		} else {
-			pub, priv, fp, gerr := ssh.GenerateKeyPair("dockpal-" + id)
-			if gerr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": gerr.Error()})
-				return
-			}
-			pubKey, privKeyPEM, fingerprint = pub, priv, fp
-		}
-
-		// Validate the operator's own public keys BEFORE taking the in-flight
-		// slot: this returns synchronously, so a 400 here would otherwise leak
-		// the slot and every later run would get a false 409.
-		var extraKeys []string
-		for _, raw := range req.ExtraPublicKeys {
-			line := strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
-			if err := ssh.ValidatePublicKeyLine(line); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid public key %q: %v", truncateForLog(line), err)})
-				return
-			}
-			extraKeys = append(extraKeys, line)
-		}
-		for _, keyID := range req.ExtraKeyIDs {
-			line, rerr := resolveSSHPublicLine(database, cryptoKey, keyID)
-			if rerr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
-				return
-			}
-			extraKeys = append(extraKeys, line)
-		}
-
-		// One harden job per instance at a time — two concurrent runs would
-		// interleave sshd rewrites and rollbacks.
-		if _, loaded := running.LoadOrStore(id, struct{}{}); loaded {
-			c.JSON(http.StatusConflict, gin.H{"error": "hardening is already in progress for this server"})
-			return
-		}
-
-		sessionKey := hardenSessionKey(id)
-		logsManager.RemoveSession(sessionKey)
-		LogAudit(c, database, "instance.harden_ssh", id, "success", fmt.Sprintf("Started SSH hardening on %s:%d (user %s)", host, port, user))
-
-		params := ssh.HardenParams{
-			Host:            host,
-			Port:            port,
-			User:            user,
-			AuthType:        authType,
-			AuthSecret:      authSecret,
-			PublicKey:       pubKey,
-			PrivateKeyPEM:   privKeyPEM,
-			ExtraPublicKeys: extraKeys,
-			// The password that used to work — after the reload the panel
-			// dials with it again and REQUIRES rejection.
-			TestPassword: func() string {
-				if authType == "password" {
-					return authSecret
-				}
-				return ""
-			}(),
-		}
-
-		go func() {
-			defer running.Delete(id)
-			defer logsManager.CompleteSession(sessionKey)
-			lw := &logWriter{instanceID: sessionKey, mgr: logsManager}
-			logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Initializing hardening on remote host %s:%d...\n", host, port)
-
-			if err := ssh.HardenSSH(params, lw); err != nil {
-				log.Printf("SSH hardening on instance %s failed: %v", id, err)
-				logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Error: %v\n", err)
-				return
-			}
-
-			// Persist the outcome: the panel now authenticates with the
-			// installed key; the password no longer works, so it is dropped.
-			instCopy, gerr := database.GetInstance(id)
-			if gerr != nil {
-				log.Printf("SSH hardening on instance %s succeeded but reloading the record failed: %v", id, gerr)
-				return
-			}
-			encPriv, eerr := registry.Encrypt([]byte(privKeyPEM), cryptoKey)
-			if eerr != nil {
-				log.Printf("SSH hardening on instance %s: failed to encrypt the new key: %v", id, eerr)
-				logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Warning: could not persist the new key (%v) — re-run hardening to repair the record.", eerr)
-				return
-			}
-			instCopy.SSHAuthType = "key"
-			instCopy.SSHKeyEncrypted = encPriv
-			instCopy.SSHPasswordEncrypted = nil
-			instCopy.SSHHardeningStatus = "hardened"
-			instCopy.SSHHardenedAt = time.Now().Unix()
-			instCopy.SSHKeyFingerprint = fingerprint
-			if serr := database.SaveInstance(*instCopy); serr != nil {
-				log.Printf("SSH hardening on instance %s: failed to save hardened state: %v", id, serr)
-				logsManager.WriteLogf(sessionKey, "[Dockpal Hardening] Warning: could not save the hardened state (%v).", serr)
-				return
-			}
-			log.Printf("SSH hardening on instance %s completed successfully", id)
-			logsManager.WriteLog(sessionKey, "[Dockpal Hardening] Hardening completed successfully — password authentication disabled.")
-		}()
-
-		c.JSON(http.StatusAccepted, gin.H{"message": "hardening started", "session": sessionKey})
-	}
-}
-
-func handleHardenSSHLogs(logsManager *InstallLogsManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		streamLogSession(c, logsManager, hardenSessionKey(c.Param("instance_id")), "[Dockpal Hardening]")
-	}
-}
-
-// truncateForLog keeps validation error messages readable.
-func truncateForLog(s string) string {
-	if len(s) <= 40 {
-		return s
-	}
-	return s[:37] + "..."
 }

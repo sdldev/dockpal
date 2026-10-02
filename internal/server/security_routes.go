@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,11 +129,19 @@ func handleDetectSecurity(database *db.DB, jwtSecret string) gin.HandlerFunc {
 }
 
 // SecurityApplyRequest is the desired end state of all three controls (the
-// UI's toggle model: set the switches, then Apply once).
+// UI's toggle model: set the switches, then Apply once) plus the operator's
+// own public keys to keep on the server.
 type SecurityApplyRequest struct {
 	PasswordAuth *bool `json:"password_auth" binding:"required"`
 	RootLogin    *bool `json:"root_login" binding:"required"`
 	Fail2ban     *bool `json:"fail2ban" binding:"required"`
+	// ExtraPublicKeys are the operator's own authorized_keys lines — without
+	// at least one (or the panel key), their own machine loses shell access
+	// once passwords are disabled.
+	ExtraPublicKeys []string `json:"extra_public_keys"`
+	// ExtraKeyIDs reference saved PUBLIC keys (Settings → Administration →
+	// SSH Keys) — the picker alternative to pasting.
+	ExtraKeyIDs []string `json:"extra_key_ids"`
 }
 
 // handleApplySecurity starts a background job converging the server to the
@@ -176,6 +185,35 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 			return
 		}
 
+		// The panel key that stays on the server: prefer the key generated at
+		// create time; without one (legacy instances) generate one now.
+		panelPriv := ""
+		panelPub := strings.TrimSpace(inst.SSHPublicKey)
+		panelFP := inst.SSHKeyFingerprint
+		if len(inst.SSHKeyEncrypted) > 0 {
+			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+			if derr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
+				return
+			}
+			panelPriv = string(plain)
+			if panelPub == "" {
+				pub, _, derr := ssh.PublicKeyFromPrivate(panelPriv)
+				if derr != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive the panel public key"})
+					return
+				}
+				panelPub = pub
+			}
+		} else {
+			pub, priv, fp, gerr := ssh.GenerateKeyPair("dockpal-" + id)
+			if gerr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": gerr.Error()})
+				return
+			}
+			panelPub, panelPriv, panelFP = pub, priv, fp
+		}
+
 		// Disabling password auth can be verified end-to-end when the panel
 		// still holds the old password.
 		testPassword := ""
@@ -183,6 +221,30 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 			if plain, derr := registry.Decrypt(inst.SSHPasswordEncrypted, cryptoKey); derr == nil {
 				testPassword = string(plain)
 			}
+		}
+
+		// Validate the operator's own public keys BEFORE taking the in-flight
+		// slot: a synchronous 400 must not leak the slot (a leaked slot made
+		// every later run return a false 409).
+		publicKeys := []string{panelPub}
+		for _, raw := range req.ExtraPublicKeys {
+			line := strings.TrimSpace(raw)
+			if line == "" {
+				continue
+			}
+			if err := ssh.ValidatePublicKeyLine(line); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid public key %q: %v", truncateForLog(line), err)})
+				return
+			}
+			publicKeys = append(publicKeys, line)
+		}
+		for _, keyID := range req.ExtraKeyIDs {
+			line, rerr := resolveSSHPublicLine(database, cryptoKey, keyID)
+			if rerr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+				return
+			}
+			publicKeys = append(publicKeys, line)
 		}
 
 		if _, loaded := running.LoadOrStore(id, struct{}{}); loaded {
@@ -199,6 +261,8 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 			PasswordAuth: *req.PasswordAuth,
 			RootLogin:    *req.RootLogin,
 			Fail2ban:     *req.Fail2ban,
+			PanelKeyPEM:  panelPriv,
+			PublicKeys:   publicKeys,
 			TestPassword: testPassword,
 		}
 
@@ -213,6 +277,28 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 				logsManager.WriteLogf(sessionKey, "[Dockpal Security] Error: %v\n", err)
 				return
 			}
+			// Persist the outcome: panel keeps its key, the password is gone
+			// once passwords are disabled, and the badge reads "hardened".
+			instCopy, gerr := database.GetInstance(id)
+			if gerr == nil {
+				encPriv, eerr := registry.Encrypt([]byte(panelPriv), cryptoKey)
+				if eerr == nil {
+					instCopy.SSHKeyEncrypted = encPriv
+					instCopy.SSHPublicKey = panelPub
+					instCopy.SSHKeyFingerprint = panelFP
+					if !*req.PasswordAuth {
+						instCopy.SSHAuthType = "key"
+						instCopy.SSHPasswordEncrypted = nil
+					}
+					if !*req.PasswordAuth {
+						instCopy.SSHHardeningStatus = "hardened"
+						instCopy.SSHHardenedAt = time.Now().Unix()
+					}
+					if serr := database.SaveInstance(*instCopy); serr != nil {
+						log.Printf("Security apply on instance %s: persisting state failed: %v", id, serr)
+					}
+				}
+			}
 			// Refresh the cached state from the server after the change.
 			if state, derr := ssh.DetectSecurity(host, port, user, authType, secret, "", lw); derr == nil {
 				persistSecurityState(database, id, state)
@@ -223,6 +309,14 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 
 		c.JSON(http.StatusAccepted, gin.H{"message": "security update started", "session": sessionKey})
 	}
+}
+
+// truncateForLog keeps validation error messages readable.
+func truncateForLog(s string) string {
+	if len(s) <= 40 {
+		return s
+	}
+	return s[:37] + "..."
 }
 
 func handleSecurityLogs(logsManager *InstallLogsManager) gin.HandlerFunc {

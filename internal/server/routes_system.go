@@ -74,4 +74,3 @@ func handleStatsStream(c *gin.Context, agentMgr *agent.Manager) {
 		}
 	}
 }
-

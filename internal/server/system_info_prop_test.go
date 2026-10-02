@@ -450,9 +450,9 @@ func TestProperty_MergePreservesValuesFromBothInputs(t *testing.T) {
 
 		// Verify all values are preserved exactly
 		checks := []struct {
-			name   string
-			got    interface{}
-			want   interface{}
+			name string
+			got  interface{}
+			want interface{}
 		}{
 			{"hostname", merged["hostname"], info.Hostname},
 			{"os", merged["os"], info.OS},

@@ -87,13 +87,22 @@ func sudoWrap(sudo bool, cmd string) string {
 	return " " + cmd
 }
 
-// SecurityUpdate describes the DESIRED end state of all three controls (the
-// UI's toggle model). Only differences vs the current state are applied, in
-// one sshd rewrite + one reload where possible.
+// SecurityUpdate describes the DESIRED end state of the three controls plus
+// the keys to keep on the server (the UI's unified toggle model). Only
+// differences vs the current state are applied, in one sshd rewrite + one
+// reload where possible.
 type SecurityUpdate struct {
 	PasswordAuth bool // true = passwords allowed, false = disabled (key-only)
 	RootLogin    bool // true = unmanaged (server default), false = PermitRootLogin no
 	Fail2ban     bool // true = installed and running, false = stopped
+	// PanelKeyPEM is the private key the panel authenticates with after the
+	// run (its public half MUST be in PublicKeys, or the panel locks itself
+	// out). Empty when the panel already connects by key — then PublicKeys
+	// still get installed but nothing is persisted.
+	PanelKeyPEM string
+	// PublicKeys are the authorized_keys lines to ensure present on the
+	// server (panel key + the operator's own keys). Additive + idempotent.
+	PublicKeys []string
 	// TestPassword, when disabling password auth and the panel knows the old
 	// password, is used to verify rejection from the outside post-reload.
 	TestPassword string
@@ -135,6 +144,20 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 	mode, err := configMode(client, sudo)
 	if err != nil {
 		return err
+	}
+
+	// --- keys first (additive + idempotent), then prove they work ---
+	if len(update.PublicKeys) > 0 {
+		step("Ensuring %d public key(s) in ~/.ssh/authorized_keys...", len(update.PublicKeys))
+		if err := runCommand(client, authorizedKeysInstallCommand(update.PublicKeys), io.Discard); err != nil {
+			return fmt.Errorf("failed to install public keys: %w", err)
+		}
+		if update.PanelKeyPEM != "" {
+			if err := verifyKeyLogin(host, port, user, update.PanelKeyPEM, expectedHostKey); err != nil {
+				return fmt.Errorf("panel key login verification failed — server unchanged (except authorized_keys, which is safe): %w", err)
+			}
+			step("Panel key login verified.")
+		}
 	}
 
 	// --- sshd controls (password auth + root login share one drop-in) ---

@@ -71,4 +71,3 @@ func TestCheckOrigin(t *testing.T) {
 		})
 	}
 }
-

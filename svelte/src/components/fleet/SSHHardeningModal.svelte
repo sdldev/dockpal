@@ -47,20 +47,14 @@
 		fail2ban: string;
 	}
 
-	let phase = $state<Phase>('idle'); // hardening job
-	let secJob = $state<Phase>('idle'); // security control job
+	let secJob = $state<Phase>('idle'); // the single Apply job
 	let logs = $state<string[]>([]); // shared log area (latest job)
 	let logSource = $state<'harden' | 'security'>('harden');
-	// Key to leave on the server: a fresh per-instance keypair (default — one
-	// leaked key must not open other servers) or an existing saved key.
-	let keySource = $state<'generate' | 'saved'>('generate');
 	let savedKeys = $state<SSHKeyInfo[]>([]);
-	let selectedKeyID = $state('');
 	// The operator's own public key(s) — without one, their own PC loses shell
 	// access the moment password auth is disabled (only the panel key remains).
 	let extraPublicKeys = $state('');
 	let selectedExtraKeyIDs = $state<string[]>([]);
-	let confirmOpen = $state(false);
 	let confirmApply = $state(false);
 	let socket: WebSocket | null = null;
 	// Live detected state.
@@ -75,10 +69,8 @@
 
 	$effect(() => {
 		if (open) {
-			phase = 'idle';
 			secJob = 'idle';
 			logs = [];
-			confirmOpen = false;
 			confirmApply = false;
 			extraPublicKeys = '';
 			selectedExtraKeyIDs = [];
@@ -135,10 +127,7 @@
 				? 'Password'
 				: 'Unknown'
 	);
-	const canStart = $derived(
-		phase === 'idle' && secJob === 'idle' && (keySource === 'generate' || selectedKeyID !== '')
-	);
-	const busy = $derived(phase === 'running' || secJob === 'running');
+	const busy = $derived(secJob === 'running');
 
 	function pretty(v: string): string {
 		if (!v) return '—';
@@ -162,31 +151,6 @@
 	}
 
 	// ---- guided hardening run ----
-	async function start() {
-		if (!instance || !canStart) return;
-		confirmOpen = false;
-		phase = 'running';
-		logSource = 'harden';
-		logs = [];
-		try {
-			const savedLines = selectedExtraKeyIDs
-				.map((id) => savedKeys.find((k) => k.id === id)?.public_key?.trim())
-				.filter((l): l is string => !!l);
-			const pastedLines = extraPublicKeys
-				.split('\n')
-				.map((l) => l.trim())
-				.filter(Boolean);
-			await api.post(`/instances/${instance.id}/harden`, {
-				ssh_key_id: keySource === 'saved' ? selectedKeyID : undefined,
-				extra_public_keys: [...savedLines, ...pastedLines]
-			});
-			await openLogStream('harden');
-		} catch (e) {
-			phase = 'failed';
-			addToast(e instanceof Error ? e.message : 'Hardening failed to start', 'error');
-		}
-	}
-
 	// ---- security controls (toggle model) ----
 	const togglesReady = $derived(
 		wantPasswordAuth !== undefined && wantRootLogin !== undefined && wantFail2ban !== undefined
@@ -205,19 +169,27 @@
 		logSource = 'security';
 		logs = [];
 		try {
+			const savedLines = selectedExtraKeyIDs
+				.map((id) => savedKeys.find((k) => k.id === id)?.public_key?.trim())
+				.filter((l): l is string => !!l);
+			const pastedLines = extraPublicKeys
+				.split('\n')
+				.map((l) => l.trim())
+				.filter(Boolean);
 			await api.post(`/instances/${instance.id}/security`, {
 				password_auth: wantPasswordAuth,
 				root_login: wantRootLogin,
-				fail2ban: wantFail2ban
+				fail2ban: wantFail2ban,
+				extra_public_keys: [...savedLines, ...pastedLines]
 			});
-			await openLogStream('security');
+			await openLogStream();
 		} catch (e) {
 			secJob = 'failed';
 			addToast(e instanceof Error ? e.message : 'Security update failed to start', 'error');
 		}
 	}
 
-	async function openLogStream(kind: 'harden' | 'security') {
+	async function openLogStream() {
 		const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		// Single-use 60s ticket instead of the 4h JWT in the URL (audit L1).
 		let credential = getToken() ?? '';
@@ -227,38 +199,25 @@
 		} catch {
 			// Older backend without /ws-ticket — fall back to the JWT.
 		}
-		const path =
-			kind === 'harden'
-				? `/api/instances/${instance?.id}/harden/logs`
-				: `/api/instances/${instance?.id}/security/logs`;
-		socket = new WebSocket(`${proto}//${location.host}${path}?token=${credential}`);
+		socket = new WebSocket(
+			`${proto}//${location.host}/api/instances/${instance?.id}/security/logs?token=${credential}`
+		);
 		socket.onmessage = (event) => {
 			const line = String(event.data);
 			logs = [...logs, line];
-			if (line.includes('[Dockpal Security] Error:') || line.includes('[Dockpal Hardening] Error:')) {
-				if (kind === 'harden') phase = 'failed';
-				else secJob = 'failed';
+			if (line.includes('[Dockpal Security] Error:')) {
+				secJob = 'failed';
 				socket?.close();
-			} else if (
-				line.includes('[Dockpal Hardening] Hardening completed successfully') ||
-				line.includes('[Dockpal Security] Update completed successfully')
-			) {
-				if (kind === 'harden') phase = 'done';
-				else secJob = 'done';
-				addToast(
-					kind === 'harden'
-						? `"${displayName}" is hardened — password login disabled`
-						: `Security change applied on "${displayName}"`,
-					'success'
-				);
+			} else if (line.includes('[Dockpal Security] Update completed successfully')) {
+				secJob = 'done';
+				addToast(`Security changes applied on "${displayName}"`, 'success');
 				onchanged?.();
 				socket?.close();
 				detect();
 			}
 		};
 		socket.onclose = () => {
-			if (kind === 'harden' && phase === 'running') phase = 'failed';
-			if (kind === 'security' && secJob === 'running') secJob = 'failed';
+			if (secJob === 'running') secJob = 'failed';
 		};
 	}
 </script>
@@ -352,62 +311,9 @@
 						/>
 					</label>
 				</div>
-				<p class="text-xs text-zinc-600">
-					Apply converges the server to these switches: sshd changes go through one drop-in write,
-					<span class="font-mono">sshd -t</span> + effective-config check + reload; only differences vs the
-					detected state are touched.
-				</p>
-			</div>
-
-			<!-- Guided hardening -->
-			<div class="border-t border-zinc-800 pt-3 space-y-2">
-				<div class="flex items-center gap-2">
-					<h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">SSH key hardening</h4>
-					{#if isHardened}
-						<span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded bg-green-500/10 text-green-400">
-							<Icon name="admin" class="w-3.5 h-3.5" /> Hardened
-							{#if instance.ssh_hardened_at}
-								<span class="text-zinc-500 font-normal">— {new Date(instance.ssh_hardened_at * 1000).toLocaleString()}</span>
-							{/if}
-						</span>
-					{:else}
-						<span class="text-xs text-zinc-500">login: {authLabel}</span>
-					{/if}
-				</div>
-				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-					<div>
-						<label for="harden-key-source" class="block text-xs font-medium text-zinc-400 mb-1">Key to install</label>
-						<select
-							id="harden-key-source"
-							bind:value={keySource}
-							disabled={busy}
-							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-						>
-							<option value="generate">Generate dedicated key (recommended)</option>
-							<option value="saved">Saved key</option>
-						</select>
-					</div>
-					{#if keySource === 'saved'}
-						<div>
-							<label for="harden-saved-key" class="block text-xs font-medium text-zinc-400 mb-1">Saved key</label>
-							<select
-								id="harden-saved-key"
-								bind:value={selectedKeyID}
-								disabled={busy}
-								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-							>
-								{#each savedKeys as k (k.id)}
-									<option value={k.id}>{k.name} — {k.key_type} {k.fingerprint.slice(0, 20)}…</option>
-								{:else}
-									<option value="">No saved keys — Settings → Administration → SSH Keys</option>
-								{/each}
-							</select>
-						</div>
-					{/if}
-				</div>
-				<div>
+				<div class="border-t border-zinc-800/60 pt-3 mt-1">
 					<span class="block text-xs font-medium text-zinc-400 mb-1">
-						Your public key <span class="text-zinc-600">(recommended)</span>
+						Your public keys on this server <span class="text-zinc-600">(installed with Apply)</span>
 					</span>
 					{#if savedKeys.length > 0}
 						<div class="flex flex-wrap gap-2 mb-2">
@@ -433,12 +339,29 @@
 						class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-xs text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-600"
 					></textarea>
 					<p class="text-xs text-zinc-600 mt-1">
-						Pick a saved key above or paste the output of
-						<span class="font-mono text-zinc-400">cat ~/.ssh/id_ed25519.pub</span> from your own
-						machine — without it, only Dockpal can log in after passwords are disabled.
+						These plus the panel key are (re)installed idempotently on every Apply. The panel key is
+						always kept — without your own key here, only Dockpal can log in once passwords are off.
 					</p>
 				</div>
+				<p class="text-xs text-zinc-600">
+					Apply converges the server to these switches: sshd changes go through one drop-in write,
+					<span class="font-mono">sshd -t</span> + effective-config check + reload; only differences vs the
+					detected state are touched.
+				</p>
 			</div>
+
+			<!-- Hardened badge (result of turning password login off) -->
+			{#if isHardened}
+				<div class="flex items-center gap-2">
+					<span class="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded bg-green-500/10 text-green-400">
+						<Icon name="admin" class="w-3.5 h-3.5" /> Hardened
+						{#if instance.ssh_hardened_at}
+							<span class="text-zinc-500 font-normal">— {new Date(instance.ssh_hardened_at * 1000).toLocaleString()}</span>
+						{/if}
+					</span>
+					<span class="text-xs text-zinc-500">login: {authLabel}</span>
+				</div>
+			{/if}
 
 			<!-- Run log -->
 			{#if logs.length > 0}
@@ -450,61 +373,33 @@
 				</div>
 			{/if}
 
-			{#if phase === 'done'}
+			{#if secJob === 'done'}
 				<div class="p-3 bg-green-500/10 border border-green-500/20 rounded-sm text-sm text-green-400">
-					Hardening complete — the server now only accepts the installed SSH key. Dockpal stores
-					its private key encrypted and no longer keeps the password.
-				</div>
-			{:else if phase === 'failed'}
-				<div class="p-3 bg-red-500/10 border border-red-500/20 rounded-sm text-sm text-red-400">
-					Hardening failed — the server was left unchanged (the key may have been installed, which
-					is safe). Review the log and retry.
-				</div>
-			{:else if secJob === 'done'}
-				<div class="p-3 bg-green-500/10 border border-green-500/20 rounded-sm text-sm text-green-400">
-					Security change applied — detected state refreshed above.
+					Changes applied — the panel key and your public keys are installed, the toggles are
+					enforced, and the detected state above is refreshed from the server.
 				</div>
 			{:else if secJob === 'failed'}
 				<div class="p-3 bg-red-500/10 border border-red-500/20 rounded-sm text-sm text-red-400">
-					Security change failed — review the log and retry.
+					Apply failed — the keys may have been installed (safe), but the toggles were not fully
+					enforced. Review the log and retry.
 				</div>
 			{/if}
 
 			<div class="flex justify-end gap-2 pt-1">
 				<Button variant="secondary" size="sm" onclick={close}>Close</Button>
 				{#if secJob === 'running'}
-					<Button variant="secondary" size="sm" loading={true}>Applying…</Button>
+					<Button variant="primary" size="sm" loading={true}>Applying…</Button>
 				{:else}
-					<Button
-						variant="secondary"
-						size="sm"
-						disabled={!togglesDirty || busy}
-						onclick={() => (confirmApply = true)}
-					>
+					<Button variant="primary" size="sm" disabled={!togglesReady || busy} onclick={() => (confirmApply = true)}>
 						Apply
 					</Button>
-				{/if}
-				{#if phase !== 'running'}
-					<Button variant="primary" size="sm" disabled={!canStart || busy} onclick={() => (confirmOpen = true)}>
-						{isHardened ? 'Re-run hardening' : 'Install key & disable password login'}
-					</Button>
-				{:else}
-					<Button variant="primary" size="sm" loading={true}>Hardening…</Button>
 				{/if}
 			</div>
 		</div>
 	{/if}
 </Modal>
 
-<ConfirmDialog
-	open={confirmOpen}
-	title="Disable password login"
-	message={`Install the SSH key on "${displayName}" and disable password authentication in sshd? Key-only login is verified BEFORE passwords are turned off, and everything rolls back automatically on failure.${extraPublicKeys.trim() || selectedExtraKeyIDs.length > 0 ? ' Your own public key will also be installed so you keep CLI access.' : ' Without your own public key, only Dockpal will be able to log in.'} Keep in mind you should still have access to the provider console as a last resort.`}
-	confirmLabel="Harden server"
-	busy={phase === 'running'}
-	onconfirm={start}
-	onclose={() => (confirmOpen = false)}
-/>
+
 
 <ConfirmDialog
 	open={confirmApply}
