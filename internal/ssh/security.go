@@ -33,9 +33,17 @@ func DetectSecurity(host string, port int, user, authType, secret, expectedHostK
 
 	// Effective sshd config — reflects reality regardless of which file or
 	// drop-in set it. sshd -T needs root (host key readability).
+	// $SSHD must expand in the CALLER's shell and only the binary path cross
+	// into sudo: wrapping the whole line in `sudo sh -c` lost the variable
+	// (root's shell has no SSHD set), so non-root servers always reported
+	// unknown — exactly what happened on vps-media (user ubuntu).
 	var out strings.Builder
+	prefix := ""
+	if sudo {
+		prefix = "sudo "
+	}
 	cmd := "SSHD=$(command -v sshd || echo /usr/sbin/sshd); " +
-		"if [ -x \"$SSHD\" ]; then" + sudoWrap(sudo, "$SSHD -T 2>/dev/null") + "; fi"
+		"if [ -x \"$SSHD\" ]; then " + prefix + "\"$SSHD\" -T 2>/dev/null; fi"
 	if err := runCommandTo(client, cmd, &out); err == nil {
 		state.PasswordAuth = parseSSHDValue(out.String(), "passwordauthentication")
 		state.RootLogin = parseSSHDValue(out.String(), "permitrootlogin")
@@ -77,14 +85,6 @@ func parseSSHDValue(out, key string) string {
 		}
 	}
 	return ""
-}
-
-// sudoWrap prefixes a command with sudo (sh -c style) when needed.
-func sudoWrap(sudo bool, cmd string) string {
-	if sudo {
-		return " sudo sh -c " + shellQuote(cmd)
-	}
-	return " " + cmd
 }
 
 // SecurityUpdate describes the DESIRED end state of the three controls plus
@@ -217,9 +217,17 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 // (same commands as DetectSecurity, no new dial).
 func detectEffective(client *cryptossh.Client, sudo bool) (SecurityState, error) {
 	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown"}
+	// $SSHD must expand in the CALLER's shell and only the binary path cross
+	// into sudo: wrapping the whole line in `sudo sh -c` lost the variable
+	// (root's shell has no SSHD set), so non-root servers always reported
+	// unknown — exactly what happened on vps-media (user ubuntu).
 	var out strings.Builder
+	prefix := ""
+	if sudo {
+		prefix = "sudo "
+	}
 	cmd := "SSHD=$(command -v sshd || echo /usr/sbin/sshd); " +
-		"if [ -x \"$SSHD\" ]; then" + sudoWrap(sudo, "$SSHD -T 2>/dev/null") + "; fi"
+		"if [ -x \"$SSHD\" ]; then " + prefix + "\"$SSHD\" -T 2>/dev/null; fi"
 	if err := runCommandTo(client, cmd, &out); err == nil {
 		state.PasswordAuth = parseSSHDValue(out.String(), "passwordauthentication")
 		state.RootLogin = parseSSHDValue(out.String(), "permitrootlogin")
