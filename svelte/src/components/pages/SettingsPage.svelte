@@ -82,7 +82,7 @@
 		clearToken();
 		currentUser.set(null);
 		addToast('Logged out', 'info');
-		navigate('dashboard', {}, true);
+		navigate('fleet', {}, true);
 	}
 
 	async function quickReset() {

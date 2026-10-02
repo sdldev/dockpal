@@ -47,7 +47,8 @@ function normalize(path: string): string {
 
 // Resolve a URL path into a page id + params (container id for detail view).
 export function pathToPage(path: string): { page: string; params: RouteParams } {
-	const p = normalize(path) || 'dashboard';
+	// Root path lands on Servers (fleet) — the natural starting point.
+	const p = normalize(path) || 'fleet';
 	const parts = p.split('/');
 
 	// /containers/:id → container detail
@@ -66,8 +67,8 @@ export function pathToPage(path: string): { page: string; params: RouteParams } 
 	const entry = Object.entries(pagePaths).find(([, p]) => p === base);
 	if (entry) return { page: entry[0], params: {} };
 
-	// Unknown path → dashboard (the SPA has no 404 page).
-	return { page: 'dashboard', params: {} };
+	// Unknown path → fleet (the SPA has no 404 page).
+	return { page: 'fleet', params: {} };
 }
 
 // Build the URL for a page (+ params).
@@ -75,7 +76,7 @@ export function pageToPath(page: string, params: RouteParams = {}): string {
 	if (page === 'container-detail' && params.id) {
 		return '/containers/' + encodeURIComponent(params.id);
 	}
-	return pagePaths[page] ?? '/dashboard';
+	return pagePaths[page] ?? '/fleet';
 }
 
 // Navigate to a page: updates state + URL. Pass `replace` to overwrite the

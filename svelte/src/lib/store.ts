@@ -25,7 +25,7 @@ selectedInstance.subscribe((id) => {
 });
 
 // Current page routing
-export const currentPage = writable<string>('dashboard');
+export const currentPage = writable<string>('fleet');
 
 // Selected compose stack name (stacks ↔ compose page navigation)
 export const currentStackName = writable<string | null>(null);

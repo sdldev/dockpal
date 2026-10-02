@@ -40,7 +40,7 @@
     api.post('/logout').catch(() => {});
     clearToken();
     currentUser.set(null);
-    navigate('dashboard', {}, true);
+    navigate('fleet', {}, true);
   }
 
   // Sidebar: open by default on desktop, closed on mobile (evaluated once
@@ -75,7 +75,7 @@
     // dispatches this event so we drop the session back to login.
     const onUnauthorized = () => {
       currentUser.set(null);
-      navigate('dashboard', {}, true);
+      navigate('fleet', {}, true);
     };
     window.addEventListener('dockpal:unauthorized', onUnauthorized);
     return () => window.removeEventListener('dockpal:unauthorized', onUnauthorized);
