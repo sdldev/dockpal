@@ -339,8 +339,10 @@
 				</div>
 			</div>
 
-			<!-- Servers table: per-server resource + workload summary -->
-			<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
+			<!-- Servers table: per-server resource + workload summary.
+			     Clip X only: the row actions dropdown must escape the card
+			     vertically (overflow-y:hidden would cut it off at the edge). -->
+			<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-x-clip overflow-y-visible">
 				<table class="w-full">
 					<thead>
 							<tr class="border-b border-zinc-800 bg-zinc-950/20">
