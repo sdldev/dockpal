@@ -29,19 +29,23 @@ func securitySessionKey(instanceID string) string {
 // resolveInstanceSSHCreds decrypts the credential the panel holds for this
 // instance ("key" or "password") — shared by harden and security flows.
 func resolveInstanceSSHCreds(cryptoKey []byte, inst *db.Instance) (string, string, error) {
-	if len(inst.SSHKeyEncrypted) > 0 {
-		plain, err := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to decrypt stored SSH key")
-		}
-		return "key", string(plain), nil
-	}
+	// When a password is stored, connect with it: the panel key may not be
+	// authorized on the server yet (password bootstrap) — installing keys is
+	// the security job's JOB. After a key-only apply the password is gone and
+	// the key below is guaranteed authorized.
 	if len(inst.SSHPasswordEncrypted) > 0 {
 		plain, err := registry.Decrypt(inst.SSHPasswordEncrypted, cryptoKey)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to decrypt stored SSH password")
 		}
 		return "password", string(plain), nil
+	}
+	if len(inst.SSHKeyEncrypted) > 0 {
+		plain, err := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to decrypt stored SSH key")
+		}
+		return "key", string(plain), nil
 	}
 	return "", "", errors.New("no SSH credentials stored for this server — install the agent over SSH first")
 }
