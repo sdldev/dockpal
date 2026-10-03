@@ -6,6 +6,8 @@
   import { api } from '$lib/api/client';
   import { navTitle, navServerStatus, selectedInstance, sidebarOpen, currentUser, type NavServerStatus } from '$lib/store';
   import { navigate } from '$lib/router';
+  import { listInstances } from '$lib/api/stacks';
+  import type { InstanceListItem } from '$lib/types/api';
   import type { SystemInfo } from '$lib/types/api';
   import Icon from '../ui/Icon.svelte';
 
@@ -21,9 +23,9 @@
     return instanceId === 'local' ? '/system/info' : `/instances/${encodeURIComponent(instanceId)}/system/info`;
   }
 
-  async function fetchStatus() {
+  async function fetchStatus(instanceId: string) {
     try {
-      const s = await api.get<SystemInfo>(statusPath($selectedInstance));
+      const s = await api.get<SystemInfo>(statusPath(instanceId));
       lastGood = {
         hostname: s.hostname,
         os: s.os,
@@ -41,13 +43,76 @@
     }
   }
 
+  // Refetch immediately when the selected server changes, dropping the stale
+  // "last good" values so the chip never shows the previous server's data;
+  // the 10s interval keeps it fresh afterwards.
+  let lastStatusId = '';
+  $effect(() => {
+    const id = $selectedInstance;
+    if (id !== lastStatusId) {
+      lastStatusId = id;
+      lastGood = null;
+      navServerStatus.set(null);
+    }
+    void fetchStatus(id);
+  });
+
   onMount(() => {
-    fetchStatus();
-    pollTimer = setInterval(fetchStatus, 10000);
+    void loadServers();
+    pollTimer = setInterval(() => void fetchStatus($selectedInstance), 10000);
   });
 
   onDestroy(() => {
     if (pollTimer) clearInterval(pollTimer);
+  });
+
+  // Server switcher — the status chip doubles as the quick server switcher
+  // (the sidebar selector was removed when server context moved into the URL
+  // as /servers/:id). Picking a server navigates to its control panel.
+  let serversList = $state<InstanceListItem[]>([]);
+  let serverMenuOpen = $state(false);
+  let serverMenuWrap: HTMLDivElement | undefined = $state();
+
+  function serverLabel(inst: InstanceListItem): string {
+    return inst.id === 'local' ? 'This Server' : inst.name;
+  }
+
+  function serverOnline(inst: InstanceListItem): boolean {
+    return inst.id === 'local' || inst.status === 'online';
+  }
+
+  async function loadServers() {
+    try {
+      const res = await listInstances();
+      const list = Array.isArray(res) ? res : (res.instances ?? []);
+      // Guarantee the local daemon is always listed, even if the API omits it.
+      serversList = list.some((i) => i.id === 'local')
+        ? list
+        : [
+            { id: 'local', name: 'This Server', host: '', port: 0, mode: 'local', status: 'online', last_seen: 0 },
+            ...list
+          ];
+    } catch {
+      serversList = [];
+    }
+  }
+
+  function toggleServerMenu() {
+    serverMenuOpen = !serverMenuOpen;
+    if (serverMenuOpen) void loadServers();
+  }
+
+  function switchServer(id: string) {
+    serverMenuOpen = false;
+    if (id === $selectedInstance) return;
+    selectedInstance.set(id);
+    localStorage.setItem('dockpal_selected_instance', id);
+    navigate('server-detail', { id });
+  }
+
+  const currentServerLabel = $derived.by(() => {
+    const inst = serversList.find((i) => i.id === $selectedInstance);
+    return inst ? serverLabel(inst) : $selectedInstance === 'local' ? 'This Server' : $selectedInstance;
   });
 
   // Profile dropdown (username / role / logout). Closed by picking an item,
@@ -60,13 +125,19 @@
   }
 
   function handleWindowPointerDown(e: PointerEvent) {
+    if (serverMenuOpen && serverMenuWrap && !serverMenuWrap.contains(e.target as Node)) {
+      serverMenuOpen = false;
+    }
     if (profileOpen && profileWrap && !profileWrap.contains(e.target as Node)) {
       profileOpen = false;
     }
   }
 
   function handleWindowKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && profileOpen) profileOpen = false;
+    if (e.key === 'Escape') {
+      serverMenuOpen = false;
+      profileOpen = false;
+    }
   }
 
   function gotoSettings() {
@@ -101,23 +172,65 @@
 
   <div class="flex items-center gap-3 text-xs text-zinc-400 shrink-0">
     {#if $navServerStatus}
-      <span class="hidden sm:flex items-center gap-1.5">
-        <span
-          class="w-1.5 h-1.5 rounded-full"
-          class:bg-emerald-400={$navServerStatus.online}
-          class:bg-red-400={!$navServerStatus.online}
-          aria-hidden="true"
-        ></span>
-        <span class="font-medium text-zinc-300 truncate max-w-40" title={$navServerStatus.hostname}>
-          {$navServerStatus.hostname}
-        </span>
-      </span>
-      <span class="hidden md:inline text-zinc-600">•</span>
-      <span class="hidden md:inline">Docker {$navServerStatus.dockerVersion}</span>
-      <span class="hidden lg:inline text-zinc-600">•</span>
-      <span class="hidden lg:inline">{$navServerStatus.cpuCores} cores</span>
-      <span class="inline text-zinc-600">•</span>
-      <span class="inline capitalize">{$selectedInstance === 'local' ? 'This Server' : $selectedInstance}</span>
+      <div class="relative" bind:this={serverMenuWrap}>
+        <button
+          onclick={toggleServerMenu}
+          class="flex items-center gap-1.5 px-2 py-1 -my-1 rounded-sm border border-transparent hover:border-zinc-800 hover:bg-zinc-900 transition-colors"
+          aria-haspopup="menu"
+          aria-expanded={serverMenuOpen}
+          title="Switch server"
+        >
+          <span class="hidden sm:flex items-center gap-1.5">
+            <span
+              class="w-1.5 h-1.5 rounded-full"
+              class:bg-emerald-400={$navServerStatus.online}
+              class:bg-red-400={!$navServerStatus.online}
+              aria-hidden="true"
+            ></span>
+            <span class="font-medium text-zinc-300 truncate max-w-40" title={$navServerStatus.hostname}>
+              {$navServerStatus.hostname}
+            </span>
+          </span>
+          <span class="hidden md:inline text-zinc-600">•</span>
+          <span class="hidden md:inline">Docker {$navServerStatus.dockerVersion}</span>
+          <span class="hidden lg:inline text-zinc-600">•</span>
+          <span class="hidden lg:inline">{$navServerStatus.cpuCores} cores</span>
+          <span class="hidden sm:inline text-zinc-600">•</span>
+          <span class="inline text-zinc-300">{currentServerLabel}</span>
+          <Icon name="chevron-down" class="w-3 h-3 text-zinc-500" />
+        </button>
+
+        {#if serverMenuOpen}
+          <div
+            class="absolute right-0 top-full mt-2 w-60 bg-zinc-900 border border-zinc-800 rounded-sm shadow-xl py-2 z-40"
+            role="menu"
+          >
+            <div
+              class="px-3 pb-2 border-b border-zinc-800 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
+            >
+              Servers
+            </div>
+            {#each serversList as inst (inst.id)}
+              <button
+                onclick={() => switchServer(inst.id)}
+                class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors {inst.id === $selectedInstance ? 'bg-zinc-800/60 text-white' : 'text-zinc-300 hover:text-white hover:bg-zinc-800'}"
+                role="menuitem"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full shrink-0 {serverOnline(inst) ? 'bg-emerald-400' : 'bg-zinc-600'}"
+                  aria-hidden="true"
+                ></span>
+                <span class="truncate">{serverLabel(inst)}</span>
+                {#if inst.id === $selectedInstance}
+                  <span class="ml-auto text-[10px] uppercase font-semibold text-zinc-500">current</span>
+                {/if}
+              </button>
+            {:else}
+              <div class="px-3 py-2 text-xs text-zinc-600">No servers found</div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     {/if}
 
     {#if $currentUser}

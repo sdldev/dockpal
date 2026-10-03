@@ -1,5 +1,5 @@
 // Minimal URL router: syncs the `currentPage` store with the browser URL so the
-// SPA supports clean deep links (/dashboard, /servers, /containers/:id) and
+// SPA supports clean deep links (/servers, /servers/:id, /containers/:id) and
 // back/forward navigation — replacing the legacy Alpine router.
 import { writable } from 'svelte/store';
 import { currentPage, containersInitialTab } from './store';
@@ -12,12 +12,12 @@ export const routeParams = writable<RouteParams>({});
 
 // SPA page id → canonical path.
 const pagePaths: Record<string, string> = {
-	dashboard: '/dashboard',
 	servers: '/servers',
 	stacks: '/stacks',
 	compose: '/compose',
 	containers: '/containers',
 	'container-detail': '/containers', // dynamic: /containers/:id (see pageToPath)
+	'server-detail': '/servers', // dynamic: /servers/:id (see pageToPath)
 	integrations: '/integrations',
 	settings: '/settings'
 };
@@ -25,10 +25,12 @@ const pagePaths: Record<string, string> = {
 // Paths whose pages were folded into other pages by the IA consolidation,
 // kept working for old bookmarks: Images → Containers tab, Installed Apps
 // (updates) → Stacks tab, Webhooks/Domains → Integrations tabs, Admin →
-// Settings tab, App Installer → Stacks catalog, /fleet + /instances → the
-// Servers page (renamed in the v1.0.0 IA).
+// Settings tab, App Installer → Stacks catalog, /dashboard + /fleet +
+// /instances → the Servers page (the old Dashboard became the per-server
+// detail at /servers/:id in the v1.0.0 IA).
 const legacyAliases: Record<string, string> = {
 	'/fleet': 'servers',
+	'/dashboard': 'servers',
 	'/profile': 'settings',
 	'/registry': 'settings',
 	'/admin': 'settings',
@@ -58,6 +60,11 @@ export function pathToPage(path: string): { page: string; params: RouteParams } 
 		return { page: 'container-detail', params: { id: decodeURIComponent(parts[1]) } };
 	}
 
+	// /servers/:id → server detail (the per-server control panel)
+	if (parts[0] === 'servers' && parts.length === 2 && parts[1]) {
+		return { page: 'server-detail', params: { id: decodeURIComponent(parts[1]) } };
+	}
+
 	const base = '/' + parts[0];
 	if (legacyAliases[base]) {
 		// The `/images` alias lands on the Containers page; flag it so the page
@@ -77,6 +84,9 @@ export function pathToPage(path: string): { page: string; params: RouteParams } 
 export function pageToPath(page: string, params: RouteParams = {}): string {
 	if (page === 'container-detail' && params.id) {
 		return '/containers/' + encodeURIComponent(params.id);
+	}
+	if (page === 'server-detail' && params.id) {
+		return '/servers/' + encodeURIComponent(params.id);
 	}
 	return pagePaths[page] ?? '/servers';
 }

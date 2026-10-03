@@ -1,20 +1,30 @@
 <script lang="ts">
-  // Dashboard with live host statistics — port of the legacy UI's dashboard:
-  // system status + disk gauge, a 3-card row (CPU chart, Memory chart, info
-  // list of running/stopped/containers/images).
+  // Server detail — the per-server control panel at /servers/:id (the old
+  // "Dashboard" page): system status + disk gauge, metrics history charts,
+  // and an info list of running/stopped/containers/images.
   // Polls system/info every 2.5s with a 30-point rolling window (legacy parity).
   import { onMount } from 'svelte';
   import { api } from '../../lib/api/client';
   import { addToast } from '../../lib/store';
   import { selectedInstance } from '../../lib/store';
   import { get } from 'svelte/store';
+  import { routeParams } from '../../lib/router';
   import type { ContainerInfo } from '../../lib/types/api';
   import type { SystemInfo } from '../../lib/types/generated';
-  import HealthWidget from '../Dashboard/HealthWidget.svelte';
-  import MetricsHistory from '../Dashboard/MetricsHistory.svelte';
+  import HealthWidget from '../servers/HealthWidget.svelte';
+  import MetricsHistory from '../servers/MetricsHistory.svelte';
   import { newStatBuffer, pushPoint, type StatBuffer } from '$lib/stats-history';
 
-  let instanceId = $state(get(selectedInstance) || 'local');
+  // The controlled server comes from the URL (/servers/:id), falling back to
+  // the selected instance for robustness. Deep links also sync
+  // selectedInstance so the instance-scoped pages (Stacks, Containers,
+  // Compose) follow the server being viewed here.
+  const requestedId = get(routeParams).id;
+  let instanceId = $state(requestedId || get(selectedInstance) || 'local');
+  if (requestedId && requestedId !== get(selectedInstance)) {
+    selectedInstance.set(requestedId);
+    localStorage.setItem('dockpal_selected_instance', requestedId);
+  }
 
   let containers = $state<ContainerInfo[]>([]);
   let loading = $state(true);
@@ -33,8 +43,8 @@
 
   // Tracks whether the live poll has gone silent. We still keep the last known
   // values (legacy behavior) but no longer pretend they are live: the header
-  // badge tells the user the data is stale so they don't read a frozen
-  // dashboard as "everything is fine".
+  // badge tells the user the data is stale so they don't read a frozen panel
+  // as "everything is fine".
   let stale = $state(false);
   let lastSuccessAt = $state<number | null>(null);
   let staleAgeLabel = $state('');
@@ -115,7 +125,6 @@
   }
 
   onMount(() => {
-    instanceId = get(selectedInstance) || 'local';
     (async () => {
       await Promise.all([loadContainers(), loadImageCount(), pollSystemInfo()]);
       loading = false;

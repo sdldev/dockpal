@@ -7,7 +7,7 @@
   import Login from './components/pages/Login.svelte';
   import Sidebar from './components/layout/Sidebar.svelte';
   import ToastContainer from './components/layout/ToastContainer.svelte';
-  import Dashboard from './components/pages/Dashboard.svelte';
+  import ServerDetailPage from './components/pages/ServerDetailPage.svelte';
   import ContainersPage from './components/pages/ContainersPage.svelte';
   import SettingsPage from './components/pages/SettingsPage.svelte';
   import IntegrationsPage from './components/pages/IntegrationsPage.svelte';
@@ -55,7 +55,7 @@
   // Navheader title follows the active page (pages keep their own internal
   // sub-headings; the top-level title/description now lives only here).
   const pageTitles: Record<string, string> = {
-    dashboard: 'Dashboard',
+    'server-detail': 'Server',
     servers: 'Servers',
     stacks: 'Stacks',
     compose: 'Compose',
@@ -65,7 +65,7 @@
     settings: 'Settings'
   };
   $effect(() => {
-    navTitle.set(pageTitles[$currentPage] ?? 'Dashboard');
+    navTitle.set(pageTitles[$currentPage] ?? 'Dockpal');
   });
 
   onMount(() => {
@@ -109,11 +109,11 @@
       <NavHeader logout={logout} />
       <main class="flex-1 p-4 sm:p-6 overflow-auto">
         <!-- Remount the current page when the selected instance changes so
-             instance-scoped pages (Dashboard, Stacks, Compose...) re-fetch
+             instance-scoped pages (Server detail, Stacks, Compose...) re-fetch
              instead of showing stale data from the previous server. -->
         {#key $selectedInstance}
-          {#if $currentPage === 'dashboard'}
-            <Dashboard />
+          {#if $currentPage === 'server-detail'}
+            <ServerDetailPage />
           {:else if $currentPage === 'servers'}
             <ServersPage />
           {:else if $currentPage === 'containers'}

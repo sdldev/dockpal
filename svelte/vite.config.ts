@@ -30,6 +30,13 @@ export default defineConfig({
         target: 'http://localhost:3012',
         changeOrigin: true,
         ws: true // deploy log streaming: /api/instances/:id/deploy/stream/:deployId
+      },
+      // Panel health lives outside /api; without this the dev server would
+      // answer /health with the SPA's index.html and HealthWidget would
+      // choke on it.
+      '/health': {
+        target: 'http://localhost:3012',
+        changeOrigin: true
       }
     }
   }

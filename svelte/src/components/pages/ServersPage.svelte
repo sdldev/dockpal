@@ -75,12 +75,12 @@
 		return $isAdmin && id !== 'local';
 	}
 
-	// Open a server in the Dashboard: make it the active instance (persisted)
-	// and navigate there — same flow as picking it in the sidebar selector.
+	// Open a server's control panel (/servers/:id): make it the active
+	// instance (persisted, so Stacks/Containers follow) and navigate.
 	function openServer(id: string) {
 		selectedInstance.set(id);
 		localStorage.setItem('dockpal_selected_instance', id);
-		navigate('dashboard');
+		navigate('server-detail', { id });
 	}
 
 	function openEdit(inst: { id: string; name: string; host?: string; port?: number }) {
@@ -152,7 +152,7 @@
 		// Poll at 15s, not 5s: fetchMetrics issues 3 requests per instance
 		// (system/info + containers + images), so a 5s cadence with a few
 		// instances already exceeds the backend's 60 req/min read limit and the
-		// gauges start rendering zeros from 429s. 15s keeps the dashboard fresh
+		// gauges start rendering zeros from 429s. 15s keeps the page fresh
 		// while staying well under the limit.
 		servers.startPolling(15000);
 	});
@@ -367,7 +367,7 @@
 								<td class="px-4 py-3">
 									<button
 										class="flex items-center gap-2 text-left hover:bg-zinc-800/40 -mx-2 -my-1.5 px-2 py-1.5 rounded transition-colors group"
-										title={`Open ${inst.id === 'local' ? 'This Server' : inst.name} in the Dashboard`}
+										title={`Open ${inst.id === 'local' ? 'This Server' : inst.name} control panel`}
 										onclick={() => openServer(inst.id)}
 									>
 										<span

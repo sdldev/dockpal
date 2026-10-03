@@ -1,7 +1,7 @@
 <script lang="ts">
   // Metrics history panel — time-series charts over the recorded host
   // metrics with a range selector (Live rolling buffer, or 1h/12h from the
-  // recorder). This is what lets the dashboard answer "when did the server
+  // recorder). This is what lets the server panel answer "when did the server
   // spike?", not just "what is happening right now".
   //
   // Data comes from GET /api/instances/:id/metrics/history (backend
@@ -42,7 +42,7 @@
 
   interface Props {
     instanceId?: string;
-    // Live buffers pushed by the dashboard's own 2.5s poll (used for the
+    // Live buffers pushed by the server panel's own 2.5s poll (used for the
     // 'live' range only).
     liveCpu?: number[];
     liveRam?: number[];

@@ -38,7 +38,7 @@ export const sidebarOpen = writable<boolean>(true);
 
 // Current page title shown in the navheader (set by each page, or derived
 // from the route id when a page doesn't set one).
-export const navTitle = writable<string>('Dashboard');
+export const navTitle = writable<string>('Dockpal');
 
 // Server status summary for the navheader right side (instance + docker).
 export interface NavServerStatus {

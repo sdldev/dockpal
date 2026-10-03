@@ -119,8 +119,10 @@ To add a page:
 4. Add a sidebar entry in `svelte/src/components/layout/Sidebar.svelte` (`nav` array) if it
    belongs in navigation
 
-Current sidebar IA (post-simplification, see commit `fa1a045`): **6 items** —
-Dashboard, Servers (multi-instance only, was "Fleet"), Stacks, Containers,
+Current sidebar IA (post-simplification, commits `fa1a045` + `eab0e1b`): **5 items** —
+Servers (always visible; the per-server control panel is `/servers/:id` via
+`ServerDetailPage` — the old Dashboard page — and the server switcher is the
+NavHeader status-chip menu, not a sidebar selector), Stacks, Containers,
 Integrations, Settings. Features consolidated as **tabs inside pages** rather
 than top-level entries: Stacks hosts My Stacks + Catalog + Updates; Containers
 hosts Containers + Images; Integrations hosts Webhooks + Domains; Settings
@@ -128,10 +130,12 @@ hosts Profile + Administration (admin-only). Pages embedded as tabs accept a
 `hideHeader` prop so their own heading doesn't duplicate the navheader.
 
 Navigate programmatically with `navigate(page, params)` from `lib/router.ts` — **not**
-`currentPage.set(...)`, which desyncs the URL. Legacy Alpine paths (`/profile`,
-`/registry`, `/deploy`, `/instances`, `/add-instance`) are aliased in `router.ts` so old
-bookmarks keep working. The `$lib` alias must stay in sync between `vite.config.ts` and
-`tsconfig.json`.
+`currentPage.set(...)`, which desyncs the URL. Legacy paths (`/profile`,
+`/registry`, `/deploy`, `/instances`, `/add-instance`, `/dashboard`, `/fleet`) are
+aliased in `router.ts` so old bookmarks keep working. Instance-scoped pages
+(Stacks, Containers, Compose) follow the `selectedInstance` store, which
+`/servers/:id` and the NavHeader switcher keep in sync with the URL. The `$lib`
+alias must stay in sync between `vite.config.ts` and `tsconfig.json`.
 
 Layout (post-navheader, commit `4cb776a`): `App.svelte` renders a **collapsible
 sidebar** (store `sidebarOpen` in `lib/store.ts`; toggled by the hamburger in
