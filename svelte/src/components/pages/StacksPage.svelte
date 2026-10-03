@@ -4,7 +4,7 @@
   // The Catalog tab hosts the former "App Installer" (one-click templates +
   // raw Compose/Git deploys) so "create something" has one home.
   import { onMount } from 'svelte';
-  import { listStacks, listInstances, type Stack, type InstanceListItem } from '$lib/api/stacks';
+  import { listStacks, listInstances, type Stack } from '$lib/api/stacks';
   import { stackStatusColor } from '$lib/stack-utils';
   import { currentStackName, selectedInstance } from '$lib/store';
   import { navigate } from '$lib/router';
@@ -12,7 +12,6 @@
   import AppsPage from './AppsPage.svelte';
 
   let stacks = $state<Stack[]>([]);
-  let instances = $state<InstanceListItem[]>([]);
   let loading = $state(true);
   let error = $state('');
 
@@ -34,33 +33,20 @@
     }
   }
 
-  async function loadInstances() {
+  // Fallback only: if the stored selection no longer exists (fresh data dir
+  // or removed instance), reset to local. Picking an instance is the
+  // NavHeader server switcher's job — this page just follows the store.
+  async function ensureSelectionValid() {
     try {
       const res = await listInstances();
       const list = Array.isArray(res) ? res : (res.instances ?? []);
-      // "local" is rendered as the hardcoded first option — drop the API's
-      // pseudo-entry to avoid a duplicate.
-      instances = list.filter((i) => i.id !== 'local');
-
-      // Fallback: if the stored selection no longer exists (e.g. fresh data
-      // dir or removed instance), reset to local and refresh.
       const selected = $selectedInstance;
       const exists = selected === 'local' || list.some((i) => i.id === selected);
       if (!exists) {
         selectedInstance.set('local');
         localStorage.setItem('dockpal_selected_instance', 'local');
-        await refresh();
       }
-    } catch {
-      instances = [];
-    }
-  }
-
-  function onInstanceChange(e: Event) {
-    const id = (e.target as HTMLSelectElement).value;
-    selectedInstance.set(id);
-    localStorage.setItem('dockpal_selected_instance', id);
-    refresh();
+    } catch { /* keep current selection on error */ }
   }
 
   function openStack(name: string) {
@@ -74,28 +60,19 @@
   }
 
   onMount(() => {
-    loadInstances();
+    ensureSelectionValid();
+  });
+
+  // Reload whenever the NavHeader switcher changes the target instance
+  // (covers mount and the fallback reset above too).
+  $effect(() => {
+    void $selectedInstance;
     refresh();
   });
 </script>
 
 <div class="max-w-6xl">
   <div class="mb-6 flex items-center justify-end gap-3">
-    <label class="flex items-center gap-2 text-sm text-zinc-400">
-      Instance
-      <select
-        class="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
-        value={$selectedInstance}
-        onchange={onInstanceChange}
-      >
-        <option value="local">local (this host)</option>
-        {#each instances as inst (inst.id)}
-          <option value={inst.id} disabled={inst.status === 'offline'}>
-            {inst.name} ({inst.status})
-          </option>
-        {/each}
-      </select>
-    </label>
     <button
       class="rounded-sm bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
       onclick={createStack}

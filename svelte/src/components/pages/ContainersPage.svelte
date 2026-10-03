@@ -8,10 +8,24 @@
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-	import { addToast, selectedInstance, isOperator, containersInitialTab } from '$lib/store';
+	import { addToast, selectedInstance, isOperator, containersInitialTab, currentStackName } from '$lib/store';
 	import ImagesPage from './ImagesPage.svelte';
 	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
+
+	// A container belongs to a stack when compose labelled it. Standard compose
+	// (Dockge-style stacks) sets com.docker.compose.project; template deploys
+	// set dockpal.project. Either way the value is the stack/project name.
+	function stackOf(c: ContainerInfo): string | null {
+		const l = c.labels;
+		if (!l) return null;
+		return l['com.docker.compose.project'] || l['dockpal.project'] || null;
+	}
+
+	function openStack(name: string) {
+		currentStackName.set(name);
+		navigate('compose');
+	}
 
 	// Images live here as a tab (infra view), keeping the sidebar focused.
 	const tabs = ['containers', 'images'] as const;
@@ -96,6 +110,32 @@
 	function toggleDetail(id: string) {
 		selectedContainerId = selectedContainerId === id ? null : id;
 	}
+
+	// Group containers by owning stack so the table mirrors the Stacks page:
+	// stack-owned rows sort under a project header, everything else ("other")
+	// follows ungrouped. Stacks sort A→Z for a stable order.
+	interface StackGroup {
+		name: string;
+		items: ContainerInfo[];
+	}
+	const groups = $derived.by(() => {
+		const byStack = new Map<string, ContainerInfo[]>();
+		const others: ContainerInfo[] = [];
+		for (const c of containers) {
+			const s = stackOf(c);
+			if (s) {
+				const arr = byStack.get(s) ?? [];
+				arr.push(c);
+				byStack.set(s, arr);
+			} else {
+				others.push(c);
+			}
+		}
+		const named: StackGroup[] = [...byStack.entries()]
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([name, items]) => ({ name, items }));
+		return others.length > 0 ? [...named, { name: '', items: others }] : named;
+	});
 </script>
 
 <div class="space-y-4">
@@ -138,7 +178,22 @@
 			</tr>
 		</thead>
 		<tbody>
-			{#each containers as container (container.id)}
+			{#each groups as group (group.name || '__other__')}
+				{#if group.name}
+					<tr class="border-b border-zinc-800/50 bg-zinc-800/30">
+						<td colspan="5" class="px-4 py-1.5">
+							<button
+								class="flex items-center gap-2 text-xs font-medium text-sky-400 hover:text-sky-300"
+								title="Open this stack"
+								onclick={() => openStack(group.name)}
+							>
+								<Icon name="stacks" />
+								Stack: {group.name}
+							</button>
+						</td>
+					</tr>
+				{/if}
+			{#each group.items as container (container.id)}
 				<tr class="border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors">
 						<td class="px-4 py-2.5 text-sm text-white">
 							<button class="hover:text-sky-400 hover:underline" onclick={() => navigate('container-detail', { id: container.id })}>{container.name}</button>
@@ -180,9 +235,11 @@
 							</div>
 						</td>
 				</tr>
-			{:else}
-				<tr><td colspan="5" class="text-center py-8 text-zinc-600">{loading ? 'Loading...' : 'No containers found'}</td></tr>
 			{/each}
+			{/each}
+			{#if containers.length === 0}
+				<tr><td colspan="5" class="text-center py-8 text-zinc-600">{loading ? 'Loading...' : 'No containers found'}</td></tr>
+			{/if}
 		</tbody>
 	</table>
 
@@ -194,14 +251,18 @@
 		</div>
 	{/if}
 
-	<!-- Delete confirmation -->
-	<ConfirmDialog
-		open={pendingDelete !== null}
-		title="Delete container"
-		message={`Delete container ${pendingDelete?.name ?? ''}? This stops and removes the container. Its volumes are kept unless you remove them separately. This cannot be undone.`}
-		busy={actionBusy === pendingDelete?.id}
-		onconfirm={confirmDelete}
-		onclose={() => (pendingDelete = null)}
-	/>
+		<!-- Delete confirmation — stack-owned containers get an explicit warning
+		     because deleting one makes its stack go "partial" (see Stacks). -->
+		{@const pendingStack = pendingDelete ? stackOf(pendingDelete) : null}
+		<ConfirmDialog
+			open={pendingDelete !== null}
+			title={pendingStack ? 'Delete stack-managed container' : 'Delete container'}
+			message={pendingStack
+				? `${pendingDelete?.name} is managed by stack "${pendingStack}". Deleting it here leaves the stack "partial" — it comes back on the next stack deploy/restart. Prefer Stacks → ${pendingStack} → Down to stop the whole stack cleanly. Delete anyway?`
+				: `Delete container ${pendingDelete?.name ?? ''}? This stops and removes the container. Its volumes are kept unless you remove them separately. This cannot be undone.`}
+			busy={actionBusy === pendingDelete?.id}
+			onconfirm={confirmDelete}
+			onclose={() => (pendingDelete = null)}
+		/>
 	{/if}
 </div>

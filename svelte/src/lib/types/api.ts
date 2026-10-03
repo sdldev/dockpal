@@ -55,6 +55,7 @@ export interface ContainerInfo {
   ports: PortSummary[];
   created: number;
   network_mode?: string;
+  labels?: Record<string, string>;
 }
 
 // GET /api/instances — summary row per registered Docker host (incl. "local").
