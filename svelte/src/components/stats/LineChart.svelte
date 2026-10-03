@@ -1,13 +1,27 @@
+<script module lang="ts">
+  // chart.js (~200 kB minified) ships as its own lazy chunk: only chart
+  // components need it, so it's imported on first render instead of weighing
+  // down the entry bundle. Module scope = one shared load + registration for
+  // every chart instance (Chart.register is idempotent anyway).
+  let chartModulePromise: Promise<typeof import('chart.js')> | null = null;
+
+  export function loadChart(): Promise<typeof import('chart.js')> {
+    chartModulePromise ??= import('chart.js').then((m) => {
+      m.Chart.register(
+        m.LineController, m.LineElement, m.PointElement, m.LinearScale,
+        m.CategoryScale, m.Filler, m.Tooltip, m.Legend
+      );
+      return m;
+    });
+    return chartModulePromise;
+  }
+</script>
+
 <script lang="ts">
   // Chart.js 4 line chart wrapper — mirrors the legacy UI's charts.js config:
   // fill:true, tension:0.3, pointRadius:0, hidden legend, update('none').
   import { onMount, onDestroy } from 'svelte';
-  import {
-    Chart, LineController, LineElement, PointElement, LinearScale,
-    CategoryScale, Filler, Tooltip, Legend
-  } from 'chart.js';
-
-  Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip, Legend);
+  import type { Chart } from 'chart.js';
 
   export interface ChartSeries {
     label: string;
@@ -35,10 +49,16 @@
 
   let canvas: HTMLCanvasElement;
   let chart: Chart | null = null;
+  // Guards against racing builds: two overlapping async builds could both see
+  // `chart === null` and construct twice on the same canvas.
+  let buildRun = 0;
 
   function defaultYFmt(v: number) { return `${Number(v).toFixed(0)}%`; }
 
-  function buildOrUpdate() {
+  async function buildOrUpdate() {
+    const run = ++buildRun;
+    const { Chart: ChartCtor } = await loadChart();
+    if (run !== buildRun || !canvas) return; // superseded or destroyed meanwhile
     // Copy labels/data into plain arrays: callers pass Svelte $state proxies,
     // and Chart.js does Object.defineProperty(data, '_chartjs', ...) in
     // listenArrayEvents(), which Svelte's state proxy rejects with
@@ -71,7 +91,7 @@
       return;
     }
 
-    chart = new Chart(canvas, {
+    chart = new ChartCtor(canvas, {
       type: 'line',
       data,
       options: {
@@ -97,16 +117,17 @@
     });
   }
 
-  onMount(() => buildOrUpdate());
+  onMount(() => void buildOrUpdate());
 
   $effect(() => {
     // Re-run when any reactive input changes
     void labels.length;
     void series.map((s) => [s.label, s.data.length]);
-    if (canvas) buildOrUpdate();
+    if (canvas) void buildOrUpdate();
   });
 
   onDestroy(() => {
+    buildRun++; // invalidate any in-flight build
     chart?.destroy();
     chart = null;
   });

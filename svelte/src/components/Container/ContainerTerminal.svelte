@@ -7,10 +7,21 @@
   // binary frames; size changes are sent as JSON control frames that the
   // server applies with docker exec resize.
   import { onDestroy, tick } from 'svelte';
-  import { Terminal } from '@xterm/xterm';
-  import { FitAddon } from '@xterm/addon-fit';
-  import '@xterm/xterm/css/xterm.css';
+  import type { Terminal } from '@xterm/xterm';
+  import type { FitAddon } from '@xterm/addon-fit';
   import { getWSTicket } from '$lib/api/containers';
+
+  // xterm.js (~250 kB minified) is imported on demand: only this component
+  // needs the emulator, so it ships as its own lazy chunk (like the YAML
+  // CodeMirror editor) instead of weighing down the entry bundle. The bundled
+  // import() runtime caches loaded chunks, so repeat calls are cheap.
+  async function loadXterm() {
+    return Promise.all([
+      import('@xterm/xterm'),
+      import('@xterm/addon-fit'),
+      import('@xterm/xterm/css/xterm.css')
+    ]);
+  }
 
   interface Props {
     instanceId: string;
@@ -49,7 +60,9 @@
     status = 'connecting';
     statusMessage = '';
 
-    term = new Terminal({
+    const [{ Terminal: TerminalCtor }, { FitAddon: FitAddonCtor }] = await loadXterm();
+
+    term = new TerminalCtor({
       cursorBlink: true,
       scrollback: 5000,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
@@ -61,7 +74,7 @@
         selectionBackground: '#264f78'
       }
     });
-    fitAddon = new FitAddon();
+    fitAddon = new FitAddonCtor();
     term.loadAddon(fitAddon);
     term.onData((data) => {
       // emulator input → container stdin (binary frame). Drop input while the
