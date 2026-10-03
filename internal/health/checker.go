@@ -129,31 +129,33 @@ func readHostUptimeSeconds() float64 {
 	return -1
 }
 
-// CheckHealth performs all health checks and returns the overall health status
-func (c *Checker) CheckHealth(ctx context.Context) *HealthResponse {
-	response := c.newHealthResponse()
-
-	// Perform all health checks
-	checks := map[string]func(context.Context) CheckResult{
-		"database":  c.checkDatabase,
-		"docker":    c.checkDocker,
-		"disk_root": c.checkRootDiskSpace,
-		"disk_data": c.checkDataDiskSpace,
-		"memory":    c.checkMemory,
-	}
-
+// runChecks executes the named checks into the response and derives the
+// overall status: any fail is unhealthy, otherwise any warn is degraded.
+func runChecks(ctx context.Context, response *HealthResponse, checks map[string]func(context.Context) CheckResult) {
 	for name, checkFunc := range checks {
 		result := checkFunc(ctx)
 		response.Checks[name] = result
 		response.summary[result.Status]++
 	}
 
-	// Determine overall status based on check results
 	if response.summary[CheckFail] > 0 {
 		response.Status = StatusUnhealthy
 	} else if response.summary[CheckWarn] > 0 {
 		response.Status = StatusDegraded
 	}
+}
+
+// CheckHealth performs all health checks and returns the overall health status
+func (c *Checker) CheckHealth(ctx context.Context) *HealthResponse {
+	response := c.newHealthResponse()
+
+	runChecks(ctx, response, map[string]func(context.Context) CheckResult{
+		"database":  c.checkDatabase,
+		"docker":    c.checkDocker,
+		"disk_root": c.checkRootDiskSpace,
+		"disk_data": c.checkDataDiskSpace,
+		"memory":    c.checkMemory,
+	})
 
 	return response
 }
@@ -179,23 +181,10 @@ func (c *Checker) CheckReadiness(ctx context.Context) *HealthResponse {
 	response := c.newHealthResponse()
 
 	// For readiness, check critical dependencies
-	checks := map[string]func(context.Context) CheckResult{
+	runChecks(ctx, response, map[string]func(context.Context) CheckResult{
 		"database": c.checkDatabase,
 		"docker":   c.checkDocker,
-	}
-
-	for name, checkFunc := range checks {
-		result := checkFunc(ctx)
-		response.Checks[name] = result
-		response.summary[result.Status]++
-	}
-
-	// Determine overall status
-	if response.summary[CheckFail] > 0 {
-		response.Status = StatusUnhealthy
-	} else if response.summary[CheckWarn] > 0 {
-		response.Status = StatusDegraded
-	}
+	})
 
 	return response
 }
@@ -315,38 +304,66 @@ func (c *Checker) checkDiskSpace(ctx context.Context, path string) CheckResult {
 	}
 }
 
+// readCgroupMemoryAvailableMB reports the memory still allowed to this cgroup
+// when cgroup v2 sets a finite ceiling; ok is false when the ceiling is absent
+// ("max"), unreadable, or the current usage cannot be read.
+func readCgroupMemoryAvailableMB() (availableMB int64, ok bool) {
+	raw, err := os.ReadFile("/sys/fs/cgroup/memory.max")
+	if err != nil {
+		return 0, false
+	}
+	limit := strings.TrimSpace(string(raw))
+	if limit == "" || limit == "max" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(limit, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+
+	curRaw, err := os.ReadFile("/sys/fs/cgroup/memory.current")
+	if err != nil {
+		return 0, false
+	}
+	cur, err := strconv.ParseInt(strings.TrimSpace(string(curRaw)), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return (n - cur) / (1024 * 1024), true
+}
+
+// readMeminfoAvailableMB parses MemAvailable from /proc/meminfo; ok is false
+// when the file is unreadable or the figure is missing or malformed.
+func readMeminfoAvailableMB() (availableMB int64, ok bool) {
+	meminfo, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(meminfo), "\n") {
+		if !strings.HasPrefix(line, "MemAvailable:") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[2] == "kB" {
+			if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+				return kb / 1024, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // readAvailableMemoryMB reports available system memory in MB and where the
 // figure came from. A container memory ceiling wins over host meminfo, since
 // the process cannot use more than its cgroup allows.
 func readAvailableMemoryMB() (availableMB int64, source string) {
-	// cgroup v2: respect the container's memory ceiling when one is set.
-	if raw, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
-		limit := strings.TrimSpace(string(raw))
-		if limit != "" && limit != "max" {
-			if n, err := strconv.ParseInt(limit, 10, 64); err == nil && n > 0 {
-				if curRaw, err := os.ReadFile("/sys/fs/cgroup/memory.current"); err == nil {
-					if cur, err := strconv.ParseInt(strings.TrimSpace(string(curRaw)), 10, 64); err == nil {
-						return (n - cur) / (1024 * 1024), "cgroup-v2"
-					}
-				}
-			}
-		}
+	if mb, ok := readCgroupMemoryAvailableMB(); ok {
+		return mb, "cgroup-v2"
 	}
-
-	// Host memory (also visible inside most containers).
-	if meminfo, err := os.ReadFile("/proc/meminfo"); err == nil {
-		for _, line := range strings.Split(string(meminfo), "\n") {
-			if strings.HasPrefix(line, "MemAvailable:") {
-				fields := strings.Fields(line)
-				if len(fields) == 3 && fields[2] == "kB" {
-					if kb, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
-						return kb / 1024, "meminfo"
-					}
-				}
-			}
-		}
+	if mb, ok := readMeminfoAvailableMB(); ok {
+		return mb, "meminfo"
 	}
-
 	return 0, "unavailable"
 }
 
