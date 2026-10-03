@@ -218,3 +218,39 @@ export interface SystemInfo {
 	network_tx_bps: number;
 }
 
+
+// Matches ssh.SecurityActivity JSON (GET /api/instances/:id/security/activity)
+// — bounded fail2ban + firewall snapshot fetched over the panel's stored SSH
+// credential. Unreadable pieces fail soft to "unknown"/zero.
+export interface SecurityActivity {
+	fail2ban: Fail2banActivity;
+	firewall: FirewallActivity;
+	checked_at: number;
+}
+
+export interface Fail2banActivity {
+	active: 'active' | 'inactive' | 'unknown';
+	currently_banned: number;
+	total_banned: number;
+	total_failed: number;
+	banned_ips: string[];
+	events: string[];
+	read_error?: string;
+}
+
+export interface FirewallActivity {
+	tool: 'ufw' | 'firewalld' | 'none' | 'unknown';
+	active: 'active' | 'inactive' | 'unknown';
+	status: string;
+	blocks_24h: number;
+	block_lines: string[];
+	read_error?: string;
+}
+
+// GET /api/instances/:id/security/activity response — 200 with an optional
+// `error` field when the probe itself failed (same contract as detect).
+export interface SecurityActivityResponse {
+	activity: SecurityActivity;
+	cached: boolean;
+	error?: string;
+}

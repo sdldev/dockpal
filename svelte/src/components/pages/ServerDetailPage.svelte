@@ -13,7 +13,9 @@
   import type { SystemInfo } from '../../lib/types/generated';
   import HealthWidget from '../servers/HealthWidget.svelte';
   import MetricsHistory from '../servers/MetricsHistory.svelte';
+  import SecurityActivityCard from '../servers/SecurityActivityCard.svelte';
   import { newStatBuffer, pushPoint, type StatBuffer } from '$lib/stats-history';
+  import type { InstanceListItem } from '../../lib/types/api';
 
   // The controlled server comes from the URL (/servers/:id), falling back to
   // the selected instance for robustness. Deep links also sync
@@ -30,6 +32,23 @@
   let loading = $state(true);
   let error = $state('');
   let imageCount = $state(0);
+
+  // Cached fail2ban badge value for the security card's collapsed summary —
+  // read once from the instance record so a glance costs no SSH connection.
+  let fail2banState = $state('');
+
+  async function loadInstance() {
+    if (instanceId === 'local') {
+      fail2banState = '';
+      return;
+    }
+    try {
+      const inst = await api.get<InstanceListItem>(`/instances/${encodeURIComponent(instanceId)}`);
+      fail2banState = inst.sec_fail2ban ?? '';
+    } catch {
+      fail2banState = '';
+    }
+  }
 
   // --- host stats (polling) ---
   let sysInfo = $state<SystemInfo | null>(null);
@@ -129,6 +148,7 @@
       await Promise.all([loadContainers(), loadImageCount(), pollSystemInfo()]);
       loading = false;
     })();
+    loadInstance();
     pollTimer = setInterval(pollSystemInfo, 2500);
     imageTimer = setInterval(loadImageCount, 30000);
     return () => {
@@ -243,4 +263,8 @@
       </div>
     </div>
   {/if}
+
+  <!-- Security activity (fail2ban + firewall): collapsed by default, SSH
+       only fires when the user expands or refreshes (server-side TTL cache). -->
+  <SecurityActivityCard {instanceId} {fail2banState} />
 </div>

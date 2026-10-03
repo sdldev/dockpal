@@ -96,6 +96,7 @@ type TestResult struct {
 // RegisterInstanceRoutes adds instance CRUD and enrollment endpoints.
 func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent.Manager, jwtSecret string, logsManager *InstallLogsManager) {
 	hardenRunning := &sync.Map{} // instanceID -> struct{}{} while a harden/security job runs
+	activityCache := newSecurityActivityCache() // fail2ban/firewall snapshot cache (TTL + single-flight)
 	g.POST("/instances", RequireRole(auth.RoleAdmin), handleCreateInstance(database, jwtSecret))
 	g.GET("/instances", RequireRole(auth.RoleViewer), handleListInstances(database))
 	g.GET("/instances/:instance_id", RequireRole(auth.RoleViewer), handleGetInstance(database, jwtSecret))
@@ -108,6 +109,8 @@ func RegisterInstanceRoutes(g *gin.RouterGroup, database *db.DB, agentMgr *agent
 	g.GET("/instances/:instance_id/security", RequireRole(auth.RoleOperator), handleDetectSecurity(database, jwtSecret))
 	g.POST("/instances/:instance_id/security", RequireRole(auth.RoleAdmin), handleApplySecurity(database, jwtSecret, logsManager, hardenRunning))
 	g.GET("/instances/:instance_id/security/logs", RequireRole(auth.RoleAdmin), handleSecurityLogs(logsManager))
+	g.GET("/instances/:instance_id/security/activity", RequireRole(auth.RoleOperator), handleSecurityActivity(database, jwtSecret, activityCache))
+	g.POST("/instances/:instance_id/security/unban", RequireRole(auth.RoleAdmin), handleSecurityUnban(database, jwtSecret, activityCache))
 }
 
 // handleCreateInstance creates a new instance with a generated agent token.
