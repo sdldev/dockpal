@@ -217,12 +217,10 @@
 							<dt class="text-zinc-500">Image</dt>
 							<dd class="text-zinc-300 font-mono">{detail.image}</dd>
 						</div>
-						{#if detail.ports && detail.ports.length > 0}
-							<div class="flex justify-between">
-								<dt class="text-zinc-500">Ports</dt>
-								<dd class="text-zinc-300 font-mono">{formatPorts(detail.ports)}</dd>
-							</div>
-						{/if}
+						<div class="flex justify-between">
+							<dt class="text-zinc-500">Ports</dt>
+							<dd class="text-zinc-300 font-mono">{formatPorts(detail.ports)}</dd>
+						</div>
 						{#if detail.command && detail.command.length > 0}
 							<div class="flex justify-between">
 								<dt class="text-zinc-500">Command</dt>
