@@ -1,0 +1,1833 @@
+{
+  "version": 1,
+  "created_at": 1791071596,
+  "findings": [
+    {
+      "fingerprint": "0860e0a06d5e8398b657b691ac7c10171d37d020d42ba0ce93b45c56295f6806",
+      "rule": "documentation/agent-context",
+      "path": "AGENTS.md",
+      "line": 8,
+      "strength": "review",
+      "message": "Section `What this is` at line 8 only describes the project, which agents read from its files. Codex, GitHub Copilot, Cursor, Windsurf, Cline and Claude Code load it at the start of every session (about 80 tokens)."
+    },
+    {
+      "fingerprint": "e6113649c5026d8d498330fae80f8adb8e47b72267504f5ddcc4b8645a93ec02",
+      "rule": "documentation/agent-context",
+      "path": "AGENTS.md",
+      "line": 1,
+      "strength": "review",
+      "message": "Section `AGENTS.md` only describes the project, which agents read from its files. Codex, GitHub Copilot, Cursor, Windsurf, Cline and Claude Code load it at the start of every session (about 43 tokens)."
+    },
+    {
+      "fingerprint": "177a6839a800d31131e592e965cd10abc441e4c486df658385fd61b1864160b8",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/direct.go",
+      "line": 362,
+      "strength": "review",
+      "message": "`DirectClient::DeployCompose` (internal/agent/direct.go:362) and `DirectClient::DeployComposeStreamed` (internal/agent/direct.go:399) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "1d4dc4f128597d041825d86cf9ac891b49a86f586cb0a0e6bd4c3646b48679b9",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/direct.go",
+      "line": 98,
+      "strength": "review",
+      "message": "`DirectClient::ListContainers` (internal/agent/direct.go:98) and `DirectClient::ListImages` (internal/agent/direct.go:467) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "44aa469326338109b8a8280946544bf8dfd59f58eb92061a930456a36f00caad",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/direct.go",
+      "line": 187,
+      "strength": "review",
+      "message": "`DirectClient::EditContainer` (internal/agent/direct.go:187), `DirectClient::CheckImageUpdate` (internal/agent/direct.go:520) and 7 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "7e7a1aa6e5ddf117985a0b8039e424805c3b25d8e8c11c0bfc235ba878611fac",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/direct.go",
+      "line": 716,
+      "strength": "review",
+      "message": "`DirectClient::GetHostInfo` (internal/agent/direct.go:716) and `DirectClient::GetHostStats` (internal/agent/direct.go:736) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9cd5e090fae905d9e188856dc9eef3c07296c95fd8bcc2adac9ceaa1ca5e9934",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/direct.go",
+      "line": 434,
+      "strength": "review",
+      "message": "`DirectClient::DeployComposeStreamed` (internal/agent/direct.go:434) and `DirectClient::DeployStackStreamed` (internal/agent/direct_stacks.go:156) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "cd74ad312ac86e3e131b1290779a41b162a840dc3473728a875e88c266045ae9",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/direct.go",
+      "line": 81,
+      "strength": "review",
+      "message": "`DirectClient::doRequest` (internal/agent/direct.go:81) and `DirectClient::GetAppUpdate` (internal/agent/direct.go:631) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "f039c9701baaa47dc0470063fadcd1ca656502b53f17c67acc20771aaed0dae6",
+      "rule": "security/unsafe-settings",
+      "path": "internal/agent/direct.go",
+      "line": 29,
+      "strength": "review",
+      "message": "`NewDirectClient` turns off certificate or signature verification."
+    },
+    {
+      "fingerprint": "3cacb2cb42463bb0cabeb8e57e60f73dd12c33c4207416c8427f9d6b8e0050e8",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/agent/edge.go",
+      "line": 237,
+      "strength": "review",
+      "message": "`EdgeClient::DeployComposeStreamed` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "58eaea302f56dfcd61afbb3dbebd71143ea92ef8f4f3590665010b40de791922",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/edge.go",
+      "line": 83,
+      "strength": "review",
+      "message": "`parseResponse` (internal/agent/edge.go:83) and `parseStackResponse` (internal/agent/edge_stacks.go:43) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "a217f6f01ce53e7d0c7418dfe2b5e4c40568d33ae406b66aeb0ddca700eb44e2",
+      "rule": "documentation/comments",
+      "path": "internal/agent/edge.go",
+      "line": 375,
+      "strength": "review",
+      "message": "`EdgeClient` has a comment to clean up: at lines 375–379 it narrates an edit instead of the code as it is."
+    },
+    {
+      "fingerprint": "07668e181f947eec87cd30d73b5b08165eae8b1cc9a4177e4c193ea726d03f49",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/agent/local.go",
+      "line": 529,
+      "strength": "review",
+      "message": "`getMemoryInfo` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "798c95aea9633e4cedf0ffbc8dc88b704bd85ec7a19acf4f5336f50d7b0be6b6",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/agent/local.go",
+      "line": 598,
+      "strength": "review",
+      "message": "`getCPUPercent` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "a00d73f097af68a0f7524db4193a159480e5ce87c16fb19898e69942903a0521",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/agent/local.go",
+      "line": 303,
+      "strength": "review",
+      "message": "`LocalClient::TriggerAppUpdate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "dd37106d03f7f5ce51e828f59250320a46b7936dc204fb4755064cae55f5cbee",
+      "rule": "maintainability/file-organization",
+      "path": "internal/agent/local.go",
+      "line": 35,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "7249c42a65ea3ca9a7a9a548c92a4babeb16e4c125623b7e1eaf7613ab4ab2d7",
+      "rule": "documentation/comments",
+      "path": "internal/agent/manager.go",
+      "line": 196,
+      "strength": "review",
+      "message": "`Manager::SendEdgeRequest` has 3 comments to clean up: at lines 196, 209 and 217 they repeat the code."
+    },
+    {
+      "fingerprint": "2f55d48645f95b9d9abbf9893c99c40838a23dc372d09a65a2230e8d67461698",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/server.go",
+      "line": 195,
+      "strength": "review",
+      "message": "`AppHandler::HandleListAppUpdates` (internal/agent/server.go:195) and `handleInstanceListAppUpdates` (internal/server/instance_scoped_routes.go:1904) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "f33678022d785506b7dff21075acfc242258dd53eab3bcc234b778e10ee4fe05",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/agent/server.go",
+      "line": 270,
+      "strength": "review",
+      "message": "`AppHandler::HandleTriggerAppUpdate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "f68b9dc33f7da034d61fca49aabf7d0538b460bbef5586b1db6f626d7c653ad9",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/agent/server.go",
+      "line": 271,
+      "strength": "review",
+      "message": "`AppHandler::HandleTriggerAppUpdate` (internal/agent/server.go:271) and `AppHandler::HandleSetAppAutoUpdate` (internal/agent/server.go:371) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "5b931ae7a5dc8a5ee8e1ae62d2ec547ce858917928ec858893b2fd6ba475176d",
+      "rule": "maintainability/file-organization",
+      "path": "internal/agent/types.go",
+      "line": 13,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "6b3bef30e06d6cc6561a632385bd5bbc48b564debaa6257fcd84e3647de38612",
+      "rule": "security/unsafe-settings",
+      "path": "internal/agent/wsclient.go",
+      "line": 15,
+      "strength": "review",
+      "message": "`wsDial` turns off certificate or signature verification."
+    },
+    {
+      "fingerprint": "67669df986f1f22307402b083ebb502d4c9483f2a0e1781d314a45fad4644abc",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/auth/handler.go",
+      "line": 152,
+      "strength": "review",
+      "message": "`HandleResetPassword` (internal/auth/handler.go:152) and `HandleChangePassword` (internal/auth/handler.go:274) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "95ff40410c0bc626ae8f2b8fa0ca1340aa7b242a0aa93f84d7753d5727643eda",
+      "rule": "maintainability/file-organization",
+      "path": "internal/auth/handler.go",
+      "line": 18,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "3146a17300d85df89cee1ac8b5395a7aad4b7403a26d86d3e60511547005b868",
+      "rule": "security/sensitive-data",
+      "path": "internal/composecli/bridge.go",
+      "line": 58,
+      "strength": "review",
+      "message": "`StackUpStreamed` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "f03c3a64afa5ff9b41879407e2ded1ec648f503a788076019462aa512a44fa59",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/composecli/composecli.go",
+      "line": 121,
+      "strength": "review",
+      "message": "`run` (internal/composecli/composecli.go:121) and `Output` (internal/composecli/composecli.go:178) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "06795975d491745079625bc79da791225961b40e93b361206dd1a41c92c29c5b",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/config/validation.go",
+      "line": 318,
+      "strength": "review",
+      "message": "`Validator::logConfiguration` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "79332c01558e267a847e17336a1947029c309cb13314fe6795699e11b1e92ecd",
+      "rule": "documentation/comments",
+      "path": "internal/config/validation.go",
+      "line": 62,
+      "strength": "review",
+      "message": "`Validator::ValidateConfig` has 6 comments to clean up: at lines 62, 65, 68, 71, 74 and 77 they repeat the code."
+    },
+    {
+      "fingerprint": "7dec5c7141f601c9fe9420675c9739dafdbea7af09a5fc056151474ac7d1b271",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/config/validation.go",
+      "line": 98,
+      "strength": "review",
+      "message": "`Validator::validatePaths` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "83c32d1fd06f817e1b3015bbaacf069f00280b02ef4b760a44c003c6e4c46791",
+      "rule": "documentation/comments",
+      "path": "internal/config/validation.go",
+      "line": 202,
+      "strength": "review",
+      "message": "`Validator::validatePort` has 3 comments to clean up: at lines 202, 209 and 215 they repeat the code."
+    },
+    {
+      "fingerprint": "16f9fa063de755288910b02b44299312f77555a819f5d18553a8d04609b54837",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/db/app_updates.go",
+      "line": 354,
+      "strength": "review",
+      "message": "`DB::PurgeOlderThan` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "1bab4de758d86245717b2a4e8069a7b27696713b18cc80e76268f728f273a004",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/db/app_updates.go",
+      "line": 162,
+      "strength": "review",
+      "message": "`DB::SaveAppUpdate` (internal/db/app_updates.go:162), `DB::AppendAppUpdateEvent` (internal/db/app_updates.go:304) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "4b87b8a4025190d49e27e237423e0d0028dc221e1106576ab8089dba36cad726",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/db/db.go",
+      "line": 606,
+      "strength": "review",
+      "message": "`DB::ListRegistryCredentials` (internal/db/db.go:606), `DB::ListInstances` (internal/db/db.go:729) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "5928fbeb469334e6c5458cfc5fb327632acb2a5c967cee4aa09e0cc8fee1a2af",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/db/db.go",
+      "line": 496,
+      "strength": "review",
+      "message": "`DB::ListServicesByInstance` (internal/db/db.go:496) and `DB::ListDomainsByInstance` (internal/db/db.go:557) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "84de95e1b4bb203f3d9996caab375d3e814b6f77d772030ab382536ab04d3d54",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/db/db.go",
+      "line": 272,
+      "strength": "review",
+      "message": "`DB::UpdatePasswordWithVersion` (internal/db/db.go:272), `DB::UpdateUserRole` (internal/db/db.go:356) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9913110e4e12a5a73f1f4102bdbd7cf2764a689e6c5bb5a7207490d75c41cd4b",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/db/db.go",
+      "line": 300,
+      "strength": "review",
+      "message": "`DB::IncrementTokenVersion` (internal/db/db.go:300) and `DB::IncrementAllTokenVersions` (internal/db/db.go:340) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "f25b3d85386f2fde1b47f5f275aa52eb13a8c1bce43ddba93bd21d7b60855a29",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/db/db.go",
+      "line": 590,
+      "strength": "review",
+      "message": "`DB::GetRegistryCredential` (internal/db/db.go:590), `DB::GetInstance` (internal/db/db.go:712) and 3 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8f024882f9887d7e6fe9beea8286d761f3f3169cab84182582e452f770f99587",
+      "rule": "maintainability/file-organization",
+      "path": "internal/db/db_extra_test.go",
+      "line": 8,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "578f8964fb9346a6dc0faa8d30e6f7d1b864be180d89169d8889c4bcc1f5beab",
+      "rule": "maintainability/file-organization",
+      "path": "internal/db/db_instance_prop_test.go",
+      "line": 18,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "0514f4e8a37132a2dc7a0201ae5ea787a0d6b68614c03c1c65b0353f08fc1d44",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/auto_updater.go",
+      "line": 1206,
+      "strength": "review",
+      "message": "`readAutoUpdateCooldown` (internal/docker/auto_updater.go:1206), `readAutoUpdateConcurrency` (internal/docker/auto_updater.go:1225) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "2d95d93580f847aee726fa3c2d74d86f90b4a3da763745d3a6f232edf49d54e1",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/auto_updater.go",
+      "line": 872,
+      "strength": "review",
+      "message": "Lines 872 and 894 of `AutoUpdateWorker::TriggerApp` (internal/docker/auto_updater.go) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "42fec63a3f6ee9bec26db6504bb66c2723e9bb7d909d8a6e4aa06f4b7cc29327",
+      "rule": "documentation/comments",
+      "path": "internal/docker/auto_updater.go",
+      "line": 951,
+      "strength": "review",
+      "message": "This file's top-level code has a comment to clean up: at lines 951–954 it narrates an edit instead of the code as it is."
+    },
+    {
+      "fingerprint": "86ab6177c373fd72c1ff9b1a3c1575a60886dc428e5dcde6726f30d24b0fbcc6",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/auto_updater.go",
+      "line": 656,
+      "strength": "review",
+      "message": "`AutoUpdateWorker::TriggerApp` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "da25f1b263d2d513436b1b6801d5515c441ce6b897296949befdd8b069cfa5f7",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/auto_updater.go",
+      "line": 1206,
+      "strength": "review",
+      "message": "`readAutoUpdateCooldown` (internal/docker/auto_updater.go:1206) and `readAutoUpdateGrace` (internal/docker/auto_updater.go:1244) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "387e83828ce3481b7af19153e3b4a3642a992bcadc780703d65c2bce376424ce",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/compose.go",
+      "line": 734,
+      "strength": "review",
+      "message": "`setServiceLabelOnNode` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "551d3bb5103f1cd00cfe61adff84370b7db9e12cc54938798a8c8952268b4a83",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/compose.go",
+      "line": 852,
+      "strength": "review",
+      "message": "`findYAMLMapValue` (internal/docker/compose.go:852) and `mappingValue` (internal/docker/restart.go:131) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "5c4e7fe191c80052748f7169d968b4580a807c5a74d6f05c09c1dfdc93507158",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/compose.go",
+      "line": 67,
+      "strength": "review",
+      "message": "`ParsePort` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "808d5a55324c4a88192c686c3cbc59fad8610e1f8cd193cc25d2f6de2e832b8d",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/compose.go",
+      "line": 348,
+      "strength": "review",
+      "message": "`Client::createAndStartService` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "95fbfd8b9378514ebce899e823a6d36c1f62fe1888f3ba3804b7a506a3be80cb",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/compose.go",
+      "line": 20,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "ff224238557cad236290cf9a728db89ce15857a85997a82589079c95bdcbe973",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/compose.go",
+      "line": 564,
+      "strength": "review",
+      "message": "`SetServiceLabel` (internal/docker/compose.go:564), `ApplyEnvVariables` (internal/docker/compose.go:629) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8c01e59cf70dfb4d5b8b3622c91a507235d6e5029ad19d4b44cdb84ace3ba1d9",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/compose_prop_test.go",
+      "line": 16,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "c1fe402ea796770513f18aa3d30a6ec9a7c4c9da4bdc32061eef768e5d085eaa",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/compose_test.go",
+      "line": 7,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "063a69a033cbedec712e1c5b4934d488d4c64d6a7c7a40fffc79765e08fb5c06",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/container.go",
+      "line": 469,
+      "strength": "review",
+      "message": "`Client::recreateContainer` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "c93dff0e8551831886f00b55f17a0daf638b72bf577c444a6d3f3d534e878db5",
+      "rule": "documentation/comments",
+      "path": "internal/docker/container.go",
+      "line": 487,
+      "strength": "review",
+      "message": "`Client::recreateContainer` has 3 comments to clean up: at lines 487, 493 and 624 they repeat the code."
+    },
+    {
+      "fingerprint": "8ba0ec00ca7835a4ca88c308b05809311a2c3d7449541861707013cf94623f89",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/deploy_stream.go",
+      "line": 14,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "978fe832a6d0a7667fe72d3abd4fa6520ba7677334050079b5518cc31c224d37",
+      "rule": "documentation/comments",
+      "path": "internal/docker/deploy_stream.go",
+      "line": 227,
+      "strength": "review",
+      "message": "`Client::DeployComposeStreamed` has 3 comments to clean up: at lines 227, 246 and 260 they repeat the code."
+    },
+    {
+      "fingerprint": "f0e7b6dace3c63490f34a69e325a11d876418cecea4b6e3495042f818c34df7a",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/deploy_stream.go",
+      "line": 190,
+      "strength": "review",
+      "message": "`Client::DeployComposeStreamed` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "3d824d107e654c5e0935d60bcd68c95e877df391f5cb2ed5bfdf5d80cf7691ae",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/fileops_property_test.go",
+      "line": 17,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "81b476ca2452ce1d1ac5350aff5be4d8e719e53abcf12755cfc2eb22a9393d52",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/images.go",
+      "line": 74,
+      "strength": "review",
+      "message": "`Client::PullImageWithAuth` (internal/docker/images.go:74) and `Client::ForcePullImage` (internal/docker/images.go:152) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "4fda07f0be0a27790ec2bed37e60bb3c559bb75842a7abafdd1954b5bd69fa90",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/docker/stack_store.go",
+      "line": 660,
+      "strength": "review",
+      "message": "`stackRun` (internal/docker/stack_store.go:660), `StackUpdate` (internal/docker/stack_store.go:703) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8f912b9a6c974baa82f6799e596afd1cf6558b7cf3cea88366e9d603e9817799",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/stack_store.go",
+      "line": 48,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "988e34b505e91a922c3abd5a11a051025f1dbb339f68233149fab0c748ca160b",
+      "rule": "maintainability/file-organization",
+      "path": "internal/docker/stack_store_test.go",
+      "line": 14,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "2f1cadee8314b4724da065e0814e9a04dab6753293cbf8684b5db6edd105b34c",
+      "rule": "documentation/comments",
+      "path": "internal/metrics/auto_update.go",
+      "line": 12,
+      "strength": "review",
+      "message": "This file's top-level code has a comment to clean up: at lines 12–16 it holds sentences that add nothing."
+    },
+    {
+      "fingerprint": "15d8d790114cca92df93068d0a918bfd0e46fb985cf513799df240896ab857c0",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/metrics/prometheus.go",
+      "line": 268,
+      "strength": "review",
+      "message": "`MetricsCollector::collectContainerStats` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "62fa567842ab196f17b6e47f253ed0c73e74b30e22c378097cfce1aa73add4f2",
+      "rule": "maintainability/file-organization",
+      "path": "internal/metrics/prometheus.go",
+      "line": 122,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "ab9069711f1b2d67732a5de39c454b4a3875b6b32fbdf5cb6fd20ee3fda9f405",
+      "rule": "documentation/comments",
+      "path": "internal/metrics/prometheus.go",
+      "line": 252,
+      "strength": "review",
+      "message": "`MetricsCollector::collectContainerMetrics` has 3 comments to clean up: at lines 252, 257 and 261 they repeat the code."
+    },
+    {
+      "fingerprint": "34ebbbc8f3830a844b2bb55470124767b63886c37c09d4d1a2b83cd3f9dfb591",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/registry/registry.go",
+      "line": 129,
+      "strength": "review",
+      "message": "`Manager::Create` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "42105da058ab31040c6b352878d6242c3151f52fb2cd8cdd2670e16c11df1217",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/registry/registry.go",
+      "line": 268,
+      "strength": "review",
+      "message": "`Manager::Get` (internal/registry/registry.go:268) and `Manager::TestConnection` (internal/registry/registry.go:353) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "0c42dee9398de9e66b4b89da443a22b45c3cd2f96f0ea80b735805fdcb41a6ce",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/agent_ws.go",
+      "line": 49,
+      "strength": "review",
+      "message": "`HandleAgentConnect` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "32f1603457ed55518b894c61f9a3bf985d3dcac2428ecd32aba9403a4679ecb7",
+      "rule": "documentation/comments",
+      "path": "internal/server/agent_ws.go",
+      "line": 58,
+      "strength": "review",
+      "message": "`HandleAgentConnect` has 5 comments to clean up: at lines 58, 91, 105, 108 and 113 they repeat the code."
+    },
+    {
+      "fingerprint": "5393e152fb7b46d16bb7f94d30d1d2b8a04c04a23f0dd3adf19b1626a0cba3f2",
+      "rule": "documentation/comments",
+      "path": "internal/server/agent_ws.go",
+      "line": 147,
+      "strength": "review",
+      "message": "`verifyAgentToken` has 6 comments to clean up: at lines 147, 153, 155, 160, 170 and 172 they repeat the code."
+    },
+    {
+      "fingerprint": "af97332f2dd6c747fc8a46ad3a11c9bed88ebdd9089ed35a6a2144b494db8020",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/backup.go",
+      "line": 17,
+      "strength": "review",
+      "message": "`HandleTriggerBackup` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "1c5a36ebfdd8c5950049db4776bfbefefeec7e1da481f868a7de1791e924f460",
+      "rule": "documentation/comments",
+      "path": "internal/server/instance_routes.go",
+      "line": 482,
+      "strength": "review",
+      "message": "`handleTestInstance` has 3 comments to clean up: at lines 482, 497 and 503 they repeat the code."
+    },
+    {
+      "fingerprint": "1d22aee014707840181d3c8a9497faaa6d6533885f8f495776d019f32bfc1b0a",
+      "rule": "documentation/comments",
+      "path": "internal/server/instance_routes.go",
+      "line": 516,
+      "strength": "review",
+      "message": "`handleRotateToken` has 4 comments to clean up: at lines 516, 535, 542 and 565 they repeat the code."
+    },
+    {
+      "fingerprint": "2454f7b248f62d8030a3ea30ab3ce4714a8910b0cf6265a7567efbcd230b17c5",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_routes.go",
+      "line": 164,
+      "strength": "review",
+      "message": "`handleCreateInstance` (internal/server/instance_routes.go:164) and `handleRotateToken` (internal/server/instance_routes.go:528) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "5eab13c2c6332ebdf56322fd2275d1c6da95ee85e272a7b9b1aaa1634c501e88",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/instance_routes.go",
+      "line": 377,
+      "strength": "review",
+      "message": "`handleUpdateInstance` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "6680040c2ba819ba2518c2ced1f85c63c417ac38749be0126774011272d88f30",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_routes.go",
+      "line": 512,
+      "strength": "review",
+      "message": "`handleRotateToken` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "73ede3f92906c4a12de6cd4bdce3c9ed220a2f68f57888f052ed2eb0f29dc5a5",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_routes.go",
+      "line": 99,
+      "strength": "review",
+      "message": "`RegisterInstanceRoutes` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "870edb50013009da62674c45375c5054cde5a736980519a41ffc43a22a3e52ed",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_routes.go",
+      "line": 733,
+      "strength": "review",
+      "message": "`handleInstallAgent` (internal/server/instance_routes.go:733) and `handleApplySecurity` (internal/server/security_routes.go:202) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8fc779855644ea2aa600f697a442322c7002f65c252bbe1001e3f10b509526ff",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_routes.go",
+      "line": 119,
+      "strength": "review",
+      "message": "`handleCreateInstance` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "aad0c9207fa36737d7ddfaa84a47d97033a76354f396b21002b4cf84f29cbc7f",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_routes.go",
+      "line": 301,
+      "strength": "review",
+      "message": "`handleGetInstance` (internal/server/instance_routes.go:301), `handleUpdateInstance` (internal/server/instance_routes.go:362) and 7 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "ad9453da5169194eeadf080e980ae9f3dbcce0cad0a9aca4b5c3fe76ffdbeb0d",
+      "rule": "documentation/comments",
+      "path": "internal/server/instance_routes.go",
+      "line": 163,
+      "strength": "review",
+      "message": "`handleCreateInstance` has 6 comments to clean up: at lines 163, 171, 178, 190, 215 and 238 they repeat the code."
+    },
+    {
+      "fingerprint": "d08cfec60cfceaf75413397614ee5cfddc056d477f7c01f56a40338a80f22ce5",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/instance_routes.go",
+      "line": 461,
+      "strength": "review",
+      "message": "`handleDeleteInstance` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "f5191955fbcec004aa41ca04f7622a0383d0c53bffc932309c213b4319fbdcc2",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_routes.go",
+      "line": 602,
+      "strength": "review",
+      "message": "`generateInstallCommand` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "f87be3a71376228671a257cd23c3e1b528a4f4d1d63f5490d1494cdff265e422",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_routes.go",
+      "line": 680,
+      "strength": "review",
+      "message": "`handleInstallAgent` mixes separate jobs in long blocks; splitting it would make it easier to understand.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "138db4d66c90a1ba2a7204fea447e3cdeec72510f0bdf7c7541f267844ff6511",
+      "rule": "maintainability/file-organization",
+      "path": "internal/server/instance_routes_prop_test.go",
+      "line": 30,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "04f05a7b3f850204cf34e51a3c697d8b0aa6c63eee4004cc50b6efaa2a83c7a7",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 812,
+      "strength": "review",
+      "message": "`handleInstanceDeployGit` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "0bd8eaa6f614f0f5d5ade81cf993b0c47ae4249f9aec87b9c2531b63e1a55eef",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 1672,
+      "strength": "review",
+      "message": "`handleInstanceGetRegistry` (internal/server/instance_scoped_routes.go:1672), `handleInstanceTestRegistry` (internal/server/instance_scoped_routes.go:1805) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "0ff80719915e0bbad45f23e65eae13e620776abfaefb6937fd5e77c107e89298",
+      "rule": "documentation/comments",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 871,
+      "strength": "review",
+      "message": "`handleInstanceDeployGit` has 5 comments to clean up: at lines 871, 877, 913, 916 and 922 they repeat the code."
+    },
+    {
+      "fingerprint": "1ca378606300713b23549c4e2ccd84f621326f93f676d4f2a27a4ba9ae538f58",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 1370,
+      "strength": "review",
+      "message": "`handleInstanceListServices` (internal/server/instance_scoped_routes.go:1370), `handleInstanceListDomains` (internal/server/instance_scoped_routes.go:1435) and 3 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "20be0fa9d33e7335489249cc84076525d53e37e6ae083bdc9a30c9a9f1ad51a1",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 225,
+      "strength": "review",
+      "message": "`handleInstanceEditContainer` (internal/server/instance_scoped_routes.go:225) and `RegisterRoutes` (internal/server/routes.go:927) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "2738d5f8ad1f56bc30ff2d3c579a862db1154684e769cbe3fdfd91a65061c6ad",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2020,
+      "strength": "review",
+      "message": "`handleInstanceTriggerAppUpdate` (internal/server/instance_scoped_routes.go:2020) and `RegisterRoutes` (internal/server/routes.go:526) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "352e4d8e980acb44abc6991838ea05f944c0ae5fb8d4f95b05d2fc500328b30f",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 432,
+      "strength": "review",
+      "message": "`handleInstanceContainerExec` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "4bfa9f2c52eaa8b923c30238e05c3fdbbdcf37497c1e0ef1c5a673b0c3d69751",
+      "rule": "documentation/comments",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 778,
+      "strength": "review",
+      "message": "`handleInstanceDeployCompose` has 4 comments to clean up: at lines 778, 781, 787 and 799 they repeat the code."
+    },
+    {
+      "fingerprint": "55d85dfaaa87062dafca57f8a30835880d369e4be8cfcaa9e55fb9d546b4ec0b",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 565,
+      "strength": "review",
+      "message": "`handleInstanceDeployStream` (internal/server/instance_scoped_routes.go:565) and `handleInstanceDeployCompose` (internal/server/instance_scoped_routes.go:750) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "7427a15ac77b03d3e3bd926cdf3f363f822181fcb6f86b8d0e68db235721cb9f",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 848,
+      "strength": "review",
+      "message": "`handleInstanceDeployGit` (internal/server/instance_scoped_routes.go:848) and `RegisterRoutes` (internal/server/routes.go:1235) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "7a7647568cd80020c44f9d24f7c06ecf6a338e23bb51627efcfd861a256a04ea",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 151,
+      "strength": "review",
+      "message": "`handleInstanceStartContainer` (internal/server/instance_scoped_routes.go:151), `handleInstanceRestartContainer` (internal/server/instance_scoped_routes.go:181) and 5 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "7f8e8c0ab4ac10616f785f4bd31b28676594ee103d7a45a1c8c00736297077e1",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 1830,
+      "strength": "review",
+      "message": "`handleInstanceTestRegistry` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "86694fcef0b2a53dd3ee3e1215b1b57ca690bf25a827656e2db118dbf73b0af7",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2000,
+      "strength": "review",
+      "message": "`handleInstanceTriggerAppUpdate` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "8f39885f10dfae98eb08e5d892b2f26e6c73fa8c72aa2ffac4c1ed4d03dc72e9",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2127,
+      "strength": "review",
+      "message": "`handleInstanceSetAppAutoUpdate` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "9255e6f3c646cac0819c1ab0c1e4a94ef0441c9ff0a33ade820b548982a207e3",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 637,
+      "strength": "review",
+      "message": "`handleInstanceTemplateDeployStream` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "961369be74ed6a7fd3726c3f2ca6cdf0a71aad446f92a71b035bf9c0c4a4b038",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2260,
+      "strength": "review",
+      "message": "`handleInstanceAppUpdatesStream` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "a436af326696c44f162fabf0824558b677ad995916a413914dd5213ec7b1ebd4",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 220,
+      "strength": "review",
+      "message": "`handleInstanceEditContainer` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "a4f6eabff78290b9a94f9385b5b1f344ba8ed2cb8089e4b056f805931cff9def",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 35,
+      "strength": "review",
+      "message": "`RegisterInstanceScopedRoutes` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "a606419e0053ac47f6b3fb5431fe9dd0f44db056ae14d97bc6846cd162c64548",
+      "rule": "security/unsafe-settings",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2260,
+      "strength": "review",
+      "message": "`handleInstanceAppUpdatesStream` turns off certificate or signature verification."
+    },
+    {
+      "fingerprint": "af1e0130bb0c901c11a6f80df6b3f5d249a417dd4dbc2830c6b8f302c8b12803",
+      "rule": "maintainability/file-organization",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 35,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "b3852f704082f7205b2cf46e4408482611ed43ae3681986c4ae8c0cbd2ecc9a0",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2000,
+      "strength": "review",
+      "message": "`handleInstanceTriggerAppUpdate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "d33057715f642e56be89c5cc46f212926b9488ba1d8b583454cebea822eb7f5e",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 2127,
+      "strength": "review",
+      "message": "`handleInstanceSetAppAutoUpdate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "d475088777fbf3764f71e2d1c843925be7e59774e10c15baebdc340244caa6cb",
+      "rule": "documentation/comments",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 231,
+      "strength": "review",
+      "message": "`handleInstanceEditContainer` has 4 comments to clean up: at lines 231, 239, 259 and 269 they repeat the code."
+    },
+    {
+      "fingerprint": "da59de458b8abaac84cb296fe4ada1ac05f8feac3a6aadbc211e3cdf5179d7b0",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 387,
+      "strength": "review",
+      "message": "`handleInstanceContainerLogs` (internal/server/instance_scoped_routes.go:387) and `RegisterRoutes` (internal/server/routes.go:1048) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8b31e79d242f2fc1ad7038ecebf30c3aa49f12ea468b1899243af32c82de4944",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_stacks_routes.go",
+      "line": 224,
+      "strength": "review",
+      "message": "`handleInstanceDeployStack` (internal/server/instance_stacks_routes.go:224) and `handleDeployStack` (internal/server/routes_stacks.go:232) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "cfb579e97077a1e08cf661d7af515f7e06510e78f7ac3c6efba920dd6bc110f3",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/instance_stacks_routes.go",
+      "line": 288,
+      "strength": "review",
+      "message": "`handleInstanceStackServiceAction` (internal/server/instance_stacks_routes.go:288) and `handleStackServiceAction` (internal/server/routes_stacks.go:343) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "e9092beac9b1400f2a05994ca4e67643f427d518897e93901c52141c340b24a8",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_stacks_routes.go",
+      "line": 46,
+      "strength": "review",
+      "message": "`registerInstanceStackRoutes` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "3dc941c08dc821766c34d0ed3d5f9e83b204b21cdc13c33d897a638bc4f7653c",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/middleware.go",
+      "line": 37,
+      "strength": "review",
+      "message": "`AuthMiddleware` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "216e90a3fd5365198870ef0c8ffc15c7b596bc00d5ecd37bf1af87f6fc1ea8f0",
+      "rule": "documentation/comments",
+      "path": "internal/server/routes.go",
+      "line": 373,
+      "strength": "review",
+      "message": "`RegisterRoutes` has 10 comments to clean up: at lines 373–381 it narrates an edit instead of the code as it is; at lines 933, 941, 949, 961, 971, 1106, 1117, 1175 and 1198 they repeat the code."
+    },
+    {
+      "fingerprint": "7d2b2b2b7b6936382dc68f0456bfbab70c1cf9b08a50c1aea1df61f08c0376b9",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/routes.go",
+      "line": 1082,
+      "strength": "review",
+      "message": "`RegisterRoutes` (internal/server/routes.go:1082), `RegisterRoutes` (internal/server/routes.go:1156) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "84ee24ab6feaecf5ad195902f2f7d234659cb5e978478cd1b542937a62aa9629",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/routes.go",
+      "line": 34,
+      "strength": "review",
+      "message": "`RegisterRoutes` mixes separate jobs in long blocks; splitting it would make it easier to understand.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "d077f3228abd846da17660e3a0dc806aaa1024102153af6cfe3e8a6b652c97f3",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/routes.go",
+      "line": 1287,
+      "strength": "review",
+      "message": "`RegisterRoutes` (internal/server/routes.go:1287) and `HandleWebhookDeploy` (internal/server/webhook_handlers.go:136) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "527bd3011be30ec7ec26cc176e39f7575d8ceb92f6e891e0baf5648aaf6a6317",
+      "rule": "maintainability/file-organization",
+      "path": "internal/server/routes_helpers.go",
+      "line": 29,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "57a479f6dc3b49b6435ce7323c49f9b6f3594dfcdc21ca9e3648a57a6b7cab0b",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/routes_helpers.go",
+      "line": 403,
+      "strength": "review",
+      "message": "`handleDeployStreamWS` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "67c212e2c4a86476ddd891bed3144fd4f31643f3a764f04378027c746f20e875",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/routes_stacks.go",
+      "line": 228,
+      "strength": "review",
+      "message": "`handleDeployStack` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "cf16ffe5584e2e2c9d3b47794cdab93d0fd069b3df9b31ad7b2707f476580f72",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/routes_stacks.go",
+      "line": 324,
+      "strength": "review",
+      "message": "`handleStackAction` (internal/server/routes_stacks.go:324) and `handleStackServiceAction` (internal/server/routes_stacks.go:372) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "d83cfba0a362c31776a7f156ee414392e7b70e080253afc989bcf96549988874",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/routes_stacks.go",
+      "line": 67,
+      "strength": "review",
+      "message": "`stackError` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "43ff815095ec361449d78c71952c5f0ad4b38942a96a483d5c6f333c251df562",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/routes_system.go",
+      "line": 13,
+      "strength": "review",
+      "message": "`handleStatsStream` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "7f814e1fbd3a679fe8c30c6e06819362fb70c2a234fd5a174faf6c5678e84347",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/routes_system.go",
+      "line": 52,
+      "strength": "review",
+      "message": "Lines 52 and 66 of `handleStatsStream` (internal/server/routes_system.go) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "2b1a3233e6acf09a185bc5724c0b83d97abb685b8c5d52a13e1cfac4b9f112f1",
+      "rule": "security/sensitive-data",
+      "path": "internal/server/security_activity.go",
+      "line": 168,
+      "strength": "review",
+      "message": "`handleSecurityUnban` sends internal error details to a remote client."
+    },
+    {
+      "fingerprint": "2db6c12bce41da09160f3d76c9d45ec292c6b513d631dfb6b2b43b7bfa545539",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/security_activity.go",
+      "line": 113,
+      "strength": "review",
+      "message": "`handleSecurityActivity` (internal/server/security_activity.go:113), `handleDetectSecurity` (internal/server/security_routes.go:93) and 3 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "6444326e7c32aa4ba2f27b414175e0ad3d7d8165cbbcc3da47740ea972f255d4",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/server/security_activity.go",
+      "line": 170,
+      "strength": "review",
+      "message": "`handleSecurityUnban` (internal/server/security_activity.go:170) and `handleApplySecurity` (internal/server/security_routes.go:160) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "80cd207186a32453134ad51f719709b9e0d88d68e301281747e9fa953d47fcf3",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/security_activity.go",
+      "line": 168,
+      "strength": "review",
+      "message": "`handleSecurityUnban` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "e035a598d4f3aa3711c9b83fe0760e14df00ea64b68ff914ac7f8e60f2948227",
+      "rule": "security/injection",
+      "path": "internal/server/security_activity.go",
+      "line": 111,
+      "strength": "review",
+      "message": "`handleSecurityActivity` places values from another party into a URL it requests without binding, escaping or checking them."
+    },
+    {
+      "fingerprint": "fdbe9ebd555d65a5af3f75ee3cc1c888a5aefedf527b08d0717c3f0450d6a811",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/security_activity.go",
+      "line": 111,
+      "strength": "review",
+      "message": "`handleSecurityActivity` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "333e8e9c1f7d924da7bd0d02aadd74faa86e401f919b6180a39fcb30098e8d10",
+      "rule": "security/injection",
+      "path": "internal/server/security_routes.go",
+      "line": 91,
+      "strength": "review",
+      "message": "`handleDetectSecurity` places values from another party into a URL it requests without binding, escaping or checking them."
+    },
+    {
+      "fingerprint": "b8f27fed680cc888269f05e7b0739f60e51870a84742c9c23529d0cbe6ac74f9",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/security_routes.go",
+      "line": 158,
+      "strength": "review",
+      "message": "`handleApplySecurity` mixes separate jobs in long blocks; splitting it would make it easier to understand.",
+      "reason": "later"
+    },
+    {
+      "fingerprint": "659a9fd028879d738563f3dad2bf391b98b85b33c5b5e662e872326d7b25367b",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/server.go",
+      "line": 147,
+      "strength": "review",
+      "message": "`Server::Run` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "5c2b0d172c717d5b6de5f20c9ab6ccff3ed2fc79db89e2ce4978a7eb08557709",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/webhook_handlers.go",
+      "line": 64,
+      "strength": "review",
+      "message": "`HandleWebhookDeploy` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "6b569ce69329dbc3716f594740b7014eac53bbd47609ff28b7909f5ce37634a3",
+      "rule": "security/injection",
+      "path": "internal/server/webhook_handlers.go",
+      "line": 64,
+      "strength": "review",
+      "message": "`HandleWebhookDeploy` places values from another party into a file path without binding, escaping or checking them."
+    },
+    {
+      "fingerprint": "d3629311599371e06a3d3a941e2d560937a5577fb71b23ce853169761185a7f4",
+      "rule": "documentation/comments",
+      "path": "internal/server/webhook_handlers.go",
+      "line": 85,
+      "strength": "review",
+      "message": "`HandleWebhookDeploy` has 4 comments to clean up: at lines 85, 108, 119 and 173 they repeat the code."
+    },
+    {
+      "fingerprint": "0957634cfdab1bb4b7aabaf9bc80bee8c414524a16ec3394a2419a81140d5f1d",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/harden.go",
+      "line": 446,
+      "strength": "review",
+      "message": "`writeManagedBlock` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "0bf7a3295f2327d1aed5b4d1a18ff0fa15a54b6f614f7988f90bf8b1e53310a0",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/ssh/harden.go",
+      "line": 283,
+      "strength": "review",
+      "message": "`verifyKeyLogin` (internal/ssh/harden.go:283) and `passwordLoginSucceeds` (internal/ssh/harden.go:302) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "2522a795fa7af8ff09486fbda511e59e796b7b12d05e3263f08b3e08844a4950",
+      "rule": "security/injection",
+      "path": "internal/ssh/harden.go",
+      "line": 446,
+      "strength": "review",
+      "message": "`writeManagedBlock` places its parameters into a command without binding, escaping or checking them; a caller passing outside input would make it exploitable."
+    },
+    {
+      "fingerprint": "37a96846ecb1cf03c28705b310a69a7f7b8afe2bc748be719bb4a6974c386be7",
+      "rule": "maintainability/file-organization",
+      "path": "internal/ssh/harden.go",
+      "line": 19,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "3cb83bd5117fbf243007d8d3e5e7d52498ed0eba355e4e036674e2ec3606245f",
+      "rule": "security/unsafe-settings",
+      "path": "internal/ssh/harden.go",
+      "line": 253,
+      "strength": "review",
+      "message": "`dialSSH` likely keeps passwords as plain text or hashes them with a fast or broken hash."
+    },
+    {
+      "fingerprint": "5ed5016e18290f0405066d827ae2cabee27024ad14b86d71347620f88cb35335",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/ssh/harden.go",
+      "line": 529,
+      "strength": "review",
+      "message": "`runCommandTo` (internal/ssh/harden.go:529) and `runCommand` (internal/ssh/installer.go:265) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "775138b6bd59a9ad7f4a7941aa68882150965f3a8c2128abd2818e9be801016e",
+      "rule": "security/injection",
+      "path": "internal/ssh/harden.go",
+      "line": 431,
+      "strength": "review",
+      "message": "`writeDropIn` places its parameters into a command without binding, escaping or checking them; a caller passing outside input would make it exploitable."
+    },
+    {
+      "fingerprint": "88e3117c1928ee3694e11683ef25132dc96fedfa9be4b90411ca9e12d6317940",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/harden.go",
+      "line": 499,
+      "strength": "review",
+      "message": "`reloadSSHD` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "8ed64b4ba8a8021f8dcc276f68384768348538c9f7a56b8229f168f6e2407345",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/ssh/harden.go",
+      "line": 465,
+      "strength": "review",
+      "message": "`rollbackConfig` (internal/ssh/harden.go:465) and `removeDropIn` (internal/ssh/security.go:389) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9c5b8a576226ced4da57ba66aa402b3011a3265bb1d0907e69bc7f826b027af0",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/harden.go",
+      "line": 65,
+      "strength": "review",
+      "message": "`HardenSSH` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "f9c6cc36436bd9f79fd3b5088c8418a37c51dd187f9cdb538800fe53669de3a9",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/harden.go",
+      "line": 223,
+      "strength": "review",
+      "message": "`dialSSH` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "26f23d3dd15fc62ea2d3d9edbcfc97f0f441caf36e133fd73ab6279c3dbe9d60",
+      "rule": "maintainability/file-organization",
+      "path": "internal/ssh/harden_test.go",
+      "line": 10,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "502fbb558c44109225d97def7489c5a108b4d2b38d19caadb2c250446592ddb0",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/installer.go",
+      "line": 36,
+      "strength": "review",
+      "message": "`InstallAgent` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "c5bd77692179e16a10d6bf4c32dff1b46364972c997c74d940641c08e4a3fa8c",
+      "rule": "security/injection",
+      "path": "internal/ssh/installer.go",
+      "line": 36,
+      "strength": "review",
+      "message": "`InstallAgent` places values from another party into a command without binding, escaping or checking them."
+    },
+    {
+      "fingerprint": "24897e4f3f067f5a7a464d3d80998074a37a34cec7abfcfc3556edccf1b2e21e",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/security.go",
+      "line": 407,
+      "strength": "review",
+      "message": "`enableFail2ban` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "8d72f9b07bafa02a7670a555e64afeb7da39a12b162158beaf1dab256f84a221",
+      "rule": "maintainability/shared-logic",
+      "path": "internal/ssh/security.go",
+      "line": 44,
+      "strength": "review",
+      "message": "`DetectSecurity` (internal/ssh/security.go:44) and `detectEffective` (internal/ssh/security.go:295) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "acc65d0cbeb95cad202568460a6730fd585ae73db80b89c0f48d4915584605a8",
+      "rule": "security/injection",
+      "path": "internal/ssh/security.go",
+      "line": 49,
+      "strength": "review",
+      "message": "`DetectSecurity` places its parameters into a command and a URL it requests without binding, escaping or checking them; a caller passing outside input would make it exploitable."
+    },
+    {
+      "fingerprint": "dbf2bc133715c90ab5f95637abf2f8b94487644233beb09e3156284a0b1e8e77",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/security.go",
+      "line": 349,
+      "strength": "review",
+      "message": "`applyDropInState` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "e7402e23b291b88ab8e848ec7ecd89d1702732cf0557e3628086749923455af5",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/security.go",
+      "line": 173,
+      "strength": "review",
+      "message": "`ApplySecurity` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "0b6df02a4768d10071b3892d2eed3f87aaadd8f459b1baac73fb51cb6aaa369e",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/security_activity.go",
+      "line": 171,
+      "strength": "review",
+      "message": "`collectActivity` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "fcea2bec3561c5ee1ed279dbb1a7ecd93cb741c09994570e83fa0e9bab622315",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/ssh/security_activity.go",
+      "line": 296,
+      "strength": "review",
+      "message": "`parseFail2banStatus` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "e259f2538ce51ff01afeebdd6a4255c64ef8d0344818b3789ec9a8e8f4d408ba",
+      "rule": "maintainability/file-organization",
+      "path": "internal/ssh/security_activity_test.go",
+      "line": 23,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "aa8c4e126441d4db41b408ab2d548c3b606b76f2b6d8b29d62f042fd585af477",
+      "rule": "maintainability/file-organization",
+      "path": "internal/update/update_test.go",
+      "line": 16,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "2f0889a273e1a6b19a9b499c99ad80b5ea507289c1a9193ddaa153fa807c4d26",
+      "rule": "maintainability/file-organization",
+      "path": "internal/validator/validator_prop_test.go",
+      "line": 19,
+      "strength": "review",
+      "message": "This test file may test several separate subjects."
+    },
+    {
+      "fingerprint": "8cbb68a7a1d31b2abef6305bfe13759a1ff8e35e7fac856277622c5e8c1512c2",
+      "rule": "maintainability/function-simplification",
+      "path": "scripts/gen-templates.cjs",
+      "line": 16,
+      "strength": "review",
+      "message": "`buildCompose` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "ac7b6428e82a1c9af90f49a62286255e0489961e690ba8cbc7cb1de2afb448e2",
+      "rule": "maintainability/shared-logic",
+      "path": "scripts/gen-templates.cjs",
+      "line": 64,
+      "strength": "review",
+      "message": "`quoteScalar` (scripts/gen-templates.cjs:64) and `quoteScalar` (svelte/src/lib/compose-builder.ts:32) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "560305133a743041e078880c4916a95e59e0bf80986163daa9db2ee4e4a2a44c",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/App.svelte",
+      "line": 42,
+      "strength": "review",
+      "message": "`logout` (svelte/src/App.svelte:42) and `onMount(…)` (svelte/src/App.svelte:77) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9e60d684871d76a06151f4ae7db8606590a05e0055e3857e5df1ce75e981f148",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/App.svelte",
+      "line": 40,
+      "strength": "review",
+      "message": "`logout` (svelte/src/App.svelte:40) and `logout` (svelte/src/components/pages/SettingsPage.svelte:81) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "d77258e404ba6821cdc98957021498aa4be114e193f4f6aadd8274e71b1563c1",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/App.svelte",
+      "line": 29,
+      "strength": "review",
+      "message": "`loadUser` (svelte/src/App.svelte:29) and `handleLogin` (svelte/src/components/pages/Login.svelte:22) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "08ed26e98f57b73dbf744ccc2a533913be9e9a4a6f3089ed7cd82ac11d4c65a0",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/Container/ContainerTerminal.svelte",
+      "line": 86,
+      "strength": "review",
+      "message": "`connect` (svelte/src/components/Container/ContainerTerminal.svelte:86) and `connect` (svelte/src/components/Container/LogsViewer.svelte:42) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "2adb0d8a858b572312a28a7948e8a4b35eb582052306f2f60f692f9c0cb51808",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/Container/ContainerTerminal.svelte",
+      "line": 84,
+      "strength": "review",
+      "message": "`connect` (svelte/src/components/Container/ContainerTerminal.svelte:84) and `sendControlByte` (svelte/src/components/Container/ContainerTerminal.svelte:141) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "410ebb985c7f159c5c5081fa716bce69871c78882f3991e43dcba57c73f0c65f",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/Container/ContainerTerminal.svelte",
+      "line": 44,
+      "strength": "review",
+      "message": "`wsURL` (svelte/src/components/Container/ContainerTerminal.svelte:44), `openLogStream` (svelte/src/components/deploy/DeployWizard.svelte:235) and 4 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9577c0430a609db3c19cf8663f0e106bc2209ce14489cc90f108615648994b52",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/Container/ContainerTerminal.svelte",
+      "line": 105,
+      "strength": "review",
+      "message": "`connect` (svelte/src/components/Container/ContainerTerminal.svelte:105) and `$effect(…)` (svelte/src/components/Container/ContainerTerminal.svelte:151) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "d3ceb4359bef3dc6453acc3504d50abc9a7285a532c2bda7850708cb01465a6b",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/Container/ContainerTerminal.svelte",
+      "line": 53,
+      "strength": "review",
+      "message": "`connect` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "116ca834618bdcd19e19f7bb560a87d75d004b025f5ab60e86c69615d251e8c4",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/Container/LogsViewer.svelte",
+      "line": 35,
+      "strength": "review",
+      "message": "`connect` (svelte/src/components/Container/LogsViewer.svelte:35) and `onDestroy(…)` (svelte/src/components/Container/LogsViewer.svelte:84) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "dc28253e2d8bf8062ce271ca39fdb06e1eaabefcde4b941e70baa5ca6c62c5e5",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/Container/StatsChart.svelte",
+      "line": 41,
+      "strength": "review",
+      "message": "`fetchStats` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "0b9c1cdb7f746e0f6777f8fc69500c62d4eb6f98ca9e26cf1160dd94a9a27ca3",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/ApiKeysTab.svelte",
+      "line": 44,
+      "strength": "review",
+      "message": "`createKey` (svelte/src/components/admin/ApiKeysTab.svelte:44) and `createWebhook` (svelte/src/components/pages/WebhooksPage.svelte:67) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "23a9dc42ed8a1c9359d3e163bf6f17c54cc044606a86762c58be70cd351276e7",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/ApiKeysTab.svelte",
+      "line": 58,
+      "strength": "review",
+      "message": "`deleteKey` (svelte/src/components/admin/ApiKeysTab.svelte:58), `deleteService` (svelte/src/components/pages/AppsPage.svelte:162) and 7 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "194a62cf1c4db7b9fdde38ac505d33f7fe3a8fa89adb20e999ad1f132192053a",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/BackupTab.svelte",
+      "line": 27,
+      "strength": "review",
+      "message": "`formatSize` (svelte/src/components/admin/BackupTab.svelte:27), `formatBytes` (svelte/src/components/admin/SystemInfoTab.svelte:27) and 3 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "e7c6916b4007bd809d7d01d4cd844b2d3116336d9b6f49da1a13c9435e02ed6b",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/BackupTab.svelte",
+      "line": 27,
+      "strength": "review",
+      "message": "`formatSize` (svelte/src/components/admin/BackupTab.svelte:27), `formatBytes` (svelte/src/components/pages/ImagesPage.svelte:114) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "952fe06d9cf95bd9fb339f194d33670ea005068cf98bf0bb3e3bab2b1b613590",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/RegistriesTab.svelte",
+      "line": 20,
+      "strength": "review",
+      "message": "`load` (svelte/src/components/admin/RegistriesTab.svelte:20), `load` (svelte/src/components/pages/WebhooksPage.svelte:28) and 4 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "d76cad16310b90808e196a0b790eafe1388c654fe06fb333a7f8f0998554c40b",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/RegistriesTab.svelte",
+      "line": 53,
+      "strength": "review",
+      "message": "`addRegistry` (svelte/src/components/admin/RegistriesTab.svelte:53) and `addDomain` (svelte/src/components/pages/DomainsPage.svelte:53) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "e6c6fac5fb44f9f3d3d307ae7ea007a661c0734755e7d1a07039fc87cbacdcde",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/RegistriesTab.svelte",
+      "line": 88,
+      "strength": "review",
+      "message": "`statusClass` (svelte/src/components/admin/RegistriesTab.svelte:88) and `stageClass` (svelte/src/components/pages/AppsPage.svelte:184) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "ef50a004c333c866e6d580fa7b98274f8ad631fa6fa5c392477eb01e71c17439",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/admin/RegistriesTab.svelte",
+      "line": 74,
+      "strength": "review",
+      "message": "`deleteRegistry` (svelte/src/components/admin/RegistriesTab.svelte:74), `deleteWebhook` (svelte/src/components/pages/WebhooksPage.svelte:74) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "ee04c1753538ba20086079d95a9e449aa6b034dd707fc3eb32542f2398622a96",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/admin/SshKeysTab.svelte",
+      "line": 76,
+      "strength": "review",
+      "message": "`onFileChosen` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "2c116052a8a964e8e62ac9074ec1785f8cfecf502b0e8549ba92ecca10023bd8",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/deploy/DeployWizard.svelte",
+      "line": 119,
+      "strength": "review",
+      "message": "`validate` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "6a2e6bc48cafcf2cdc948146bbd8fedc7f6d735f2bc9811fb1f155c85a9bb827",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/deploy/DeployWizard.svelte",
+      "line": 274,
+      "strength": "review",
+      "message": "`openLogStream` (svelte/src/components/deploy/DeployWizard.svelte:274) and `openLogStream` (svelte/src/components/servers/AddServerPanel.svelte:191) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "a915e6e46ddb2c16a22cb055d94df82235c9e1ed610fa553b3b181ced646a19f",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/deploy/DeployWizard.svelte",
+      "line": 162,
+      "strength": "review",
+      "message": "Lines 162 and 163 of `validate` (svelte/src/components/deploy/DeployWizard.svelte) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "c1a2e63c9c122fb7f048c5eda932de46179b5a116ee4c86f4715c965b26d0a5d",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/deploy/DeployWizard.svelte",
+      "line": 77,
+      "strength": "review",
+      "message": "`onMount(…)` (svelte/src/components/deploy/DeployWizard.svelte:77) and `switchMode` (svelte/src/components/deploy/DeployWizard.svelte:85) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "dcef3cd9fc2989f382a7b7b5e383bf146211eb2150db58d90c167b2e2931770f",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/deploy/DeployWizard.svelte",
+      "line": 206,
+      "strength": "review",
+      "message": "`deploy` (svelte/src/components/deploy/DeployWizard.svelte:206) and `buildCustomCompose` (svelte/src/lib/compose-builder.ts:57) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "0f677f352e62fbfe4ff30da29d8ddd42721409e3851655752b156282a2d72388",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/layout/NavHeader.svelte",
+      "line": 81,
+      "strength": "review",
+      "message": "`serverOnline` (svelte/src/components/layout/NavHeader.svelte:81) and `createServersStore` (svelte/src/lib/store.ts:123) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "80537ca159e5eeb23f7d763e4a61403e33e2907ce61c59e8ffd95f610622a9b2",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/layout/NavHeader.svelte",
+      "line": 108,
+      "strength": "review",
+      "message": "`switchServer` (svelte/src/components/layout/NavHeader.svelte:108) and `openServer` (svelte/src/components/pages/ServersPage.svelte:67) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "c974f69b0bd00f3b6dcf7b46b6dc82c5ca2e157f44a3e5740d963fd755ca8125",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/layout/NavHeader.svelte",
+      "line": 77,
+      "strength": "review",
+      "message": "`serverLabel` (svelte/src/components/layout/NavHeader.svelte:77), `executeBulkDeploy` (svelte/src/components/pages/ServersPage.svelte:185) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "5dc693bd497e11e62bd78f830319803afcded18c85c635adac17af8e304222da",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/pages/AppsPage.svelte",
+      "line": 169,
+      "strength": "review",
+      "message": "`serviceTypeBadge` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "a43f0a33e685003908bf966eb639db468134afdbb4856fd2ab02480abeb19c34",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/AppsPage.svelte",
+      "line": 137,
+      "strength": "review",
+      "message": "`uninstall` (svelte/src/components/pages/AppsPage.svelte:137) and `deleteService` (svelte/src/components/pages/AppsPage.svelte:158) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "abd228b7459e678c356135248e6ac2243bd817438f7b53ef27081dfa669ce346",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/AppsPage.svelte",
+      "line": 95,
+      "strength": "review",
+      "message": "`triggerUpdate` (svelte/src/components/pages/AppsPage.svelte:95) and `saveEdit` (svelte/src/components/pages/ContainerPage.svelte:138) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "ec8af18cef20bd2eb45fd79daee6f013c0e833f0ba3598fe6e50d44874d20187",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/AppsPage.svelte",
+      "line": 162,
+      "strength": "review",
+      "message": "`deleteService` (svelte/src/components/pages/AppsPage.svelte:162), `confirmDelete` (svelte/src/components/pages/ContainersPage.svelte:100) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "46708de465a60b9fe2857bd4906b721c572d8934b7a0cf35cb28b3acb76f0c06",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ComposePage.svelte",
+      "line": 286,
+      "strength": "review",
+      "message": "`doDeploy` (svelte/src/components/pages/ComposePage.svelte:286), `triggerGitDeploy` (svelte/src/components/stacks/CatalogTab.svelte:128) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "5f3a2ea4a48ff9f3d6c00c2d14ee3fd547ae2bd8e8479bc65d51ab00d4825e2e",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ComposePage.svelte",
+      "line": 277,
+      "strength": "review",
+      "message": "`doDeploy` (svelte/src/components/pages/ComposePage.svelte:277), `serviceAction` (svelte/src/components/pages/ComposePage.svelte:373) and 3 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "fa2659c30be509f828876a1bc47fbb8bb81d72f5a132cbf52746c274d575be5e",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ComposePage.svelte",
+      "line": 352,
+      "strength": "review",
+      "message": "`addContainer` (svelte/src/components/pages/ComposePage.svelte:352), `saveEdit` (svelte/src/components/pages/ServersPage.svelte:89) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "452ddcd8c1145a63e60df18650413d40f555fd405d2ff7477a0e5a4cfaa26804",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/pages/ContainerPage.svelte",
+      "line": 82,
+      "strength": "review",
+      "message": "`stopContainer` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "470d1168c39cbaa76408098cea7c8d394f3d016e967e6de58eccfc2956d1755b",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/pages/ContainerPage.svelte",
+      "line": 95,
+      "strength": "review",
+      "message": "`restartContainer` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "91a897f96b222ce0329bc402c4701cb5ffa16f8adf3bcc8552b26fe032b27deb",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ContainerPage.svelte",
+      "line": 72,
+      "strength": "review",
+      "message": "`startContainer` (svelte/src/components/pages/ContainerPage.svelte:72), `restartContainer` (svelte/src/components/pages/ContainerPage.svelte:98) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "dfc75c622dcec8a8ea1b5bf4d8b64cdac6ad6889be803c06e9fb249b5836a3b2",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ContainerPage.svelte",
+      "line": 43,
+      "strength": "review",
+      "message": "`formatBytes` (svelte/src/components/pages/ContainerPage.svelte:43) and `formatBps` (svelte/src/components/servers/MetricsHistory.svelte:159) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "acb99e39780e0b4166ad16d3308ab875786170dd6476741abdd6f9a1ac201f34",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ContainersPage.svelte",
+      "line": 95,
+      "strength": "review",
+      "message": "`confirmDelete` (svelte/src/components/pages/ContainersPage.svelte:95), `removeImage` (svelte/src/components/pages/ImagesPage.svelte:64) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "f61622b9f8c33b9f08ff9383b0b41bd5cd322007a803da3853edb8fcb745cd84",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ContainersPage.svelte",
+      "line": 62,
+      "strength": "review",
+      "message": "`loadContainers` (svelte/src/components/pages/ContainersPage.svelte:62) and `loadContainers` (svelte/src/components/pages/ServerDetailPage.svelte:121) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "ffa25ffc757fccb5941b22aba2686e68bc49e14ca718dbdf9075b5e327b489a6",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ContainersPage.svelte",
+      "line": 57,
+      "strength": "review",
+      "message": "`loadContainers` (svelte/src/components/pages/ContainersPage.svelte:57) and `load` (svelte/src/components/pages/ImagesPage.svelte:34) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "7b1b38b5e44c9827ae0b39c91734b1004127e782ffae8cd38bf556e7eb6b2e55",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/pages/ServerDetailPage.svelte",
+      "line": 85,
+      "strength": "review",
+      "message": "`pollSystemInfo` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "b01cb3589788ff538c3acb7837b48049db51f7ef8fbefff688e12dae96387368",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ServerDetailPage.svelte",
+      "line": 127,
+      "strength": "review",
+      "message": "`loadImageCount` (svelte/src/components/pages/ServerDetailPage.svelte:127) and `createServersStore` (svelte/src/lib/store.ts:149) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "1e1dbdc095ded06642887ee0f58d21fd11578a73b475ad0dc61a1016e0f1c060",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ServersPage.svelte",
+      "line": 98,
+      "strength": "review",
+      "message": "`saveEdit` (svelte/src/components/pages/ServersPage.svelte:98) and `removeInstance` (svelte/src/components/pages/ServersPage.svelte:114) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "2f85044bbaee8b82deea05e334d4cc9695c147ddb2e347026f3ba4035aabbd63",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ServersPage.svelte",
+      "line": 38,
+      "strength": "review",
+      "message": "Lines 38 and 47 of `securityBadge` (svelte/src/components/pages/ServersPage.svelte) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8b4e2200969adb4c30f286c01e8ec2960b28e993341db667005733081f7dfb71",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ServersPage.svelte",
+      "line": 204,
+      "strength": "review",
+      "message": "Lines 204 and 209 of `executeBulkDeploy` (svelte/src/components/pages/ServersPage.svelte) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9700f786c36e6f72e24900902988d741b17a526b841070d58202dcdf5e3faae3",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/ServersPage.svelte",
+      "line": 193,
+      "strength": "review",
+      "message": "`executeBulkDeploy` (svelte/src/components/pages/ServersPage.svelte:193) and `savePassword` (svelte/src/components/pages/SettingsPage.svelte:69) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "f8a6cb660b27f0a7b1462bbb4e6bda6929ac717b7c84c161f081224be1b7b828",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/pages/ServersPage.svelte",
+      "line": 33,
+      "strength": "review",
+      "message": "`securityBadge` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "7ec4152b6f8a71331e07fab99f481251ed4a520cf05cced6965d16059e090547",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/pages/StacksPage.svelte",
+      "line": 58,
+      "strength": "review",
+      "message": "`createStack` (svelte/src/components/pages/StacksPage.svelte:58) and `openInEditor` (svelte/src/components/stacks/CatalogTab.svelte:81) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "0ecc8e832b94b9869b1d9f302bca3e07d09f421868ba47543c97149c66d8e9ae",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/servers/AddServerPanel.svelte",
+      "line": 165,
+      "strength": "review",
+      "message": "`openLogStream` (svelte/src/components/servers/AddServerPanel.svelte:165), `openLogStream` (svelte/src/components/servers/SecurityTab.svelte:203) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "44cc09e411f62cf33ab12409c623037d6533050bd9776cb0d658619b51769c85",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/servers/AddServerPanel.svelte",
+      "line": 68,
+      "strength": "review",
+      "message": "`$effect(…)` (svelte/src/components/servers/AddServerPanel.svelte:68) and `$effect(…)` (svelte/src/components/servers/SecurityTab.svelte:119) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "9ebdefdd808a836946e47e0506cc76e73aaa07ed4a785a260cc49d6cb8589f2a",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/servers/AddServerPanel.svelte",
+      "line": 241,
+      "strength": "review",
+      "message": "`testConnection` (svelte/src/components/servers/AddServerPanel.svelte:241) and `loadHealth` (svelte/src/components/servers/HealthWidget.svelte:17) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "fa5983084dbbb607ebfc2128610cb13fc178b14177a79143a9a8cbd5b42f5817",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/servers/AddServerPanel.svelte",
+      "line": 185,
+      "strength": "review",
+      "message": "Lines 185 and 189 of `openLogStream` (svelte/src/components/servers/AddServerPanel.svelte) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "3d67e2388cc6a75f2f5cfd6f438b0213110a3197992ec5e09d996121e7559c1e",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/components/servers/SecurityActivityCard.svelte",
+      "line": 106,
+      "strength": "review",
+      "message": "`firewallChip` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "2d9919da09edc097a57300ddf250e1baa2fd843311dec90eae9042678f96bc58",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/lib/compose-builder.ts",
+      "line": 79,
+      "strength": "review",
+      "message": "Lines 79 and 81 of `buildCustomCompose` (svelte/src/lib/compose-builder.ts) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8cd2dad064c1396f3df219821d71d8c10a828d78f438c92683a38aef1e95b570",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/lib/router.ts",
+      "line": 53,
+      "strength": "review",
+      "message": "`pathToPage` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "9c9206a06706e2310a723d50e85ae8a4c6565f137c88317bc2d384455b905180",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/lib/router.ts",
+      "line": 110,
+      "strength": "review",
+      "message": "`handlePopState` (svelte/src/lib/router.ts:110) and `initRouter` (svelte/src/lib/router.ts:118) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "e4095ee1d6a124857ea846a45207adc6b5632147af93f06d2fce5f0a783089b3",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/lib/router.ts",
+      "line": 59,
+      "strength": "review",
+      "message": "Lines 59 and 64 of `pathToPage` (svelte/src/lib/router.ts) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "009d18db3ea6a5cb209368fa3634538b9dc8b8c57af5832b98ddc875520d3948",
+      "rule": "maintainability/file-organization",
+      "path": "svelte/src/lib/stack-utils.ts",
+      "line": 4,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "4e8748c3035318754d2c1afba281de8c9a9575ab6411362f7c01c5ea0741b218",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/lib/stack-utils.ts",
+      "line": 15,
+      "strength": "review",
+      "message": "`parseDockerPort` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "8b22d22e9c7d87f35f26d83e739697bc45528dfecc1ae03ede27200dce2254b5",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/lib/stack-utils.ts",
+      "line": 116,
+      "strength": "review",
+      "message": "`serviceStateColor` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "aa12409544f93242a86db3888dd41184816e0ba90b74585d5f27bd8827d8b9db",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/lib/store.ts",
+      "line": 113,
+      "strength": "review",
+      "message": "`createServersStore` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "eb6379c8c28f51823bfc25744a31dbaa865e2df577065667f661ec092daa96d9",
+      "rule": "maintainability/file-organization",
+      "path": "svelte/src/lib/store.ts",
+      "line": 10,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    },
+    {
+      "fingerprint": "0b8cb71a01a46af69263c1dd9f39e92e4cf62c5c1f67b1e5a2201fc9f34d4b38",
+      "rule": "maintainability/function-simplification",
+      "path": "svelte/src/lib/yaml-sync.ts",
+      "line": 76,
+      "strength": "review",
+      "message": "`copyYAMLCommentsItems` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
+    },
+    {
+      "fingerprint": "5b7451da5e2430c1ad665c76a3cb4b3d1562f5c16dafdc93d835ca778c4c0446",
+      "rule": "maintainability/file-organization",
+      "path": "svelte/src/lib/yaml-sync.ts",
+      "line": 7,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+    }
+  ]
+}

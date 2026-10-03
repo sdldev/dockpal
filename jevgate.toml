@@ -4,8 +4,9 @@
 # shows what would be uploaded without sending anything.
 
 # Only these paths may be uploaded: the detected source and test directories,
-# and agent instruction files for the documentation rules.
-upload_allow = ["deployment/**", "internal/**", "scripts/**", "svelte/**", "web/**", "**/AGENTS.md"]
+# agent instruction files for the documentation rules, and custom-question
+# example files.
+upload_allow = ["deployment/**", "internal/**", "scripts/**", "svelte/**", "web/**", "**/AGENTS.md", ".jevgate/questions/**", ".github/workflows/*.yml"]
 # Never uploaded, even when allowed above.
 upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 
@@ -24,6 +25,7 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # sized for pull requests stops it; max_cost bounds the spend instead (a
 # whole check of a 1,000-file project costs a few cents).
 # max_cost = 1.00
+max_cost = 1.00
 # max_seconds = 300
 
 # Unset, the default rules run and only rule levels measured right at least
@@ -42,6 +44,19 @@ upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
 # security = "review"  # injection, sensitive-data, unsafe-settings, access-control, workflows (opt-in)
 # tests = "review"  # value, redundancy, laws
 # documentation = "review"  # agent-context, large-docs, staleness, duplication, comments (opt-in)
+
+# Opt-in groups run report-only for now ("report" = judge, never fail): review
+# their findings first, then raise (e.g. "mature") once the noise is known.
+security = "report"      # injection, sensitive-data, unsafe-settings, access-control, workflows
+documentation = "report" # agent-context, large-docs, staleness, duplication, comments
+
+# Gallery questions ship at review (they fail the gate on their findings); hold
+# them at report while their findings on this codebase are being reviewed.
+# n-plus-one ships as a note and never fails, so it needs no override.
+"custom/swallowed-errors" = "report"
+"custom/resource-leak" = "report"
+"custom/todo-without-owner" = "report"
+"custom/thin-handlers" = "report"
 
 # Levels for the files some paths match, such as report-only tooling. The last
 # scope that matches a file and names a rule wins; flags win over scopes.
