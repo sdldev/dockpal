@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -109,6 +110,58 @@ func StackUpStreamedCLI(ctx context.Context, name string, session *DeploySession
 
 func errNoCLI() error {
 	return errors.New("docker compose plugin not available on this host — install the Docker Compose CLI plugin (verify with 'docker compose version') to manage stacks")
+}
+
+// ExternalStackFiles returns the compose YAML of a project Dockpal does not
+// manage (its files live outside composeBaseDir()). The file(s) recorded by
+// `compose ls` are read directly and concatenated when compose used several
+// -f files — the same multi-file view Dockge renders. Direct reads keep this
+// working even when the panel's filesystem view differs from the deployer's
+// (a hardened service user that may not traverse the project's directory,
+// e.g. files owned by root under /opt). If no file is readable, it falls
+// back to `compose -f … config`, which asks the CLI to render the merged
+// config instead. The result is always treated read-only by callers.
+func ExternalStackFiles(ctx context.Context, configFiles string) (string, error) {
+	if configFiles == "" {
+		return "", errors.New("no compose file recorded for this project")
+	}
+	var files []string
+	for _, f := range strings.Split(configFiles, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
+		return "", errors.New("no compose file recorded for this project")
+	}
+	var sb strings.Builder
+	readAny := false
+	for i, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		if i > 0 && readAny {
+			sb.WriteString("\n# --- " + f + " ---\n")
+		}
+		sb.Write(b)
+		readAny = true
+	}
+	if readAny {
+		return sb.String(), nil
+	}
+	if cli == nil {
+		return "", errNoCLI()
+	}
+	args := make([]string, 0, len(files)*2+1)
+	for _, f := range files {
+		args = append(args, "-f", f)
+	}
+	args = append(args, "config")
+	// No working dir: the file paths are absolute already, and the project
+	// directory may not be traversable by the panel user (chdir would fail
+	// with EACCES before compose even runs — the original adminer case).
+	return cli.Output(ctx, "", args...)
 }
 
 // ValidateStackName enforces Dockge-style lowercase stack names.
@@ -549,23 +602,40 @@ func orderedStacks(m map[string]*Stack, order []string) []*Stack {
 }
 
 // GetStackFull returns the stack with runtime status and services filled in.
+//
+// A stack whose directory does not exist under composeBaseDir() is not
+// automatically "not found": `docker compose ls` may still know it as an
+// external project (created outside Dockpal — e.g. deployed by hand on the
+// host, then discovered). Those come back with Managed=false and whatever
+// compose file content the CLI reports, so the UI can show a read-only view
+// instead of a 404 that contradicts the Stacks list.
 func GetStackFull(ctx context.Context, name string) (*Stack, error) {
 	s, err := GetStack(name)
 	if err != nil {
 		return nil, err
 	}
-	if !s.Managed {
-		return nil, fmt.Errorf("stack %q not found", name)
-	}
 	if cli != nil {
 		if projects, err := ListComposeProjects(ctx); err == nil {
 			for _, p := range projects {
-				if p.Name == name {
-					s.Status = StatusConvert(p.Status)
-					s.StatusText = p.Status
-					break
+				if p.Name != name {
+					continue
 				}
+				s.Status = StatusConvert(p.Status)
+				s.StatusText = p.Status
+				if !s.Managed {
+					// External project: surface its compose file read-only.
+					if content, err := ExternalStackFiles(ctx, p.ConfigFiles); err == nil {
+						s.ComposeYAML = content
+					} else {
+						log.Printf("stacks: external %q compose file unavailable: %v", name, err)
+					}
+				}
+				break
 			}
+		}
+		if !s.Managed && s.Status == StackStatusUnknown {
+			// Not on disk and not known to docker → genuinely absent.
+			return nil, fmt.Errorf("stack %q not found", name)
 		}
 		if s.Status == StackStatusUnknown {
 			// On disk but not known to docker → draft (Dockge CREATED_FILE).

@@ -19,7 +19,10 @@ type fakeStackCLI struct {
 	lsErr  error
 	psOut  string
 	psErr  error
-	locked map[string]bool
+	// configOut/configErr back `compose -f … config` (external stack files).
+	configOut string
+	configErr error
+	locked    map[string]bool
 }
 
 func (f *fakeStackCLI) Run(ctx context.Context, dir string, args ...string) error {
@@ -34,6 +37,9 @@ func (f *fakeStackCLI) Output(ctx context.Context, dir string, args ...string) (
 	}
 	if strings.HasPrefix(joined, "ps") {
 		return f.psOut, f.psErr
+	}
+	if strings.HasSuffix(joined, "config") {
+		return f.configOut, f.configErr
 	}
 	return "", fmt.Errorf("unexpected args: %s", joined)
 }
@@ -240,6 +246,61 @@ func TestListStacksMergesDraftAndLive(t *testing.T) {
 	}
 	if byName["external"].Status != StackStatusExited || byName["external"].Managed {
 		t.Errorf("external should be exited+unmanaged: %+v", byName["external"])
+	}
+}
+
+func TestGetStackFullExternalStack(t *testing.T) {
+	withTempComposeBase(t)
+	// "external" lives outside the compose base dir — docker knows it, the
+	// filesystem scan does not. GetStackFull must surface it read-only
+	// instead of 404ing (Stacks list showed it, so detail must too).
+	extDir := t.TempDir()
+	extFile := filepath.Join(extDir, "docker-compose.yml")
+	if err := os.WriteFile(extFile, []byte("services:\n  web:\n    image: nginx:latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeStackCLI{
+		lsOut: `{"Name":"external","Status":"running(1)","ConfigFiles":"` + extFile + `"}` + "\n",
+	}
+	withFakeCLI(t, fake)
+
+	s, err := GetStackFull(context.Background(), "external")
+	if err != nil {
+		t.Fatalf("external stack should resolve, got %v", err)
+	}
+	if s.Managed {
+		t.Errorf("external stack must stay Managed=false: %+v", s)
+	}
+	if s.Status != StackStatusRunning {
+		t.Errorf("status = %q, want running", s.Status)
+	}
+	if !strings.Contains(s.ComposeYAML, "nginx") {
+		t.Errorf("compose YAML should come from the project's file, got %q", s.ComposeYAML)
+	}
+}
+
+// When the panel user cannot read the external file (e.g. root-owned under
+// /opt), ExternalStackFiles falls back to `compose -f … config`.
+func TestExternalStackFilesFallsBackToComposeConfig(t *testing.T) {
+	fake := &fakeStackCLI{configOut: "services:\n  web:\n    image: caddy:latest\n"}
+	withFakeCLI(t, fake)
+
+	out, err := ExternalStackFiles(context.Background(), "/root/only/docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "caddy") {
+		t.Errorf("fallback should return rendered config, got %q", out)
+	}
+}
+
+func TestGetStackFullGenuinelyMissing(t *testing.T) {
+	withTempComposeBase(t)
+	fake := &fakeStackCLI{lsOut: `{"Name":"other","Status":"running(1)","ConfigFiles":""}` + "\n"}
+	withFakeCLI(t, fake)
+
+	if _, err := GetStackFull(context.Background(), "ghost"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("unknown stack must still 404, got %v", err)
 	}
 }
 

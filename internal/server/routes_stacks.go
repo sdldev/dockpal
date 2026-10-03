@@ -152,6 +152,12 @@ func handleGetStack(c *gin.Context) {
 		stackError(c, err)
 		return
 	}
+	// An external stack whose compose file the panel cannot read (e.g.
+	// root-owned project dir) is still a real, viewable stack — answer with
+	// the metadata we do have instead of a bare 200 with no hint.
+	if !stack.Managed && stack.ComposeYAML == "" {
+		c.Header("X-Dockpal-Compose-Unavailable", "files not readable by the dockpal service user")
+	}
 	c.JSON(http.StatusOK, stack)
 }
 

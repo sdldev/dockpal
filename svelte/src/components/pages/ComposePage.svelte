@@ -414,10 +414,15 @@
         {stack.status}
       </span>
       <h1 class="text-2xl font-bold text-white">{stack.name}</h1>
+      {#if !stack.managed}
+        <span class="rounded bg-sky-400/10 px-2 py-0.5 text-xs font-medium text-sky-400">external · read-only</span>
+      {/if}
     </div>
   {/if}
 
-  <!-- Toolbar -->
+  <!-- Toolbar — external stacks (files outside Dockpal) are read-only:
+       lifecycle actions stay (docker knows the project), but Edit/Deploy/
+       Save/Delete would touch files we don't own, so they're hidden. -->
   {#if $isOperator}
     <div class="mb-4 flex flex-wrap items-center gap-2">
       {#if isEditMode}
@@ -445,13 +450,15 @@
           </button>
         {/if}
       {:else}
-        <button
-          class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
-          disabled={processing}
-          onclick={() => (isEditMode = true)}
-        >
-          ✎ Edit
-        </button>
+        {#if stack.managed}
+          <button
+            class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
+            disabled={processing}
+            onclick={() => (isEditMode = true)}
+          >
+            ✎ Edit
+          </button>
+        {/if}
         {#if !active}
           <button
             class="rounded-sm bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
@@ -469,13 +476,15 @@
             ↻ Restart
           </button>
         {/if}
-        <button
-          class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
-          disabled={processing}
-          onclick={() => doAction('update')}
-        >
-          ⬇ Update
-        </button>
+        {#if stack.managed}
+          <button
+            class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
+            disabled={processing}
+            onclick={() => doAction('update')}
+          >
+            ⬇ Update
+          </button>
+        {/if}
         {#if active}
           <button
             class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
@@ -485,20 +494,22 @@
             ⏹ Stop
           </button>
         {/if}
-        <button
-          class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
-          disabled={processing}
-          onclick={() => doAction('down')}
-        >
-          ⏏ Down
-        </button>
-        <button
-          class="rounded-sm bg-red-700 px-3 py-1.5 text-sm text-white hover:bg-red-600 disabled:opacity-50"
-          disabled={processing}
-          onclick={() => (showDeleteDialog = true)}
-        >
-          🗑 Delete
-        </button>
+        {#if stack.managed}
+          <button
+            class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
+            disabled={processing}
+            onclick={() => doAction('down')}
+          >
+            ⏏ Down
+          </button>
+          <button
+            class="rounded-sm bg-red-700 px-3 py-1.5 text-sm text-white hover:bg-red-600 disabled:opacity-50"
+            disabled={processing}
+            onclick={() => (showDeleteDialog = true)}
+          >
+            🗑 Delete
+          </button>
+        {/if}
       {/if}
       <button
         class="ml-auto rounded-sm px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200"
@@ -613,6 +624,12 @@
     <!-- Right column -->
     <div>
       <h4 class="mb-3 text-lg font-semibold text-white">compose.yaml</h4>
+      {#if !isAdd && !stack.managed && !stack.composeYAML}
+        <div class="mb-4 rounded-md border border-zinc-700 bg-zinc-800/60 p-6 text-center">
+          <p class="text-sm text-zinc-300">This stack is managed outside Dockpal and its compose file isn't readable by the dockpal service user.</p>
+          <p class="mt-1 text-xs text-zinc-500">Runtime status and lifecycle actions above still work. To view or edit the file, grant read access or adopt the stack by recreating it here.</p>
+        </div>
+      {:else}
       <div class="mb-2">
         {#if CodeMirrorEditor}
           <CodeMirrorEditor
@@ -626,6 +643,7 @@
           <div class="codemirror-host flex min-h-48 items-center justify-center rounded-md border border-zinc-700 bg-[#282a36] text-sm text-zinc-500">Loading editor…</div>
         {/if}
       </div>
+      {/if}
       {#if isEditMode && yamlError}
         <div class="mb-3 rounded-sm border border-red-800 bg-red-900/30 px-3 py-2 text-sm text-red-300">
           {yamlError}
