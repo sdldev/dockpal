@@ -7,6 +7,9 @@ domains, registries, and remote Docker hosts from one web UI.
 - Single static binary (Gin HTTP server + embedded SPA + BBolt) — no external DB
 - RBAC (admin / operator / viewer), JWT auth, audit log
 - Multi-host: manage remote Docker daemons (direct HTTP or edge WebSocket agent)
+- Per-server control panel: health, 30-day metrics history, security activity
+- SSH hardening: toggle password auth / root login / fail2ban; live fail2ban +
+  firewall monitoring with one-click unban
 - UI-driven system update with verified swap, automatic backup, and rollback
 
 ---
@@ -298,14 +301,17 @@ DOCKPAL_DB_PATH=/opt/dockpal/data/dockpal.db ./dockpal install --username admin 
 
 | Category | Details |
 |---|---|
+| **Servers** | Fleet overview + per-server control panel (`/servers/:id`): health, 30-day metrics history, containers, security activity |
 | **Containers** | List, start, stop, restart, delete, inspect, logs, stats, terminal, file manager |
 | **Deploy** | Compose YAML, Git repo, built-in templates (PostgreSQL, MariaDB, Redis, Grafana, Adminer, …) |
 | **Stacks** | Dockge-style compose stacks: create, edit, deploy, update, env files |
 | **Images** | Pull, update checks, registry auth, prune |
 | **Domains** | Traefik integration, custom routing, SSL |
 | **Monitoring** | Prometheus metrics, real-time charts, health checks, 30-day history |
-| **Multi-host** | Manage remote Docker hosts (direct HTTP or edge WebSocket agent) |
+| **Multi-host** | Manage remote Docker hosts (direct HTTP or edge WebSocket agent); SSH-based agent install + saved SSH keys |
 | **Security** | RBAC (admin/operator/viewer), JWT auth, audit log, remote-deploy password enforcement |
+| **SSH hardening** | One Apply flow: disable password auth / root login, install + enable fail2ban (sshd jail), verified against lockout |
+| **Security monitoring** | Per-server fail2ban (banned IPs, events) + firewall (ufw/firewalld) status and 24h block log, TTL-cached over SSH; unban from the UI (audited) |
 | **System update** | In-UI version check + one-click update with verified swap, backup, and auto-rollback |
 | **Backup** | Scheduled + manual, SHA-256 checksum, retention policy |
 
