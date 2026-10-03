@@ -109,6 +109,36 @@ and rebuild. `make svelte-dev` is the loop that actually hot-reloads SPA changes
   | `DOCKPAL_UPDATE_CHECK_INTERVAL` | `6h` | Release-check interval (`0` = background check off) |
   | `DOCKPAL_REPO` | `sdldev/dockpal` | GitHub repo polled for releases |
 
+## Releases
+
+Release tags are created **manually via git CLI only** — never the GitHub web
+UI: UI/API-created tags fire the `create` event, not `push`, so `release.yml`
+never builds or attaches binaries for them.
+
+```bash
+git tag -a vX.Y.Z -m "Dockpal vX.Y.Z" <commit> && git push origin vX.Y.Z
+```
+
+The tag push triggers **Build & Release**, which builds the frontend + binaries
+(`dockpal-linux-amd64` / `dockpal-linux-arm64` + `.sha256`) with
+`VERSION=<tag>` and attaches them to the release. Afterwards edit the notes
+(`gh release edit vX.Y.Z --notes ...`) and confirm `gh api
+repos/sdldev/dockpal/releases/latest`.
+
+Bump the version per SemVer — the agent decides the digit when tagging:
+
+| Digit | Bump when | Examples |
+|---|---|---|
+| **X** (major) | Big/breaking changes | new auth model, data-format migration required, removed features |
+| **Y** (minor) | Medium changes — new features, backward compatible | new page/endpoint, new monitoring capability |
+| **Z** (patch) | Minor changes — small fixes only | bug fixes, small UI tweaks, docs |
+
+A re-pinned (moved) tag is the exception: when a release must track `main`
+between real version bumps, force-move it (`git tag -fa` + `git push -f`),
+delete the old release first (`gh release delete vX.Y.Z --yes` keeps the tag;
+`git push origin :refs/tags/vX.Y.Z` removes it), then re-push the tag so the
+workflow rebuilds the assets.
+
 ## Frontend conventions
 
 To add a page:
