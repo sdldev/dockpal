@@ -4,7 +4,6 @@
 	import type { ContainerInfo } from '$lib/types/api';
 	import { formatPort, dedupePorts } from '$lib/format';
 	import { navigate } from '$lib/router';
-	import StatsChart from '../Container/StatsChart.svelte';
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -49,7 +48,6 @@
 	const basePath = $derived(containersBasePath($selectedInstance || 'local'));
 
 	let containers: ContainerInfo[] = $state([]);
-	let selectedContainerId: string | null = $state(null);
 	let loading = $state(true);
 	let error = $state('');
 	let actionBusy = $state<string | null>(null);
@@ -97,7 +95,6 @@
 		try {
 			await api.delete(`${basePath}/${encodeURIComponent(target.id)}?force=true`);
 			containers = containers.filter((c) => c.id !== target.id);
-			if (selectedContainerId === target.id) selectedContainerId = null;
 			addToast(`Container ${target.name} deleted`, 'success');
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
@@ -105,10 +102,6 @@
 			actionBusy = null;
 			pendingDelete = null;
 		}
-	}
-
-	function toggleDetail(id: string) {
-		selectedContainerId = selectedContainerId === id ? null : id;
 	}
 
 	// Group containers by owning stack so the table mirrors the Stacks page:
@@ -215,9 +208,6 @@
 					</td>
 						<td class="px-4 py-2.5">
 							<div class="flex items-center gap-1.5">
-								<Button variant="secondary" size="sm" title={selectedContainerId === container.id ? 'Close details' : 'Details'} aria-label={selectedContainerId === container.id ? 'Close details' : 'Details'} disabled={actionBusy === container.id} onclick={() => toggleDetail(container.id)}>
-									<Icon name="info" />
-								</Button>
 								{#if $isOperator}
 									<Button variant="primary" size="sm" title="Start" aria-label="Start" disabled={actionBusy === container.id || container.state === 'running'} onclick={() => runAction('start', container.id)}>
 										<Icon name="play" />
@@ -242,14 +232,6 @@
 			{/if}
 		</tbody>
 	</table>
-
-	<!-- Expandable detail & stats panel -->
-	{#if selectedContainerId && containers.length > 0}
-		<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-6">
-			<h3 class="text-md font-semibold text-white mb-4">Container Details & Stats</h3>
-			<StatsChart containerId={selectedContainerId} />
-		</div>
-	{/if}
 
 		<!-- Delete confirmation — stack-owned containers get an explicit warning
 		     because deleting one makes its stack go "partial" (see Stacks). -->
