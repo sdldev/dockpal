@@ -1,0 +1,68 @@
+#:schema https://raw.githubusercontent.com/Tech-Byte-Frontier/jevgate/v0.33.0/jevgate.schema.json
+# JevGate configuration, written by `jevgate init`. Unknown keys are errors.
+# `jevgate rules` lists every rule; `jevgate check --dry-run --show-requests`
+# shows what would be uploaded without sending anything.
+
+# Only these paths may be uploaded: the detected source and test directories,
+# and agent instruction files for the documentation rules.
+upload_allow = ["deployment/**", "internal/**", "scripts/**", "svelte/**", "web/**", "**/AGENTS.md"]
+# Never uploaded, even when allowed above.
+upload_deny = ["**/.env*", "**/*.pem", "**/*.key"]
+
+# Also judge tests (test value and redundancy), as --include-tests does.
+# File organization judges test files either way, but not yet those of the
+# preview languages (C, C++, Kotlin, Swift, Bash, Dart, Scala, Elixir, Lua).
+# include_tests = true
+
+# The model, pinned so results stay repeatable; --model overrides it. The
+# default follows the key: this one for TypeSafe, typesafe/jev-1.13 for
+# OpenRouter, typesafe-ai/jev for Vercel AI Gateway.
+# model = "jev-1.13.0"
+
+# Budgets for one invocation; flags can only lower them. A check of the
+# whole repository asks about one request per file, so a request ceiling
+# sized for pull requests stops it; max_cost bounds the spend instead (a
+# whole check of a 1,000-file project costs a few cents).
+# max_cost = 1.00
+# max_seconds = 300
+
+# Unset, the default rules run and only rule levels measured right at least
+# 80% of the time on projects JevGate was never tuned on fail the check
+# ("mature"; `jevgate rules` shows them), never in a preview language; other
+# findings are reported without failing it. A group or rule ID set to a
+# level is judged, a group's opt-in rules only when named on their own
+# (security and documentation are opt-in whole), and fails the check at
+# that level: "review" (every new finding), "mature", "uncertain", "report"
+# (judge, never fail) or "off"; "consider" is the same as "review". A rule's
+# own entry wins over its group's. Test rules also need include_tests or
+# --include-tests.
+[rules]
+# maintainability = "review"  # file-organization, function-simplification, shared-logic
+# "maintainability/hardcoded-values" = "review"  # hardcoded-values (opt-in, only by name)
+# security = "review"  # injection, sensitive-data, unsafe-settings, access-control, workflows (opt-in)
+# tests = "review"  # value, redundancy, laws
+# documentation = "review"  # agent-context, large-docs, staleness, duplication, comments (opt-in)
+
+# Levels for the files some paths match, such as report-only tooling. The last
+# scope that matches a file and names a rule wins; flags win over scopes.
+# [[scope]]
+# paths = ["scripts/**", "tools/**"]
+# fail_on = ["report"]
+
+# Custom questions: a team convention as a yes/no question whose yes is a
+# finding, the rule custom/<id>. It fails the gate at its level. One question
+# per file also works, in .jevgate/questions/<id>.toml, where
+# `jevgate rules add` copies measured questions from the gallery.
+# [[question]]
+# id = "no-body-logs"
+# question = "Does this function write a request body, or a field of one, to a log?"
+# guidance = "Logging the method, path, request id or status is fine."
+# unit = "function"  # function, file, test, section, comment, or hunk (with --base)
+# paths = ["src/api/**"]
+# level = "review"  # review, or note to list its findings without failing
+# [[question.failing]]  # code that breaks the rule; `jevgate rules test` asks it
+# path = "src/api/orders.py"
+# code = "def create(req):\n    log.info(req.body)\n"
+# [[question.passing]]  # code that keeps it
+# path = "src/api/orders.py"
+# code = "def create(req):\n    log.info(req.id)\n"

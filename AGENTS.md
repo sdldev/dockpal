@@ -197,3 +197,17 @@ Reusable UI lives in `svelte/src/components/ui/` (`Button`, `Modal`, `ConfirmDia
   `.data*` are gitignored; don't commit them.
 - Release workflow (`.github/workflows/release.yml`) builds and embeds the frontend
   before compiling — skipping that makes the binary refuse to serve `/`.
+
+<!-- jevgate:begin (written by `jevgate init --agent`; run it again to update this block, or add --remove to take it out) -->
+## JevGate
+
+JevGate reviews code as you edit it, through hooks. When they run, a session starts with the line "JevGate's hooks run in this session". After an edit, its findings on what the turn changed in the edited files arrive as context, one line each: `- path:line review rule (fails the gate): why Right 87% of the time (23 labels). Next: step`. Every finding is a `review`: a place worth a look, which you verify. The mark is only on findings that fail the gate, and the sentence before the next step says how often findings of that rule were right on projects JevGate was never tuned on (`Not yet measured.` for broad look-here findings and below 20 labels). At the end of a turn, it keeps you working while a finding in what the turn changed is neither fixed nor dismissed, at most 3 times a turn.
+
+If that line is not in this session, JevGate's hooks are not running for you (they may not be trusted yet, or this agent reads these instructions but not the hooks), and no silence from JevGate is a pass: before you finish, run `jevgate check --base HEAD` and act on its findings as below, or say that JevGate did not check your changes.
+
+- Read the code at each finding before you change anything, and fix it when it is right; `Next` is a suggested step, not the only fix.
+- When a finding is mistaken, the code is meant to be that way, or it is right but left for later, dismiss it with a reason: `jevgate baseline mark wrong PATH:LINE`, `intended` or `later`. The dismissal holds while the code it names is unchanged, the person audits dismissals with `jevgate baseline stats`, and JevGate does not block again when nothing changed.
+- Do not edit `jevgate.toml`, the custom questions in `.jevgate/questions/` or `jevgate-baseline.json` by hand, run `jevgate baseline` without `mark`, add `jevgate: allow` comments, or delete or skip tests to clear a finding, unless the person asks: accepting findings wholesale is their decision. Within a turn such edits do not unblock it: JevGate reads those files as they were when the turn began, and tells the person of each edit.
+- "JevGate could not check …" means the code was not reviewed: say so in your reply, and do not treat it as a pass.
+- `jevgate check --base HEAD` lists the findings in your uncommitted changes, and `.jevgate/latest.json` holds the last report.
+<!-- jevgate:end -->
