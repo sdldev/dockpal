@@ -25,7 +25,7 @@ selectedInstance.subscribe((id) => {
 });
 
 // Current page routing
-export const currentPage = writable<string>('fleet');
+export const currentPage = writable<string>('servers');
 
 // Selected compose stack name (stacks ↔ compose page navigation)
 export const currentStackName = writable<string | null>(null);
@@ -86,28 +86,28 @@ export function removeToast(id: string): void {
 	toasts.update((list) => list.filter((t) => t.id !== id));
 }
 
-// --- Fleet dashboard (multi-instance monitoring) ---
+// --- Servers dashboard (multi-instance monitoring) ---
 
-export interface FleetInstance extends InstanceListItem {
+export interface ServersInstance extends InstanceListItem {
 	sysInfo: SystemInfo | null;
 	containers: ContainerInfo[];
 	imageCount: number;
 }
 
-export interface FleetContainer extends ContainerInfo {
+export interface ServersContainer extends ContainerInfo {
 	instanceId: string;
 	instanceName: string;
 }
 
-export interface FleetState {
-	instances: FleetInstance[];
-	containers: FleetContainer[];
+export interface ServersState {
+	instances: ServersInstance[];
+	containers: ServersContainer[];
 	loading: boolean;
 }
 
-export function createFleetStore() {
+export function createServersStore() {
 	let intervalId: ReturnType<typeof setInterval> | null = null;
-	const { subscribe, set, update } = writable<FleetState>({
+	const { subscribe, set, update } = writable<ServersState>({
 		instances: [],
 		containers: [],
 		loading: true
@@ -120,7 +120,7 @@ export function createFleetStore() {
 
 	// Fetch the instance list, then sysInfo + containers + image count for
 	// every reachable instance in parallel. Flattens containers into the
-	// global fleet view.
+	// global servers view.
 	async function fetchMetrics() {
 		try {
 			const list = await api.get<InstanceListItem[]>('/instances');
@@ -151,7 +151,7 @@ export function createFleetStore() {
 				})
 			);
 
-			const allContainers: FleetContainer[] = [];
+			const allContainers: ServersContainer[] = [];
 			for (const inst of resolved) {
 				for (const c of inst.containers ?? []) {
 					allContainers.push({
@@ -164,7 +164,7 @@ export function createFleetStore() {
 
 			set({ instances: resolved, containers: allContainers, loading: false });
 		} catch (e) {
-			console.error('Failed to load fleet metrics:', e);
+			console.error('Failed to load servers metrics:', e);
 			update((s) => ({ ...s, loading: false }));
 		}
 	}

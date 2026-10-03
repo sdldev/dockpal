@@ -1,23 +1,23 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { createFleetStore, isAdmin, isOperator, addToast, selectedInstance } from '../../lib/store';
-	import type { FleetInstance } from '../../lib/store';
+	import { createServersStore, isAdmin, isOperator, addToast, selectedInstance } from '../../lib/store';
+	import type { ServersInstance } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
 	import { updateInstance } from '../../lib/api/stacks';
 	import { formatBytes } from '../../lib/stats-history';
 	import { formatPorts } from '../../lib/format';
 	import { navigate } from '../../lib/router';
-	import AddServerPanel from '../fleet/AddServerPanel.svelte';
-	import SSHHardeningModal from '../fleet/SSHHardeningModal.svelte';
+	import AddServerPanel from '../servers/AddServerPanel.svelte';
+	import SSHHardeningModal from '../servers/SSHHardeningModal.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
-	const fleet = createFleetStore();
+	const servers = createServersStore();
 
 	type Tab = 'overview' | 'containers' | 'bulk-deploy' | 'add-server';
-	let fleetTab = $state<Tab>('overview');
+	let serversTab = $state<Tab>('overview');
 
 	let containerSearch = $state('');
 
@@ -29,22 +29,22 @@
 	let testResult = $state<{ id: string; ok: boolean; message: string } | null>(null);
 
 	// SSH hardening detail + run (admin-only, remote instances only).
-	let hardenTarget = $state<FleetInstance | null>(null);
+	let hardenTarget = $state<ServersInstance | null>(null);
 
 	// After a successful hardening run the modal's instance snapshot is stale
 	// (it still shows "password auth"). Pull the refreshed record from the
-	// fleet store so the modal reflects the new state immediately.
+	// servers store so the modal reflects the new state immediately.
 	async function refreshAfterHarden() {
-		await fleet.fetchMetrics();
+		await servers.fetchMetrics();
 		if (hardenTarget) {
-			hardenTarget = $fleet.instances.find((i) => i.id === hardenTarget?.id) ?? hardenTarget;
+			hardenTarget = $servers.instances.find((i) => i.id === hardenTarget?.id) ?? hardenTarget;
 		}
 	}
 
 	// Security badge for the Servers table: detected state wins (it reflects
 	// the server's REAL sshd config), then the panel's hardening record, then
 	// the login type. Unknown detection = not verified = not green.
-	function securityBadge(inst: FleetInstance): { label: string; cls: string; clickable: boolean } {
+	function securityBadge(inst: ServersInstance): { label: string; cls: string; clickable: boolean } {
 		if (inst.id === 'local') return { label: 'Local', cls: 'bg-zinc-800 text-zinc-500', clickable: false };
 		if (inst.sec_password_auth === 'no')
 			return { label: 'Hardened', cls: 'bg-green-500/10 text-green-400', clickable: true };
@@ -103,7 +103,7 @@
 			await updateInstance(editTarget.id, { name });
 			addToast(`Server renamed to "${name}"`, 'success');
 			editTarget = null;
-			await fleet.fetchMetrics();
+			await servers.fetchMetrics();
 		} catch (e) {
 			editError = e instanceof Error ? e.message : 'Failed to update server';
 		} finally {
@@ -119,7 +119,7 @@
 			addToast(`Server "${removeTarget.name}" removed`, 'success');
 			removeTarget = null;
 			instanceMenuOpen = null;
-			await fleet.fetchMetrics();
+			await servers.fetchMetrics();
 		} catch (e) {
 			addToast(e instanceof Error ? e.message : 'Failed to remove server', 'error');
 		} finally {
@@ -154,11 +154,11 @@
 		// instances already exceeds the backend's 60 req/min read limit and the
 		// gauges start rendering zeros from 429s. 15s keeps the dashboard fresh
 		// while staying well under the limit.
-		fleet.startPolling(15000);
+		servers.startPolling(15000);
 	});
 
 	onDestroy(() => {
-		fleet.stopPolling();
+		servers.stopPolling();
 	});
 
 	const now = () => new Date().toLocaleTimeString();
@@ -187,7 +187,7 @@
 
 		const results = await Promise.all(
 			targets.map(async (targetId) => {
-				const inst = $fleet.instances.find((i) => i.id === targetId);
+				const inst = $servers.instances.find((i) => i.id === targetId);
 				const displayName = inst ? (inst.id === 'local' ? 'This Server' : inst.name) : targetId;
 
 				addBulkDeployLog(now(), 'info', `Deploying to ${displayName}...`, 'running');
@@ -217,7 +217,7 @@
 		bulkDeployForm = { name: '', compose: '', targets: [] };
 		bulkDeploying = false;
 
-		await fleet.fetchMetrics();
+		await servers.fetchMetrics();
 	}
 
 	function toggleTarget(id: string) {
@@ -226,21 +226,21 @@
 			: [...bulkDeployForm.targets, id];
 	}
 
-	const onlineInstances = $derived($fleet.instances.filter((i) => fleet.isOnline(i)));
-	const runningCount = $derived($fleet.containers.filter((c) => c.state === 'running').length);
+	const onlineInstances = $derived($servers.instances.filter((i) => servers.isOnline(i)));
+	const runningCount = $derived($servers.containers.filter((c) => c.state === 'running').length);
 	const totalCpuCores = $derived(
-		$fleet.instances.reduce((acc, inst) => acc + (inst.sysInfo?.cpu_cores || 0), 0)
+		$servers.instances.reduce((acc, inst) => acc + (inst.sysInfo?.cpu_cores || 0), 0)
 	);
 	const totalMemory = $derived(
-		$fleet.instances.reduce((acc, inst) => acc + (inst.sysInfo?.total_ram || 0), 0)
+		$servers.instances.reduce((acc, inst) => acc + (inst.sysInfo?.total_ram || 0), 0)
 	);
 	const onlineCount = $derived(onlineInstances.length);
-	const offlineCount = $derived($fleet.instances.length - onlineCount);
+	const offlineCount = $derived($servers.instances.length - onlineCount);
 
 	const filteredContainers = $derived(
 		!containerSearch.trim()
-			? $fleet.containers
-			: $fleet.containers.filter(
+			? $servers.containers
+			: $servers.containers.filter(
 					(c) =>
 						c.name.toLowerCase().includes(containerSearch.toLowerCase()) ||
 						c.instanceName.toLowerCase().includes(containerSearch.toLowerCase())
@@ -278,7 +278,7 @@
 	</div>
 {/snippet}
 
-{#snippet securityBadgeCell(inst: FleetInstance)}
+{#snippet securityBadgeCell(inst: ServersInstance)}
 	{@const badge = securityBadge(inst)}
 	{#if badge.clickable && canManage(inst.id)}
 		<button
@@ -300,8 +300,8 @@
 			{#each tabs as tab}
 				{#if (!tab.operatorOnly || $isOperator) && (!tab.adminOnly || $isAdmin)}
 					<button
-						onclick={() => (fleetTab = tab.id)}
-						class={`px-4 py-2 rounded-sm text-sm font-medium transition-all ${fleetTab === tab.id ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'}`}
+						onclick={() => (serversTab = tab.id)}
+						class={`px-4 py-2 rounded-sm text-sm font-medium transition-all ${serversTab === tab.id ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'}`}
 					>
 						{tab.label}
 					</button>
@@ -310,16 +310,16 @@
 		</div>
 	</div>
 
-	{#if $fleet.loading}
+	{#if $servers.loading}
 		<div class="text-zinc-500 text-sm">Loading servers...</div>
-	{:else if fleetTab === 'overview'}
-		<!-- Fleet Overview Tab -->
+	{:else if serversTab === 'overview'}
+		<!-- Servers Overview Tab -->
 		<div class="space-y-6">
-			<!-- Fleet Summary KPI Cards -->
+			<!-- Servers Summary KPI Cards -->
 			<div class="grid grid-cols-1 md:grid-cols-4 gap-4">
 				<div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
 					<div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Instances</div>
-					<div class="text-3xl font-bold text-white">{$fleet.instances.length}</div>
+					<div class="text-3xl font-bold text-white">{$servers.instances.length}</div>
 					<div class="text-[10px] text-zinc-500 mt-1">{onlineCount} Online / {offlineCount} Offline</div>
 				</div>
 				<div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
@@ -358,8 +358,8 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each $fleet.instances as inst (inst.id)}
-							{@const online = fleet.isOnline(inst)}
+						{#each $servers.instances as inst (inst.id)}
+							{@const online = servers.isOnline(inst)}
 							{@const running = (inst.containers ?? []).filter((c) => c.state === 'running').length}
 							{@const stopped = (inst.containers ?? []).length - running}
 							<tr class="border-b border-zinc-800/40 hover:bg-zinc-950/10">
@@ -505,8 +505,8 @@
 				</table>
 			</div>
 		</div>
-	{:else if fleetTab === 'containers'}
-		<!-- Fleet Containers Tab -->
+	{:else if serversTab === 'containers'}
+		<!-- All Containers Tab -->
 		<div class="bg-zinc-900 border border-zinc-800 rounded-sm overflow-hidden">
 			<div class="p-4 border-b border-zinc-800 flex items-center justify-between">
 				<h3 class="text-sm font-semibold text-white">All Running Containers Across Servers</h3>
@@ -558,7 +558,7 @@
 				</tbody>
 			</table>
 		</div>
-	{:else if fleetTab === 'bulk-deploy'}
+	{:else if serversTab === 'bulk-deploy'}
 		<!-- Bulk Deploy Tab -->
 		{#if $isOperator}
 			<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5 space-y-4">
@@ -580,7 +580,7 @@
 									type="text"
 									bind:value={bulkDeployForm.name}
 									required
-									placeholder="my-fleet-app"
+									placeholder="my-server-app"
 									class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 								/>
 							</div>
@@ -604,7 +604,7 @@
 								>Select Deployment Targets</span
 							>
 							<div class="space-y-2 max-h-64 overflow-y-auto">
-								{#each $fleet.instances as inst (inst.id)}
+								{#each $servers.instances as inst (inst.id)}
 									<div
 										role="button"
 										tabindex="0"
@@ -615,7 +615,7 @@
 										<input
 											type="checkbox"
 											checked={bulkDeployForm.targets.includes(inst.id)}
-											disabled={!fleet.isOnline(inst)}
+											disabled={!servers.isOnline(inst)}
 											class="rounded bg-zinc-900 border-zinc-800 text-blue-600 focus:ring-blue-600 pointer-events-none"
 										/>
 										<div class="flex-1 min-w-0">
@@ -631,9 +631,9 @@
 											<span class="text-xs text-zinc-500 truncate">{inst.host || 'Local Daemon'}</span>
 										</div>
 										<span
-											class={`text-xs ${fleet.isOnline(inst) ? 'text-green-400' : 'text-red-400'}`}
+											class={`text-xs ${servers.isOnline(inst) ? 'text-green-400' : 'text-red-400'}`}
 										>
-											{fleet.isOnline(inst) ? 'Online' : 'Offline'}
+											{servers.isOnline(inst) ? 'Online' : 'Offline'}
 										</span>
 									</div>
 								{/each}
@@ -694,7 +694,7 @@
 				<p class="text-sm text-zinc-500">Bulk deployment requires an operator or admin role.</p>
 			</div>
 		{/if}
-	{:else if fleetTab === 'add-server'}
+	{:else if serversTab === 'add-server'}
 		<!-- Add Server Tab (admin only) -->
 		<div class="space-y-4">
 			<p class="text-sm text-zinc-500">

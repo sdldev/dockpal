@@ -1,5 +1,5 @@
 // Minimal URL router: syncs the `currentPage` store with the browser URL so the
-// SPA supports clean deep links (/dashboard, /fleet, /containers/:id) and
+// SPA supports clean deep links (/dashboard, /servers, /containers/:id) and
 // back/forward navigation — replacing the legacy Alpine router.
 import { writable } from 'svelte/store';
 import { currentPage, containersInitialTab } from './store';
@@ -13,7 +13,7 @@ export const routeParams = writable<RouteParams>({});
 // SPA page id → canonical path.
 const pagePaths: Record<string, string> = {
 	dashboard: '/dashboard',
-	fleet: '/fleet',
+	servers: '/servers',
 	stacks: '/stacks',
 	compose: '/compose',
 	containers: '/containers',
@@ -25,8 +25,10 @@ const pagePaths: Record<string, string> = {
 // Paths whose pages were folded into other pages by the IA consolidation,
 // kept working for old bookmarks: Images → Containers tab, Installed Apps
 // (updates) → Stacks tab, Webhooks/Domains → Integrations tabs, Admin →
-// Settings tab, App Installer → Stacks catalog.
+// Settings tab, App Installer → Stacks catalog, /fleet + /instances → the
+// Servers page (renamed in the v1.0.0 IA).
 const legacyAliases: Record<string, string> = {
+	'/fleet': 'servers',
 	'/profile': 'settings',
 	'/registry': 'settings',
 	'/admin': 'settings',
@@ -37,8 +39,8 @@ const legacyAliases: Record<string, string> = {
 	'/images': 'containers',
 	'/webhooks': 'integrations',
 	'/domains': 'integrations',
-	'/instances': 'fleet',
-	'/add-instance': 'fleet'
+	'/instances': 'servers',
+	'/add-instance': 'servers'
 };
 
 function normalize(path: string): string {
@@ -47,8 +49,8 @@ function normalize(path: string): string {
 
 // Resolve a URL path into a page id + params (container id for detail view).
 export function pathToPage(path: string): { page: string; params: RouteParams } {
-	// Root path lands on Servers (fleet) — the natural starting point.
-	const p = normalize(path) || 'fleet';
+	// Root path lands on Servers — the natural starting point.
+	const p = normalize(path) || 'servers';
 	const parts = p.split('/');
 
 	// /containers/:id → container detail
@@ -67,8 +69,8 @@ export function pathToPage(path: string): { page: string; params: RouteParams } 
 	const entry = Object.entries(pagePaths).find(([, p]) => p === base);
 	if (entry) return { page: entry[0], params: {} };
 
-	// Unknown path → fleet (the SPA has no 404 page).
-	return { page: 'fleet', params: {} };
+	// Unknown path → Servers (the SPA has no 404 page).
+	return { page: 'servers', params: {} };
 }
 
 // Build the URL for a page (+ params).
@@ -76,7 +78,7 @@ export function pageToPath(page: string, params: RouteParams = {}): string {
 	if (page === 'container-detail' && params.id) {
 		return '/containers/' + encodeURIComponent(params.id);
 	}
-	return pagePaths[page] ?? '/fleet';
+	return pagePaths[page] ?? '/servers';
 }
 
 // Navigate to a page: updates state + URL. Pass `replace` to overwrite the

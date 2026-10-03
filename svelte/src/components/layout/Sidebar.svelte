@@ -94,7 +94,7 @@
     if (updateTimer) clearInterval(updateTimer);
   });
 
-  const showFleet = $derived(instances.length > 1);
+  const showServers = $derived(instances.length > 1);
 
   function onInstanceChange(e: Event) {
     const id = (e.target as HTMLSelectElement).value;
@@ -124,7 +124,7 @@
 
   const nav: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { id: 'fleet', label: 'Servers', icon: 'fleet', visible: () => showFleet },
+    { id: 'servers', label: 'Servers', icon: 'servers', visible: () => showServers },
     { id: 'stacks', label: 'Stacks', icon: 'stacks' },
     { id: 'containers', label: 'Containers', icon: 'containers' },
     { id: 'integrations', label: 'Integrations', icon: 'webhooks', role: 'operator' },
@@ -163,7 +163,7 @@
        (single-server users don't need to "choose" anything). The "+ Add
        Server" link is the discoverable entry point to the multi-server flow. -->
   <div class="px-1 pb-4 mb-2 border-b border-zinc-800">
-    {#if showFleet}
+    {#if showServers}
       <select
         aria-label="Select server"
         value={$selectedInstance}
@@ -177,9 +177,9 @@
         {/each}
       </select>
     {/if}
-    {#if $isAdmin && !showFleet}
+    {#if $isAdmin && !showServers}
       <button
-        onclick={() => navigate('fleet')}
+        onclick={() => navigate('servers')}
         class="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-sm text-xs text-zinc-500 hover:text-white hover:bg-zinc-800 border border-dashed border-zinc-800 hover:border-zinc-600 transition-colors"
       >
         <span class="text-sm leading-none">+</span> Add Server

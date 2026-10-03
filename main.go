@@ -290,7 +290,7 @@ func runServer(tls bool, tlsCert, tlsKey, tlsDomain string) {
 	startAuditRetentionWorker(appCtx, database, auditRetention)
 
 	// Serve embedded Svelte SPA at the root.
-	// The SPA handles its own client-side routes (/dashboard, /fleet,
+	// The SPA handles its own client-side routes (/dashboard, /servers,
 	// /containers/:id, ...) via lib/router.ts; the NoRoute handler below
 	// serves index.html for those deep links.
 	var svelteIndex []byte

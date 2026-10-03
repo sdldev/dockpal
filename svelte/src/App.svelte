@@ -14,7 +14,7 @@
   import ContainerPage from './components/pages/ContainerPage.svelte';
   import StacksPage from './components/pages/StacksPage.svelte';
   import ComposePage from './components/pages/ComposePage.svelte';
-  import FleetPage from './components/pages/FleetPage.svelte';
+  import ServersPage from './components/pages/ServersPage.svelte';
   import NavHeader from './components/layout/NavHeader.svelte';
 
   let initialized = $state(false);
@@ -40,7 +40,7 @@
     api.post('/logout').catch(() => {});
     clearToken();
     currentUser.set(null);
-    navigate('fleet', {}, true);
+    navigate('servers', {}, true);
   }
 
   // Sidebar: open by default on desktop, closed on mobile (evaluated once
@@ -56,7 +56,7 @@
   // sub-headings; the top-level title/description now lives only here).
   const pageTitles: Record<string, string> = {
     dashboard: 'Dashboard',
-    fleet: 'Servers',
+    servers: 'Servers',
     stacks: 'Stacks',
     compose: 'Compose',
     containers: 'Containers',
@@ -75,7 +75,7 @@
     // dispatches this event so we drop the session back to login.
     const onUnauthorized = () => {
       currentUser.set(null);
-      navigate('fleet', {}, true);
+      navigate('servers', {}, true);
     };
     window.addEventListener('dockpal:unauthorized', onUnauthorized);
     return () => window.removeEventListener('dockpal:unauthorized', onUnauthorized);
@@ -114,8 +114,8 @@
         {#key $selectedInstance}
           {#if $currentPage === 'dashboard'}
             <Dashboard />
-          {:else if $currentPage === 'fleet'}
-            <FleetPage />
+          {:else if $currentPage === 'servers'}
+            <ServersPage />
           {:else if $currentPage === 'containers'}
             <ContainersPage />
           {:else if $currentPage === 'settings'}

@@ -211,7 +211,7 @@ func (r *HistoryRecorder) Stop() {
 }
 
 // instanceIDs lists every registered instance. Falls back to "local" when
-// the database query fails (mirrors the fleet dashboard's behavior).
+// the database query fails (mirrors the Servers page's behavior).
 func (r *HistoryRecorder) instanceIDs() []string {
 	ids, err := r.agentMgr.ListInstances()
 	if err != nil {
