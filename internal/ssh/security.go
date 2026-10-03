@@ -3,6 +3,7 @@ package ssh
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	cryptossh "golang.org/x/crypto/ssh"
@@ -17,13 +18,16 @@ type SecurityState struct {
 	PasswordAuth string `json:"password_auth"` // "yes" | "no" | "unknown"
 	RootLogin    string `json:"root_login"`    // "yes" | "no" | "prohibit-password" | "without-password" | "unknown"
 	Fail2ban     string `json:"fail2ban"`      // "active" | "inactive" | "unknown"
+	// Firewall is ufw-centric: "active" | "inactive" | "absent" | "firewalld"
+	// (firewalld present — detected but not managed by Dockpal) | "unknown".
+	Firewall string `json:"firewall"`
 }
 
 // DetectSecurity connects with the given credential and reads the effective
 // configuration. Fail-closed like Vito: anything unreadable reports
 // "unknown", which the UI treats as NOT secured.
 func DetectSecurity(host string, port int, user, authType, secret, expectedHostKey string, w io.Writer) (SecurityState, error) {
-	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown"}
+	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown", Firewall: "unknown"}
 	client, err := dialSSH(host, port, user, authType, secret, expectedHostKey, w)
 	if err != nil {
 		return state, err
@@ -68,7 +72,56 @@ func DetectSecurity(host string, port int, user, authType, secret, expectedHostK
 			state.Fail2ban = "inactive"
 		}
 	}
+	state.Firewall = detectFirewallState(client, sudo)
 	return state, nil
+}
+
+// detectFirewallState runs the ufw/firewalld probe over an established
+// connection and maps the output onto SecurityState.Firewall values.
+func detectFirewallState(client *cryptossh.Client, sudo bool) string {
+	prefix := ""
+	if sudo {
+		prefix = "sudo "
+	}
+	// `ufw status` needs root and can hang on odd setups — timeout-guard it
+	// like the activity monitor does. head -n 1 keeps just "Status: …".
+	var out strings.Builder
+	script := "if command -v ufw >/dev/null 2>&1; then echo 'tool: ufw'; timeout 10 " + prefix +
+		"ufw status 2>/dev/null | head -n 1; " +
+		"elif command -v firewall-cmd >/dev/null 2>&1; then echo 'tool: firewalld'; " +
+		"else echo 'tool: none'; fi; true"
+	if err := runCommandTo(client, script, &out); err != nil {
+		return "unknown"
+	}
+	return parseFirewallDetect(out.String())
+}
+
+// parseFirewallDetect maps the probe script output onto the ufw-centric
+// firewall vocabulary. "inactive" is matched before "active" — the word
+// "active" is a substring of "inactive".
+func parseFirewallDetect(out string) string {
+	switch {
+	case strings.Contains(out, "tool: ufw"):
+		header := ""
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "Status:") {
+				header = strings.TrimSpace(line)
+				break
+			}
+		}
+		switch header {
+		case "Status: active":
+			return "active"
+		case "Status: inactive":
+			return "inactive"
+		}
+		return "unknown"
+	case strings.Contains(out, "tool: firewalld"):
+		return "firewalld"
+	case strings.Contains(out, "tool: none"):
+		return "absent"
+	}
+	return "unknown"
 }
 
 // parseSSHDValue extracts the value of `key value` from sshd -T output.
@@ -87,14 +140,17 @@ func parseSSHDValue(out, key string) string {
 	return ""
 }
 
-// SecurityUpdate describes the DESIRED end state of the three controls plus
-// the keys to keep on the server (the UI's unified toggle model). Only
+// SecurityUpdate describes the DESIRED end state of the controls plus the
+// keys to keep on the server (the UI's unified toggle model). Only
 // differences vs the current state are applied, in one sshd rewrite + one
 // reload where possible.
 type SecurityUpdate struct {
 	PasswordAuth bool // true = passwords allowed, false = disabled (key-only)
 	RootLogin    bool // true = unmanaged (server default), false = PermitRootLogin no
 	Fail2ban     bool // true = installed and running, false = stopped
+	// Firewall manages ufw only: true = installed and active, false =
+	// inactive. firewalld is detected but never touched.
+	Firewall bool
 	// PanelKeyPEM is the private key the panel authenticates with after the
 	// run (its public half MUST be in PublicKeys, or the panel locks itself
 	// out). Empty when the panel already connects by key — then PublicKeys
@@ -140,7 +196,7 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 	if err != nil {
 		return fmt.Errorf("failed to read the current security state: %w", err)
 	}
-	step("Current: password_auth=%s root_login=%s fail2ban=%s", current.PasswordAuth, current.RootLogin, current.Fail2ban)
+	step("Current: password_auth=%s root_login=%s fail2ban=%s firewall=%s", current.PasswordAuth, current.RootLogin, current.Fail2ban, current.Firewall)
 	mode, err := configMode(client, sudo)
 	if err != nil {
 		return err
@@ -205,9 +261,24 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 		step("fail2ban already in the desired state.")
 	}
 
+	// --- firewall (ufw only; firewalld is never touched) ---
+	if current.Firewall == "firewalld" {
+		step("firewalld detected — Dockpal manages ufw only, firewall left as is.")
+	} else if update.Firewall && current.Firewall != "active" {
+		if err := enableUFW(client, sudo, port, w); err != nil {
+			return err
+		}
+	} else if !update.Firewall && current.Firewall == "active" {
+		if err := disableUFW(client, sudo, w); err != nil {
+			return err
+		}
+	} else {
+		step("firewall already in the desired state.")
+	}
+
 	state, derr := detectEffective(client, sudo)
 	if derr == nil {
-		step("Detected now: password_auth=%s root_login=%s fail2ban=%s", state.PasswordAuth, state.RootLogin, state.Fail2ban)
+		step("Detected now: password_auth=%s root_login=%s fail2ban=%s firewall=%s", state.PasswordAuth, state.RootLogin, state.Fail2ban, state.Firewall)
 	}
 	step("Update completed successfully.")
 	return nil
@@ -216,7 +287,7 @@ func ApplySecurity(host string, port int, user, authType, secret, expectedHostKe
 // detectEffective reads the effective state over an established connection
 // (same commands as DetectSecurity, no new dial).
 func detectEffective(client *cryptossh.Client, sudo bool) (SecurityState, error) {
-	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown"}
+	state := SecurityState{PasswordAuth: "unknown", RootLogin: "unknown", Fail2ban: "unknown", Firewall: "unknown"}
 	// $SSHD must expand in the CALLER's shell and only the binary path cross
 	// into sudo: wrapping the whole line in `sudo sh -c` lost the variable
 	// (root's shell has no SSHD set), so non-root servers always reported
@@ -246,6 +317,7 @@ func detectEffective(client *cryptossh.Client, sudo bool) (SecurityState, error)
 			state.Fail2ban = "inactive"
 		}
 	}
+	state.Firewall = detectFirewallState(client, sudo)
 	return state, nil
 }
 
@@ -408,5 +480,72 @@ func disableFail2ban(client *cryptossh.Client, sudo bool, w io.Writer) error {
 		return fmt.Errorf("fail2ban is still running after the disable attempt")
 	}
 	fmt.Fprintln(w, "[Dockpal Security] fail2ban stopped.")
+	return nil
+}
+
+// ufwStatusCommand reads the single "Status: …" header line of ufw.
+func ufwStatusCommand(sudo string) string {
+	return "timeout 10 " + sudo + "ufw status 2>/dev/null | head -n 1; true"
+}
+
+// enableUFW converges the firewall to ufw active. Order matters: the SSH port
+// the panel is connected through MUST get its allow rule before enable —
+// enabling a default-deny ufw without it would cut off SSH (and Dockpal) on
+// the next connection. Installed on demand via apt/dnf/yum.
+func enableUFW(client *cryptossh.Client, sudo bool, sshPort int, w io.Writer) error {
+	s := ""
+	if sudo {
+		s = "sudo "
+	}
+	var has strings.Builder
+	if err := runCommandTo(client, "command -v ufw >/dev/null 2>&1 && echo yes || echo no", &has); err != nil ||
+		strings.TrimSpace(has.String()) == "no" {
+		fmt.Fprintln(w, "[Dockpal Security] Installing ufw (apt/dnf/yum)...")
+		// Real if/elif/else — an `A && B || C` chain fell through into dnf
+		// after a successful apt install (seen live with fail2ban on
+		// vps-media); same lesson applies here.
+		install := s + "sh -c " + shellQuote(
+			"if command -v apt-get >/dev/null 2>&1; then apt-get install -y ufw; "+
+				"elif command -v dnf >/dev/null 2>&1; then dnf install -y ufw; "+
+				"elif command -v yum >/dev/null 2>&1; then yum install -y ufw; "+
+				"else echo 'no supported package manager found (apt/dnf/yum)' >&2; exit 1; fi")
+		if err := runCommand(client, install, w); err != nil {
+			return fmt.Errorf("failed to install ufw: %w", err)
+		}
+	}
+	fmt.Fprintf(w, "[Dockpal Security] Allowing SSH port %d/tcp before enabling (lockout guard)...\n", sshPort)
+	if err := runCommand(client, s+"ufw allow "+strconv.Itoa(sshPort)+"/tcp", w); err != nil {
+		return fmt.Errorf("failed to allow the SSH port — refusing to enable ufw: %w", err)
+	}
+	fmt.Fprintln(w, "[Dockpal Security] Enabling ufw...")
+	if err := runCommand(client, s+"ufw --force enable", w); err != nil {
+		return fmt.Errorf("failed to enable ufw: %w", err)
+	}
+	var st strings.Builder
+	if err := runCommandTo(client, ufwStatusCommand(s), &st); err != nil ||
+		strings.TrimSpace(st.String()) != "Status: active" {
+		return fmt.Errorf("ufw did not become active — check the firewall state on the server")
+	}
+	fmt.Fprintln(w, "[Dockpal Security] ufw is active — inbound traffic denied except allowed rules; SSH port allowed.")
+	fmt.Fprintln(w, "[Dockpal Security] Note: Docker publishes container ports through iptables directly, bypassing ufw — container ports stay reachable.")
+	return nil
+}
+
+// disableUFW turns ufw off (rules stay saved for a later enable).
+func disableUFW(client *cryptossh.Client, sudo bool, w io.Writer) error {
+	s := ""
+	if sudo {
+		s = "sudo "
+	}
+	fmt.Fprintln(w, "[Dockpal Security] Disabling ufw...")
+	if err := runCommand(client, s+"ufw disable", w); err != nil {
+		return fmt.Errorf("failed to disable ufw: %w", err)
+	}
+	var st strings.Builder
+	if err := runCommandTo(client, ufwStatusCommand(s), &st); err != nil ||
+		strings.TrimSpace(st.String()) != "Status: inactive" {
+		return fmt.Errorf("ufw is still active after the disable attempt")
+	}
+	fmt.Fprintln(w, "[Dockpal Security] ufw stopped — saved rules are kept for a later enable.")
 	return nil
 }

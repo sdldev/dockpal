@@ -65,6 +65,11 @@ export const systemUpdateBadge = writable<SystemUpdateBadge | null>(null);
 // Containers tab). Consumed and cleared by ContainersPage on mount.
 export const containersInitialTab = writable<'containers' | 'images' | null>(null);
 
+// Initial tab for the server detail page (/servers/:id), set when the
+// Servers-table security badge or row menu jumps straight to the Security
+// tab. Consumed and reset to 'overview' by ServerDetailPage on mount.
+export const serverDetailTab = writable<'overview' | 'security'>('overview');
+
 // Template staged for a new stack (Stacks → Catalog → "New stack from this").
 // ComposePage consumes and clears it in add-mode.
 export const pendingTemplate = writable<Template | null>(null);

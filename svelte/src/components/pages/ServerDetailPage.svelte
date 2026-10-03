@@ -1,11 +1,12 @@
 <script lang="ts">
   // Server detail — the per-server control panel at /servers/:id (the old
-  // "Dashboard" page): system status + disk gauge, metrics history charts,
-  // and an info list of running/stopped/containers/images.
+  // "Dashboard" page): tabs Overview (system status + disk gauge, metrics
+  // history charts, info list) and Security (SSH hardening / fail2ban / ufw
+  // controls + activity monitor, via SecurityTab).
   // Polls system/info every 2.5s with a 30-point rolling window (legacy parity).
   import { onMount } from 'svelte';
   import { api } from '../../lib/api/client';
-  import { addToast } from '../../lib/store';
+  import { addToast, serverDetailTab } from '../../lib/store';
   import { selectedInstance } from '../../lib/store';
   import { get } from 'svelte/store';
   import { routeParams } from '../../lib/router';
@@ -13,9 +14,8 @@
   import type { SystemInfo } from '../../lib/types/generated';
   import HealthWidget from '../servers/HealthWidget.svelte';
   import MetricsHistory from '../servers/MetricsHistory.svelte';
-  import SecurityActivityCard from '../servers/SecurityActivityCard.svelte';
+  import SecurityTab from '../servers/SecurityTab.svelte';
   import { newStatBuffer, pushPoint, type StatBuffer } from '$lib/stats-history';
-  import type { InstanceListItem } from '../../lib/types/api';
 
   // The controlled server comes from the URL (/servers/:id), falling back to
   // the selected instance for robustness. Deep links also sync
@@ -28,27 +28,15 @@
     localStorage.setItem('dockpal_selected_instance', requestedId);
   }
 
+  // Initial tab: the Servers-table security badge / row menu jumps straight
+  // to Security via the serverDetailTab store — consume and reset it.
+  let tab = $state<'overview' | 'security'>(get(serverDetailTab));
+  serverDetailTab.set('overview');
+
   let containers = $state<ContainerInfo[]>([]);
   let loading = $state(true);
   let error = $state('');
   let imageCount = $state(0);
-
-  // Cached fail2ban badge value for the security card's collapsed summary —
-  // read once from the instance record so a glance costs no SSH connection.
-  let fail2banState = $state('');
-
-  async function loadInstance() {
-    if (instanceId === 'local') {
-      fail2banState = '';
-      return;
-    }
-    try {
-      const inst = await api.get<InstanceListItem>(`/instances/${encodeURIComponent(instanceId)}`);
-      fail2banState = inst.sec_fail2ban ?? '';
-    } catch {
-      fail2banState = '';
-    }
-  }
 
   // --- host stats (polling) ---
   let sysInfo = $state<SystemInfo | null>(null);
@@ -148,7 +136,6 @@
       await Promise.all([loadContainers(), loadImageCount(), pollSystemInfo()]);
       loading = false;
     })();
-    loadInstance();
     pollTimer = setInterval(pollSystemInfo, 2500);
     imageTimer = setInterval(loadImageCount, 30000);
     return () => {
@@ -174,97 +161,116 @@
     </div>
   {/if}
 
-  <div class="grid gap-4 md:grid-cols-2">
-    <HealthWidget />
+  <!-- Tabs (page title lives in the navheader) -->
+  <div class="flex items-center justify-end">
+    <div class="flex gap-2">
+      <button
+        onclick={() => (tab = 'overview')}
+        class={`px-4 py-2 rounded-sm text-sm font-medium transition-all ${tab === 'overview' ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'}`}
+      >
+        Overview
+      </button>
+      <button
+        onclick={() => (tab = 'security')}
+        class={`px-4 py-2 rounded-sm text-sm font-medium transition-all ${tab === 'security' ? 'bg-white text-zinc-900' : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'}`}
+      >
+        Security
+      </button>
+    </div>
+  </div>
+
+  {#if tab === 'security'}
+    <!-- SSH hardening / fail2ban / firewall controls + activity monitor -->
+    <SecurityTab {instanceId} />
+  {:else}
+    <div class="grid gap-4 md:grid-cols-2">
+      <HealthWidget />
+      {#if sysInfo}
+        {@const diskPct = sysInfo.total_disk > 0 ? (sysInfo.used_disk / sysInfo.total_disk) * 100 : 0}
+        <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 flex items-center">
+          <div class="w-full">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium text-white">Disk</span>
+              <span class="text-sm text-zinc-400">
+                {(sysInfo.used_disk / 1024 ** 3).toFixed(1)} / {(sysInfo.total_disk / 1024 ** 3).toFixed(1)} GB
+                <span class="text-zinc-600">({diskPct.toFixed(1)}%)</span>
+              </span>
+            </div>
+            <div class="h-2 bg-zinc-800 rounded-full overflow-hidden">
+              <div class="h-full rounded-full transition-all duration-500 {gaugeColor(diskPct, 'bg-violet-500')}"
+                   style="width: {Math.min(diskPct, 100)}%"></div>
+            </div>
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    {#if error}
+      <div class="p-4 bg-red-500/10 border border-red-500/20 rounded-sm">
+        <p class="text-sm text-red-400">{error}</p>
+      </div>
+    {/if}
+
     {#if sysInfo}
-      {@const diskPct = sysInfo.total_disk > 0 ? (sysInfo.used_disk / sysInfo.total_disk) * 100 : 0}
-      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4 flex items-center">
-        <div class="w-full">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm font-medium text-white">Disk</span>
-            <span class="text-sm text-zinc-400">
-              {(sysInfo.used_disk / 1024 ** 3).toFixed(1)} / {(sysInfo.total_disk / 1024 ** 3).toFixed(1)} GB
-              <span class="text-zinc-600">({diskPct.toFixed(1)}%)</span>
-            </span>
+      <!-- Metrics history: time-series charts with range selector
+           (Live rolling buffer, 1h, 12h from the recorded series) -->
+      <MetricsHistory
+        {instanceId}
+        liveCpu={cpuBuf.values}
+        liveRam={ramBuf.values}
+        liveDisk={diskBuf.values}
+        liveRx={rxBuf.values}
+        liveTx={txBuf.values}
+      />
+
+      <!-- Info + Active Containers, side by side -->
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+          <h3 class="text-sm font-medium text-zinc-300 mb-3">Info</h3>
+          <ul role="list" class="space-y-2.5">
+            <li class="flex items-center justify-between">
+              <span class="text-sm text-zinc-400">Running</span>
+              <span class="text-sm font-semibold text-emerald-400">{loading ? '—' : runningCount}</span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="text-sm text-zinc-400">Stopped</span>
+              <span class="text-sm font-semibold text-zinc-300">{loading ? '—' : stoppedCount}</span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="text-sm text-zinc-400">Containers</span>
+              <span class="text-sm font-semibold text-white">{loading ? '—' : containers.length}</span>
+            </li>
+            <li class="flex items-center justify-between">
+              <span class="text-sm text-zinc-400">Images</span>
+              <span class="text-sm font-semibold text-white">{loading ? '—' : imageCount}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-medium text-zinc-300">Active Containers</h3>
+            <span class="text-xs text-zinc-500">{runningCount} running</span>
           </div>
-          <div class="h-2 bg-zinc-800 rounded-full overflow-hidden">
-            <div class="h-full rounded-full transition-all duration-500 {gaugeColor(diskPct, 'bg-violet-500')}"
-                 style="width: {Math.min(diskPct, 100)}%"></div>
-          </div>
+          {#if loading}
+            <p class="text-sm text-zinc-600">Loading…</p>
+          {:else if runningCount === 0}
+            <p class="text-sm text-zinc-600">No running containers</p>
+          {:else}
+            <ul role="list" class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {#each containers.filter((c) => c.state === 'running') as c (c.id)}
+                <li class="flex items-center justify-between gap-3 px-2 py-1.5 rounded-sm bg-zinc-950 border border-zinc-800">
+                  <span class="flex items-center gap-2 min-w-0">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-hidden="true"></span>
+                    <span class="text-sm text-zinc-200 truncate">{c.name}</span>
+                  </span>
+                  <span class="text-xs text-zinc-500 font-mono truncate max-w-40">{c.image}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         </div>
       </div>
     {/if}
-  </div>
-
-  {#if error}
-    <div class="p-4 bg-red-500/10 border border-red-500/20 rounded-sm">
-      <p class="text-sm text-red-400">{error}</p>
-    </div>
   {/if}
-
-  {#if sysInfo}
-    <!-- Metrics history: time-series charts with range selector
-         (Live rolling buffer, 1h, 12h from the recorded series) -->
-    <MetricsHistory
-      {instanceId}
-      liveCpu={cpuBuf.values}
-      liveRam={ramBuf.values}
-      liveDisk={diskBuf.values}
-      liveRx={rxBuf.values}
-      liveTx={txBuf.values}
-    />
-
-    <!-- Info + Active Containers, side by side -->
-    <div class="grid gap-4 lg:grid-cols-2">
-      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
-        <h3 class="text-sm font-medium text-zinc-300 mb-3">Info</h3>
-        <ul role="list" class="space-y-2.5">
-          <li class="flex items-center justify-between">
-            <span class="text-sm text-zinc-400">Running</span>
-            <span class="text-sm font-semibold text-emerald-400">{loading ? '—' : runningCount}</span>
-          </li>
-          <li class="flex items-center justify-between">
-            <span class="text-sm text-zinc-400">Stopped</span>
-            <span class="text-sm font-semibold text-zinc-300">{loading ? '—' : stoppedCount}</span>
-          </li>
-          <li class="flex items-center justify-between">
-            <span class="text-sm text-zinc-400">Containers</span>
-            <span class="text-sm font-semibold text-white">{loading ? '—' : containers.length}</span>
-          </li>
-          <li class="flex items-center justify-between">
-            <span class="text-sm text-zinc-400">Images</span>
-            <span class="text-sm font-semibold text-white">{loading ? '—' : imageCount}</span>
-          </li>
-        </ul>
-      </div>
-
-      <div class="bg-zinc-900 border border-zinc-800 rounded-sm p-4">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-medium text-zinc-300">Active Containers</h3>
-          <span class="text-xs text-zinc-500">{runningCount} running</span>
-        </div>
-        {#if loading}
-          <p class="text-sm text-zinc-600">Loading…</p>
-        {:else if runningCount === 0}
-          <p class="text-sm text-zinc-600">No running containers</p>
-        {:else}
-          <ul role="list" class="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-            {#each containers.filter((c) => c.state === 'running') as c (c.id)}
-              <li class="flex items-center justify-between gap-3 px-2 py-1.5 rounded-sm bg-zinc-950 border border-zinc-800">
-                <span class="flex items-center gap-2 min-w-0">
-                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-hidden="true"></span>
-                  <span class="text-sm text-zinc-200 truncate">{c.name}</span>
-                </span>
-                <span class="text-xs text-zinc-500 font-mono truncate max-w-40">{c.image}</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
-    </div>
-  {/if}
-
-  <!-- Security activity (fail2ban + firewall): collapsed by default, SSH
-       only fires when the user expands or refreshes (server-side TTL cache). -->
-  <SecurityActivityCard {instanceId} {fail2banState} />
 </div>

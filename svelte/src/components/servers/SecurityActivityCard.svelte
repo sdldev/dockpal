@@ -256,8 +256,8 @@
               {/if}
             {:else if activity.fail2ban.active === 'inactive'}
               <p class="text-sm text-zinc-600">
-                fail2ban is not running on this server — enable it from the Security &amp; hardening
-                controls in the Servers list.
+                fail2ban is not running on this server — enable it from the SSH access &amp;
+                hardening controls above.
               </p>
             {/if}
           </div>

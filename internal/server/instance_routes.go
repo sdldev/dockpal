@@ -61,6 +61,7 @@ type InstanceResponse struct {
 	SecPasswordAuth string `json:"sec_password_auth,omitempty"`
 	SecRootLogin    string `json:"sec_root_login,omitempty"`
 	SecFail2ban     string `json:"sec_fail2ban,omitempty"`
+	SecFirewall     string `json:"sec_firewall,omitempty"`
 	SecCheckedAt    int64  `json:"sec_checked_at,omitempty"`
 }
 
@@ -79,6 +80,7 @@ type InstanceListItem struct {
 	// Detected state (may be stale — see sec_checked_at).
 	SecPasswordAuth string `json:"sec_password_auth,omitempty"`
 	SecFail2ban     string `json:"sec_fail2ban,omitempty"`
+	SecFirewall     string `json:"sec_firewall,omitempty"`
 	SecCheckedAt    int64  `json:"sec_checked_at,omitempty"`
 }
 
@@ -284,6 +286,7 @@ func handleListInstances(database *db.DB) gin.HandlerFunc {
 				SSHHardenedAt:      inst.SSHHardenedAt,
 				SecPasswordAuth:    inst.SecPasswordAuth,
 				SecFail2ban:        inst.SecFail2ban,
+				SecFirewall:        inst.SecFirewall,
 				SecCheckedAt:       inst.SecCheckedAt,
 			}
 		}
@@ -347,6 +350,7 @@ func handleGetInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			SecPasswordAuth:    inst.SecPasswordAuth,
 			SecRootLogin:       inst.SecRootLogin,
 			SecFail2ban:        inst.SecFail2ban,
+			SecFirewall:        inst.SecFirewall,
 			SecCheckedAt:       inst.SecCheckedAt,
 		})
 	}

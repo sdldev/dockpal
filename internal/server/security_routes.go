@@ -81,6 +81,7 @@ func persistSecurityState(database *db.DB, id string, state ssh.SecurityState) {
 	inst.SecPasswordAuth = state.PasswordAuth
 	inst.SecRootLogin = state.RootLogin
 	inst.SecFail2ban = state.Fail2ban
+	inst.SecFirewall = state.Firewall
 	inst.SecCheckedAt = time.Now().Unix()
 	_ = database.SaveInstance(*inst)
 }
@@ -132,13 +133,16 @@ func handleDetectSecurity(database *db.DB, jwtSecret string) gin.HandlerFunc {
 	}
 }
 
-// SecurityApplyRequest is the desired end state of all three controls (the
+// SecurityApplyRequest is the desired end state of all four controls (the
 // UI's toggle model: set the switches, then Apply once) plus the operator's
 // own public keys to keep on the server.
 type SecurityApplyRequest struct {
 	PasswordAuth *bool `json:"password_auth" binding:"required"`
 	RootLogin    *bool `json:"root_login" binding:"required"`
 	Fail2ban     *bool `json:"fail2ban" binding:"required"`
+	// Firewall converges ufw (install if missing, allow the SSH port, enable).
+	// firewalld servers are never touched.
+	Firewall *bool `json:"firewall" binding:"required"`
 	// ExtraPublicKeys are the operator's own authorized_keys lines — without
 	// at least one (or the panel key), their own machine loses shell access
 	// once passwords are disabled.
@@ -258,17 +262,18 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 
 		sessionKey := securitySessionKey(id)
 		logsManager.RemoveSession(sessionKey)
-		LogAudit(c, database, "instance.security", id, "success",
-			fmt.Sprintf("Security apply: password_auth=%t root_login=%t fail2ban=%t on %s:%d", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, host, port))
+	LogAudit(c, database, "instance.security", id, "success",
+		fmt.Sprintf("Security apply: password_auth=%t root_login=%t fail2ban=%t firewall=%t on %s:%d", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, *req.Firewall, host, port))
 
-		update := ssh.SecurityUpdate{
-			PasswordAuth: *req.PasswordAuth,
-			RootLogin:    *req.RootLogin,
-			Fail2ban:     *req.Fail2ban,
-			PanelKeyPEM:  panelPriv,
-			PublicKeys:   publicKeys,
-			TestPassword: testPassword,
-		}
+	update := ssh.SecurityUpdate{
+		PasswordAuth: *req.PasswordAuth,
+		RootLogin:    *req.RootLogin,
+		Fail2ban:     *req.Fail2ban,
+		Firewall:     *req.Firewall,
+		PanelKeyPEM:  panelPriv,
+		PublicKeys:   publicKeys,
+		TestPassword: testPassword,
+	}
 
 		go func() {
 			defer running.Delete(id)

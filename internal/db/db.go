@@ -111,7 +111,10 @@ type Instance struct {
 	SecPasswordAuth string `json:"sec_password_auth,omitempty"` // "yes"|"no"|"unknown"
 	SecRootLogin    string `json:"sec_root_login,omitempty"`    // "yes"|"no"|"prohibit-password"|"without-password"|"unknown"
 	SecFail2ban     string `json:"sec_fail2ban,omitempty"`      // "active"|"inactive"|"unknown"
-	SecCheckedAt    int64  `json:"sec_checked_at,omitempty"`
+	// SecFirewall is ufw-centric: "active"|"inactive"|"absent"|"firewalld"
+	// (present but managed outside Dockpal)|"unknown".
+	SecFirewall  string `json:"sec_firewall,omitempty"`
+	SecCheckedAt int64  `json:"sec_checked_at,omitempty"`
 }
 
 type DB struct {

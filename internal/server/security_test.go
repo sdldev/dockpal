@@ -89,8 +89,8 @@ func TestApplySecurity_MissingFieldsRejected(t *testing.T) {
 	r := gin.New()
 	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), &sync.Map{}))
 	w := httptest.NewRecorder()
-	// fail2ban missing — all three toggles are required (desired-state model).
-	req := httptest.NewRequest(http.MethodPost, "/instances/inst-sec/security", bytes.NewBufferString(`{"password_auth":false,"root_login":true}`))
+	// firewall missing — all four toggles are required (desired-state model).
+	req := httptest.NewRequest(http.MethodPost, "/instances/inst-sec/security", bytes.NewBufferString(`{"password_auth":false,"root_login":true,"firewall":false}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for missing toggles, got %d", w.Code)
@@ -107,7 +107,7 @@ func TestApplySecurity_StartsJobAndPersistsNothingOnFailure(t *testing.T) {
 	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), running))
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/instances/inst-apply/security",
-		bytes.NewBufferString(`{"password_auth":false,"root_login":true,"fail2ban":true}`))
+		bytes.NewBufferString(`{"password_auth":false,"root_login":true,"fail2ban":true,"firewall":false}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
@@ -158,7 +158,7 @@ func TestApplySecurity_ConflictsWithRunningJob(t *testing.T) {
 	r := gin.New()
 	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), running))
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/instances/inst-busy-sec/security", bytes.NewBufferString(`{"password_auth":false,"root_login":false,"fail2ban":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/instances/inst-busy-sec/security", bytes.NewBufferString(`{"password_auth":false,"root_login":false,"fail2ban":true,"firewall":false}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected 409 while another job runs, got %d", w.Code)
@@ -180,7 +180,7 @@ func TestApplySecurity_PasswordOn_StillPersistsKeys(t *testing.T) {
 	r.POST("/instances/:instance_id/security", handleApplySecurity(database, "test-jwt-secret", NewInstallLogsManager(), running))
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/instances/inst-pwon/security",
-		bytes.NewBufferString(`{"password_auth":true,"root_login":true,"fail2ban":false}`))
+		bytes.NewBufferString(`{"password_auth":true,"root_login":true,"fail2ban":false,"firewall":false}`))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())

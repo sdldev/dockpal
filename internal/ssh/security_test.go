@@ -27,6 +27,35 @@ func TestParseSSHDValue(t *testing.T) {
 	}
 }
 
+func TestParseFirewallDetect(t *testing.T) {
+	cases := []struct {
+		name, out, want string
+	}{
+		{"ufw active", "tool: ufw\nStatus: active\n", "active"},
+		{"ufw inactive", "tool: ufw\nStatus: inactive\n", "inactive"},
+		{"ufw unknown status", "tool: ufw\n", "unknown"},
+		{"firewalld present", "tool: firewalld\n", "firewalld"},
+		{"no firewall installed", "tool: none\n", "absent"},
+		{"probe failed", "", "unknown"},
+	}
+	for _, tc := range cases {
+		if got := parseFirewallDetect(tc.out); got != tc.want {
+			t.Errorf("%s: parseFirewallDetect(%q) = %q, want %q", tc.name, tc.out, got, tc.want)
+		}
+	}
+}
+
+func TestUFWStatusCommand(t *testing.T) {
+	// Root runs without a sudo prefix; non-root wraps through sudo, and the
+	// status read must always be failure-tolerant (`; true`).
+	if got := ufwStatusCommand(""); got != "timeout 10 ufw status 2>/dev/null | head -n 1; true" {
+		t.Errorf("root command = %q", got)
+	}
+	if got := ufwStatusCommand("sudo "); !strings.HasPrefix(got, "timeout 10 sudo ufw") {
+		t.Errorf("sudo command = %q", got)
+	}
+}
+
 func TestSecurityDropInLines(t *testing.T) {
 	// Password disabled only.
 	lines := securityDropInLines(true, "")

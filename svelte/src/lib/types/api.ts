@@ -74,6 +74,8 @@ export interface InstanceListItem {
   /** Detected effective state (stale-able — see sec_checked_at). */
   sec_password_auth?: string;
   sec_fail2ban?: string;
+  /** ufw-centric firewall state: "active"|"inactive"|"absent"|"firewalld"|"unknown". */
+  sec_firewall?: string;
   sec_checked_at?: number;
 }
 

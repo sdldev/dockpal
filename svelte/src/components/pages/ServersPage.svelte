@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { createServersStore, isAdmin, isOperator, addToast, selectedInstance } from '../../lib/store';
+	import { createServersStore, isAdmin, isOperator, addToast, selectedInstance, serverDetailTab } from '../../lib/store';
 	import type { ServersInstance } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
 	import { updateInstance } from '../../lib/api/stacks';
@@ -8,7 +8,6 @@
 	import { formatPorts } from '../../lib/format';
 	import { navigate } from '../../lib/router';
 	import AddServerPanel from '../servers/AddServerPanel.svelte';
-	import SSHHardeningModal from '../servers/SSHHardeningModal.svelte';
 	import Icon from '../ui/Icon.svelte';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
@@ -27,19 +26,6 @@
 	let removing = $state(false);
 	let testingId = $state<string | null>(null);
 	let testResult = $state<{ id: string; ok: boolean; message: string } | null>(null);
-
-	// SSH hardening detail + run (admin-only, remote instances only).
-	let hardenTarget = $state<ServersInstance | null>(null);
-
-	// After a successful hardening run the modal's instance snapshot is stale
-	// (it still shows "password auth"). Pull the refreshed record from the
-	// servers store so the modal reflects the new state immediately.
-	async function refreshAfterHarden() {
-		await servers.fetchMetrics();
-		if (hardenTarget) {
-			hardenTarget = $servers.instances.find((i) => i.id === hardenTarget?.id) ?? hardenTarget;
-		}
-	}
 
 	// Security badge for the Servers table: detected state wins (it reflects
 	// the server's REAL sshd config), then the panel's hardening record, then
@@ -81,6 +67,14 @@
 		selectedInstance.set(id);
 		localStorage.setItem('dockpal_selected_instance', id);
 		navigate('server-detail', { id });
+	}
+
+	// Jump straight to the detail page's Security tab — the hardening /
+	// fail2ban / firewall controls live there now (the old SSH-hardening
+	// modal was removed with that move).
+	function openSecurity(id: string) {
+		serverDetailTab.set('security');
+		openServer(id);
 	}
 
 	function openEdit(inst: { id: string; name: string; host?: string; port?: number }) {
@@ -280,11 +274,11 @@
 
 {#snippet securityBadgeCell(inst: ServersInstance)}
 	{@const badge = securityBadge(inst)}
-	{#if badge.clickable && canManage(inst.id)}
+	{#if badge.clickable}
 		<button
 			class={`text-xs font-semibold px-2 py-0.5 rounded ${badge.cls} hover:brightness-125 transition-all`}
-			title="SSH hardening details"
-			onclick={() => (hardenTarget = inst)}
+			title="Open the server's security controls"
+			onclick={() => openSecurity(inst.id)}
 		>
 			{badge.label}
 		</button>
@@ -474,10 +468,10 @@
 													</button>
 													<button
 														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
-														onclick={() => { instanceMenuOpen = null; hardenTarget = inst; }}
+														onclick={() => { instanceMenuOpen = null; openSecurity(inst.id); }}
 													>
 														<Icon name="admin" class="w-4 h-4" />
-														Security & hardening
+														Security
 													</button>
 													<button
 														class="w-full text-left px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center gap-2"
@@ -714,13 +708,6 @@
 	busy={removing}
 	onconfirm={removeInstance}
 	onclose={() => (removeTarget = null)}
-/>
-
-<SSHHardeningModal
-	open={hardenTarget !== null}
-	instance={hardenTarget}
-	onclose={() => (hardenTarget = null)}
-	onchanged={refreshAfterHarden}
 />
 
 <Modal open={editTarget !== null} title={`Edit server — ${editTarget?.name ?? ''}`} size="sm" onclose={() => (editTarget = null)}>
