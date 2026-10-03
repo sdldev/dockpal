@@ -94,11 +94,19 @@ own binary), a UI update works by writing a small trigger file that a root-owned
 the panel. The installer sets this up automatically. If the updater units are
 missing, the UI button is inert — update from the host instead.
 
+> **Path layout note:** the panel writes `update-request.json` to the directory
+> named by `DOCKPAL_UPDATE_TRIGGER_DIR`, falling back to its data dir. The
+> packaged units watch `/opt/dockpal` — so a system install must set
+> `DOCKPAL_UPDATE_TRIGGER_DIR=/opt/dockpal` in the panel's systemd unit (the
+> root dir is the service's other writable tree). The helper script also
+> checks the data-dir location, so mixed-version combinations keep working.
+
 | Variable | Default | Description |
 |---|---|---|
 | `DOCKPAL_UPDATE_ENABLED` | `true` | Master switch for the in-UI update feature |
 | `DOCKPAL_UPDATE_CHECK_INTERVAL` | `6h` | How often the panel checks for a new release (`0` = background check off) |
 | `DOCKPAL_REPO` | `sdldev/dockpal` | GitHub repository polled for releases |
+| `DOCKPAL_UPDATE_TRIGGER_DIR` | data dir | Where `update-request.json` / `update-result.json` live — must match the directory the `dockpal-updater.path` unit watches |
 
 ### Update from the host
 

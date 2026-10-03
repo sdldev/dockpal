@@ -32,12 +32,19 @@ const (
 // settingsKeyUpdateState holds the persisted State JSON.
 const settingsKeyUpdateState = "system_update_state"
 
-// TriggerFileName and ResultFileName live under the data dir (the only tree
-// the hardened service can write) and are watched/created by the root updater.
+// TriggerFileName and ResultFileName live under the trigger dir (by default
+// the data dir — the only tree the hardened service can write — unless
+// DOCKPAL_UPDATE_TRIGGER_DIR redirects them to where the root updater's
+// systemd path unit watches) and are watched/created by the root updater.
 const (
 	TriggerFileName = "update-request.json"
 	ResultFileName  = "update-result.json"
 )
+
+// EnvTriggerDir redirects where the trigger/result files live, e.g. when the
+// packaged dockpal-updater.path unit watches /opt/dockpal while the panel's
+// data dir is /opt/dockpal/data.
+const EnvTriggerDir = "DOCKPAL_UPDATE_TRIGGER_DIR"
 
 // ErrUpdateInFlight is returned when a second update is requested while one is
 // already pending or running.
@@ -87,7 +94,11 @@ type Manager struct {
 	database *db.DB
 	checker  *Checker
 	dataDir  string
-	// currentVersion is the running binary version (normalized).
+	// triggerDir is where the trigger and result files live. It defaults to
+	// dataDir but is redirected by DOCKPAL_UPDATE_TRIGGER_DIR when the
+	// systemd path unit watches a different directory (the packaged units
+	// watch the /opt/dockpal root, while the data dir is /opt/dockpal/data).
+	triggerDir     string
 	currentVersion string
 
 	mu sync.Mutex
@@ -95,11 +106,15 @@ type Manager struct {
 
 // NewManager builds a Manager. dataDir is the writable dockpal data root
 // (DOCKPAL_DATA_DIR); currentVersion is the build version (already "v"-less).
+// When DOCKPAL_UPDATE_TRIGGER_DIR names an existing directory, the trigger
+// and result files live there instead of dataDir.
 func NewManager(database *db.DB, checker *Checker, dataDir, currentVersion string) *Manager {
+	triggerDir := firstNonEmpty(os.Getenv(EnvTriggerDir), dataDir)
 	return &Manager{
 		database:       database,
 		checker:        checker,
 		dataDir:        dataDir,
+		triggerDir:     triggerDir,
 		currentVersion: normalizeVersion(currentVersion),
 	}
 }
@@ -327,8 +342,8 @@ func (m *Manager) readResultLocked() (*resultPayload, bool) {
 	return &res, true
 }
 
-func (m *Manager) triggerPath() string { return filepath.Join(m.dataDir, TriggerFileName) }
-func (m *Manager) resultPath() string  { return filepath.Join(m.dataDir, ResultFileName) }
+func (m *Manager) triggerPath() string { return filepath.Join(m.triggerDir, TriggerFileName) }
+func (m *Manager) resultPath() string  { return filepath.Join(m.triggerDir, ResultFileName) }
 
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {

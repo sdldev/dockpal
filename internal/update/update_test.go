@@ -156,6 +156,49 @@ func TestManagerRequestUpdateValidatesTarget(t *testing.T) {
 	}
 }
 
+func TestManagerTriggerDirRedirect(t *testing.T) {
+	srv := newReleaseServer(t, "v2.5.0")
+	database := openTestDB(t)
+	checker := NewChecker(database, "sdldev/dockpal", srv.URL, 0)
+	checker.CheckNow(context.Background())
+
+	dataDir := t.TempDir()
+	triggerDir := t.TempDir()
+	t.Setenv(EnvTriggerDir, triggerDir)
+	m := NewManager(database, checker, dataDir, "2.0.0")
+
+	if _, err := m.RequestUpdate("v2.5.0", "admin"); err != nil {
+		t.Fatalf("RequestUpdate: %v", err)
+	}
+	// The trigger must land in the redirected dir, not the data dir.
+	if _, err := os.Stat(filepath.Join(triggerDir, TriggerFileName)); err != nil {
+		t.Errorf("trigger not in trigger dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, TriggerFileName)); err == nil {
+		t.Error("trigger leaked into the data dir despite the redirect")
+	}
+
+	// The result file must also be read from the redirected dir.
+	res := resultPayload{Status: "done", Target: "2.5.0", ExitCode: 0, Message: "updated", FinishedAt: time.Now().Unix()}
+	data, _ := json.Marshal(res)
+	if err := os.WriteFile(filepath.Join(triggerDir, ResultFileName), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	m2 := NewManager(database, checker, dataDir, "2.0.0") // env still set
+	m2.FinalizeOnBoot()
+	status, err := m2.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != StateDone {
+		t.Errorf("state = %q want done (result read from trigger dir)", status.State)
+	}
+	// Consumed result file is removed from the redirected dir.
+	if _, err := os.Stat(filepath.Join(triggerDir, ResultFileName)); !os.IsNotExist(err) {
+		t.Errorf("result file not consumed from trigger dir: %v", err)
+	}
+}
+
 func TestManagerReconcileSuccessOnBoot(t *testing.T) {
 	srv := newReleaseServer(t, "v2.5.0")
 	database := openTestDB(t)

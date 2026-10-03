@@ -14,15 +14,34 @@
 # truth for download/verify/backup/swap/health-check/rollback logic.
 #
 # Environment (all optional, mirror update.sh):
-#   DOCKPAL_DATA_DIR   Data root (default: /opt/dockpal)
+#   DOCKPAL_DATA_DIR   Trigger/result dir when the panel runs with the default
+#                      data layout (default: /opt/dockpal). NOTE: when the
+#                      panel sets DOCKPAL_UPDATE_TRIGGER_DIR, that same value
+#                      must be exported here so both sides agree on where
+#                      update-request.json lives.
 #   DOCKPAL_UPDATE_SH  Path to update.sh (default: /opt/dockpal/update.sh)
 #
 set -euo pipefail
 
 DATA_DIR="${DOCKPAL_DATA_DIR:-/opt/dockpal}"
 UPDATE_SH="${DOCKPAL_UPDATE_SH:-$DATA_DIR/update.sh}"
-TRIGGER_FILE="$DATA_DIR/update-request.json"
 RESULT_FILE="$DATA_DIR/update-result.json"
+
+# The panel writes the trigger either to DOCKPAL_UPDATE_TRIGGER_DIR (when the
+# systemd units watch a dedicated dir) or to its data dir root. Honor the
+# explicit variable first, then the historical /opt/dockpal default, then the
+# plain data-dir location — so any panel version finds its updater.
+PANEL_TRIGGER_DIR="${DOCKPAL_UPDATE_TRIGGER_DIR:-}"
+TRIGGER_FILE=""
+for candidate in \
+    "$PANEL_TRIGGER_DIR/update-request.json" \
+    "/opt/dockpal/update-request.json" \
+    "$DATA_DIR/data/update-request.json"; do
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+        TRIGGER_FILE="$candidate"
+        break
+    fi
+done
 
 log() { echo "[dockpal-update-helper] $*" >&2; }
 
@@ -40,10 +59,15 @@ write_result() {
         > "$tmp"
     chmod 644 "$tmp"
     mv -f "$tmp" "$RESULT_FILE"
+    # Mirror the result next to the trigger file when it lives elsewhere, so
+    # the panel's manager (which reads from its own trigger dir) sees it too.
+    if [[ -n "$TRIGGER_FILE" && "$(dirname "$TRIGGER_FILE")" != "$(dirname "$RESULT_FILE")" ]]; then
+        cp -f "$RESULT_FILE" "$(dirname "$TRIGGER_FILE")/update-result.json" 2>/dev/null || true
+    fi
 }
 
-if [[ ! -f "$TRIGGER_FILE" ]]; then
-    log "no trigger file at $TRIGGER_FILE; nothing to do"
+if [[ -z "$TRIGGER_FILE" ]]; then
+    log "no trigger file found (checked trigger dir, /opt/dockpal and $DATA_DIR/data); nothing to do"
     exit 0
 fi
 
