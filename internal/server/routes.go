@@ -31,6 +31,33 @@ import (
 	"github.com/sdldev/dockpal/internal/validator"
 )
 
+// routeDeps carries the shared wiring the register* helpers below each need a
+// slice of; RegisterRoutes builds it once after the route groups exist.
+// wireLocalRuntime fills in the registry manager and image update monitor, and
+// registerDeployRoutes stores the shared deploy session manager.
+type routeDeps struct {
+	ctx          context.Context
+	r            *gin.Engine
+	dockerClient *docker.Client
+	jwtSecret    string
+	database     *db.DB
+	agentMgr     *agent.Manager
+	dataDir      string
+	version      string
+
+	api           *gin.RouterGroup
+	baseProtected *gin.RouterGroup
+	protected     *roleRouterWrapper
+	viewerGroup   *gin.RouterGroup
+	operatorGroup *gin.RouterGroup
+	adminGroup    *gin.RouterGroup
+	readLimit     gin.HandlerFunc
+
+	registryManager    *registry.Manager
+	imageUpdateMonitor *docker.ImageUpdateMonitor
+	deployManager      *docker.DeployManager
+}
+
 func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, agentMgr *agent.Manager, dataDir string, dbPath string, version string) {
 	// Health check endpoints (public, no authentication required)
 	healthHandlers := health.NewHandlers(database, dataDir, dockerClient.RawClient(), "v"+version)
@@ -41,6 +68,71 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	api := r.Group("/api")
 	api.Use(legacyAPIWarningMiddleware())
 
+	// Rate limiters
+	readRateLimiter := NewRateLimiterWithPolicy(ReadRateLimit)
+	mutationRateLimiter := NewRateLimiterWithPolicy(MutationRateLimit)
+	readLimit := RateLimitMiddleware(readRateLimiter)
+	mutationLimit := RateLimitMiddleware(mutationRateLimiter)
+
+	baseProtected := api.Group("")
+	baseProtected.Use(AuthMiddleware(jwtSecret, database))
+	baseProtected.Use(methodRateLimit(readLimit, mutationLimit))
+
+	viewerGroup := baseProtected.Group("")
+	viewerGroup.Use(RequireRole(auth.RoleViewer))
+
+	operatorGroup := baseProtected.Group("")
+	operatorGroup.Use(RequireRole(auth.RoleOperator))
+
+	adminGroup := baseProtected.Group("")
+	adminGroup.Use(RequireRole(auth.RoleAdmin))
+
+	protected := &roleRouterWrapper{
+		viewerGroup:   viewerGroup,
+		operatorGroup: operatorGroup,
+		adminGroup:    adminGroup,
+	}
+
+	deps := &routeDeps{
+		ctx:           ctx,
+		r:             r,
+		dockerClient:  dockerClient,
+		jwtSecret:     jwtSecret,
+		database:      database,
+		agentMgr:      agentMgr,
+		dataDir:       dataDir,
+		version:       version,
+		api:           api,
+		baseProtected: baseProtected,
+		protected:     protected,
+		viewerGroup:   viewerGroup,
+		operatorGroup: operatorGroup,
+		adminGroup:    adminGroup,
+		readLimit:     readLimit,
+	}
+
+	// One function per route domain; registration order matches the original
+	// single-function layout.
+	registerPublicRoutes(api, version)
+	registerUnauthenticatedRoutes(api, jwtSecret, database, agentMgr)
+	registerAccountRoutes(deps)
+	registerSystemUpdateRoutes(deps)
+	registerWebhookAndInstanceRoutes(deps)
+	wireLocalRuntime(deps)
+	registerAppUpdateRoutes(deps)
+	registerRegistryRoutes(deps)
+	registerContainerRoutes(deps)
+	registerLegacyLogStreamRoutes(deps)
+	registerDeployRoutes(deps)
+	registerDeployStreamRoutes(deps)
+	registerRepoAndTemplateRoutes(deps)
+	registerImageRoutes(deps)
+	registerFileManagerRoutes(deps)
+	registerSystemRoutes(deps)
+}
+
+// registerPublicRoutes serves the API docs, the legacy v1 alias and the public boot config.
+func registerPublicRoutes(api *gin.RouterGroup, version string) {
 	// API Docs (Redoc + OpenAPI spec)
 	api.GET("/docs/swagger.json", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
@@ -87,14 +179,13 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			"current_version":     version,
 		})
 	})
+}
 
-	// Rate limiters
+// registerUnauthenticatedRoutes wires login, the public webhook deploy trigger and the
+// audit-log hook that auth calls back into.
+func registerUnauthenticatedRoutes(api *gin.RouterGroup, jwtSecret string, database *db.DB, agentMgr *agent.Manager) {
 	loginRateLimiter := NewRateLimiterWithPolicy(LoginRateLimit)
-	readRateLimiter := NewRateLimiterWithPolicy(ReadRateLimit)
-	mutationRateLimiter := NewRateLimiterWithPolicy(MutationRateLimit)
 	webhookRateLimiter := NewRateLimiterWithPolicy(WebhookRateLimit)
-	readLimit := RateLimitMiddleware(readRateLimiter)
-	mutationLimit := RateLimitMiddleware(mutationRateLimiter)
 
 	// Auth (unprotected)
 	api.POST("/login", RateLimitMiddleware(loginRateLimiter), func(c *gin.Context) { auth.HandleLogin(c, jwtSecret, database) })
@@ -107,25 +198,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	auth.AuditHook = func(c *gin.Context, action, resource, status, details string) {
 		LogAudit(c, database, action, resource, status, details)
 	}
+}
 
-	baseProtected := api.Group("")
-	baseProtected.Use(AuthMiddleware(jwtSecret, database))
-	baseProtected.Use(methodRateLimit(readLimit, mutationLimit))
-
-	viewerGroup := baseProtected.Group("")
-	viewerGroup.Use(RequireRole(auth.RoleViewer))
-
-	operatorGroup := baseProtected.Group("")
-	operatorGroup.Use(RequireRole(auth.RoleOperator))
-
-	adminGroup := baseProtected.Group("")
-	adminGroup.Use(RequireRole(auth.RoleAdmin))
-
-	protected := &roleRouterWrapper{
-		viewerGroup:   viewerGroup,
-		operatorGroup: operatorGroup,
-		adminGroup:    adminGroup,
-	}
+// registerAccountRoutes covers the metrics scrape, self-service account actions and the
+// admin-only user, API-key, backup and SSH-key management.
+func registerAccountRoutes(deps *routeDeps) {
+	jwtSecret, database, dataDir, baseProtected, viewerGroup, adminGroup := deps.jwtSecret, deps.database, deps.dataDir, deps.baseProtected, deps.viewerGroup, deps.adminGroup
 
 	// Prometheus metrics endpoint. Requires an authenticated viewer — the
 	// series carry container/image/hostname labels that amount to a full
@@ -163,6 +241,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	adminGroup.GET("/ssh-keys", HandleListSSHKeys(database))
 	adminGroup.POST("/ssh-keys", HandleCreateSSHKey(database, jwtSecret))
 	adminGroup.DELETE("/ssh-keys/:id", HandleDeleteSSHKey(database))
+}
+
+// registerSystemUpdateRoutes wires the release checker/manager and their endpoints.
+func registerSystemUpdateRoutes(deps *routeDeps) {
+	ctx, database, dataDir, version, viewerGroup, adminGroup := deps.ctx, deps.database, deps.dataDir, deps.version, deps.viewerGroup, deps.adminGroup
 
 	// System self-update wiring. The checker polls GitHub for the latest
 	// release in the background and caches it; the manager turns an admin's
@@ -219,6 +302,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		LogAudit(c, database, "system.update", "system", "success", "update to "+state.Target+" requested")
 		c.JSON(http.StatusAccepted, gin.H{"status": state.Status, "target": state.Target})
 	})
+}
+
+// registerWebhookAndInstanceRoutes registers webhook management, the instance install
+// routes, the agent WebSocket and the instance-scoped operations.
+func registerWebhookAndInstanceRoutes(deps *routeDeps) {
+	jwtSecret, database, agentMgr, api, baseProtected, protected, viewerGroup, operatorGroup, readLimit, r := deps.jwtSecret, deps.database, deps.agentMgr, deps.api, deps.baseProtected, deps.protected, deps.viewerGroup, deps.operatorGroup, deps.readLimit, deps.r
 
 	// Webhooks management
 	protected.GET("/webhooks", HandleListWebhooks(database))
@@ -244,6 +333,14 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	// Dockge-style compose stacks (local host only, via docker compose CLI)
 	composecli.Register()
 	registerStackRoutes(viewerGroup, operatorGroup, database)
+}
+
+// wireLocalRuntime builds the local-instance runtime: registry manager, image update
+// monitor, the auto-update feed and worker, and the agent LocalClient app-ops wiring.
+// It stores the manager and monitor on deps for the endpoint groups below and exposes
+// the feed/worker/docker layers through the package globals.
+func wireLocalRuntime(deps *routeDeps) {
+	ctx, dockerClient, jwtSecret, database, agentMgr := deps.ctx, deps.dockerClient, deps.jwtSecret, deps.database, deps.agentMgr
 
 	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)
@@ -429,6 +526,14 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		Store:         database,
 		SetAutoUpdate: localSetAutoUpdate,
 	})
+	deps.registryManager = registryManager
+	deps.imageUpdateMonitor = imageUpdateMonitor
+}
+
+// registerAppUpdateRoutes serves the app list, update history, manual update trigger,
+// auto-update toggle and the SSE feed stream.
+func registerAppUpdateRoutes(deps *routeDeps) {
+	dockerClient, database, agentMgr, protected, registryManager, imageUpdateMonitor := deps.dockerClient, deps.database, deps.agentMgr, deps.protected, deps.registryManager, deps.imageUpdateMonitor
 
 	// =============================================================================
 	// App auto-update HTTP endpoints (task 5.3).
@@ -738,6 +843,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			}
 		}
 	})
+}
+
+// registerRegistryRoutes serves the registry credential CRUD and connection test.
+func registerRegistryRoutes(deps *routeDeps) {
+	protected, registryManager := deps.protected, deps.registryManager
 
 	protected.GET("/registries", func(c *gin.Context) {
 		list, err := registryManager.List()
@@ -816,6 +926,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		}
 		c.JSON(http.StatusOK, result)
 	})
+}
+
+// registerContainerRoutes serves the local-instance container CRUD and edit endpoints.
+func registerContainerRoutes(deps *routeDeps) {
+	database, agentMgr, protected := deps.database, deps.agentMgr, deps.protected
 
 	// Containers
 	protected.GET("/containers", func(c *gin.Context) {
@@ -1035,6 +1150,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		}
 		c.JSON(http.StatusOK, stats)
 	})
+}
+
+// registerLegacyLogStreamRoutes serves the legacy /api/containers/:id/logs stream.
+func registerLegacyLogStreamRoutes(deps *routeDeps) {
+	jwtSecret, database, agentMgr, api, readLimit := deps.jwtSecret, deps.database, deps.agentMgr, deps.api, deps.readLimit
 
 	// WebSocket logs
 	api.GET("/containers/:id/logs", readLimit, func(c *gin.Context) {
@@ -1073,6 +1193,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 		streamContainerLogs(conn, reader)
 	})
+}
+
+// registerDeployRoutes serves the streamed compose deploy and stores the shared
+// session manager on deps for the deploy stream and template deploy below.
+func registerDeployRoutes(deps *routeDeps) {
+	database, agentMgr, protected, registryManager := deps.database, deps.agentMgr, deps.protected, deps.registryManager
 
 	// Deploy
 	deployManager := globalDeployManager
@@ -1128,7 +1254,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 				})
 				if req.Domain != "" {
 					port := extractFirstPort(req.Compose)
-					traefik.GenerateConfig(req.Domain, req.Name, port)
+					if cfgErr := traefik.GenerateConfig(req.Domain, req.Name, port); cfgErr != nil {
+						// The deploy itself already succeeded; a failed Traefik
+						// config must at least be visible in the logs, or the
+						// domain silently stays unrouted.
+						log.Printf("deploy %s: traefik config for %s: %v", req.Name, req.Domain, cfgErr)
+					}
 				}
 			}
 			// Clean up session after 30 seconds
@@ -1139,6 +1270,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 		c.JSON(http.StatusOK, gin.H{"deploy_id": session.ID})
 	})
+	deps.deployManager = deployManager
+}
+
+// registerDeployStreamRoutes serves the deploy-session WebSocket stream.
+func registerDeployStreamRoutes(deps *routeDeps) {
+	jwtSecret, database, agentMgr, baseProtected, protected, registryManager, deployManager := deps.jwtSecret, deps.database, deps.agentMgr, deps.baseProtected, deps.protected, deps.registryManager, deps.deployManager
 
 	// WebSocket endpoint for deploy log streaming. Registered under
 	// baseProtected so AuthMiddleware + rate limiting apply (the ?token=
@@ -1316,6 +1453,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 		c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": info})
 	})
+}
+
+// registerRepoAndTemplateRoutes serves GitHub repo listing, deploy templates and the
+// streamed template deploy.
+func registerRepoAndTemplateRoutes(deps *routeDeps) {
+	dockerClient, database, agentMgr, protected, registryManager, deployManager := deps.dockerClient, deps.database, deps.agentMgr, deps.protected, deps.registryManager, deps.deployManager
 
 	// GitHub repository listing — uses stored github.com registry credential
 	protected.GET("/github/repos", func(c *gin.Context) {
@@ -1648,6 +1791,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 		c.JSON(http.StatusOK, gin.H{"deploy_id": session.ID})
 	})
+}
+
+// registerImageRoutes serves image listing, inspection, update status, pull and prune.
+func registerImageRoutes(deps *routeDeps) {
+	agentMgr, protected, registryManager, imageUpdateMonitor := deps.agentMgr, deps.protected, deps.registryManager, deps.imageUpdateMonitor
 
 	// Images
 	protected.GET("/images", func(c *gin.Context) {
@@ -1780,6 +1928,11 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		}
 		c.JSON(http.StatusOK, result)
 	})
+}
+
+// registerFileManagerRoutes serves the operator-gated container file browser and writes.
+func registerFileManagerRoutes(deps *routeDeps) {
+	dockerClient, protected, operatorGroup := deps.dockerClient, deps.protected, deps.operatorGroup
 
 	// File Manager. Read endpoints (list/read/download) are operator-gated —
 	// they run `docker exec <container> cat/ls`, the same capability class as
@@ -1892,6 +2045,12 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "written"})
 	})
+}
+
+// registerSystemRoutes serves host info, audit logs, stats streaming, domains and the
+// Cloudflare tunnel.
+func registerSystemRoutes(deps *routeDeps) {
+	dockerClient, database, agentMgr, protected, adminGroup := deps.dockerClient, deps.database, deps.agentMgr, deps.protected, deps.adminGroup
 
 	// System
 	protected.GET("/system/info", func(c *gin.Context) {
@@ -1968,12 +2127,18 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 			Service: req.Service,
 			Port:    req.Port,
 		}
-		database.SaveDomain(domain)
+		if err := database.SaveDomain(domain); err != nil {
+			internalError(c, err)
+			return
+		}
 		c.JSON(http.StatusOK, domain)
 	})
 
 	protected.DELETE("/domains/:id", func(c *gin.Context) {
-		database.DeleteDomain(c.Param("id"))
+		if err := database.DeleteDomain(c.Param("id")); err != nil {
+			internalError(c, err)
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
 
