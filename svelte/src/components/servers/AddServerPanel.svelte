@@ -14,14 +14,25 @@
 	import Button from '../ui/Button.svelte';
 
 	type Step = 'form' | 'created' | 'installing' | 'done';
+	// Process tabs: 1 register → 2 install agent → 3 install log. A tab is
+	// clickable only once its predecessor produced something (instanceId for
+	// tab 2, a started install for tab 3).
+	const tabs = [
+		{ n: 1, label: 'Register server' },
+		{ n: 2, label: 'Install agent' },
+		{ n: 3, label: 'Install log' }
+	] as const;
 
 	let step = $state<Step>('form');
 
-	// --- step 1: create ---
+	// --- tab 1: register ---
 	let name = $state('');
 	let host = $state('');
 	let port = $state<number | null>(9273);
 	let mode = $state<'edge' | 'direct'>('edge');
+	// SSH user is asked up front on tab 1 (with host/user in direct mode) so the
+	// tab-2 panel-key command can be personalized instead of "user@your-server".
+	let sshUser = $state('root');
 	let creating = $state(false);
 	let createError = $state('');
 
@@ -37,7 +48,6 @@
 	let panelKeySetupCommand = $state('');
 	let sshHost = $state('');
 	let sshPort = $state<number | null>(22);
-	let sshUser = $state('root');
 	let sshAuthType = $state<'panel_key' | 'password' | 'key'>('panel_key');
 	let sshSecret = $state('');
 	// Key auth source: a saved LEGACY private key or an ad-hoc paste. (Saved
@@ -83,7 +93,25 @@
 		socket?.close();
 	});
 
-	const canCreate = $derived(name.trim() !== '' && !creating);
+	const canCreate = $derived(
+		name.trim() !== '' &&
+			(mode !== 'direct' || host.trim() !== '') &&
+			sshUser.trim() !== '' &&
+			!creating
+	);
+	// Connection fields live on tab 1 for direct mode (host/user entered there);
+	// for edge they can be adjusted on tab 2 (defaults to the tab-1 user).
+	const effectiveSSHHost = $derived(mode === 'direct' ? host.trim() : sshHost.trim());
+	const effectiveSSHUser = $derived(sshUser.trim() || 'root');
+	const effectiveSSHPort = $derived(sshPort ?? 22);
+	// Setup command personalized with the actual user/host once known — no more
+	// "ssh user@your-server …" guesswork for the operator.
+	const personalizedSetupCommand = $derived(
+		panelKeySetupCommand.replace(
+			'user@your-server',
+			`${effectiveSSHUser}@${effectiveSSHHost || 'your-server'}`
+		)
+	);
 	// Panel-key auth needs no secret at all; key auth with a saved key only
 	// needs the key picked; paste mode needs the secret textarea filled.
 	const keyCredentialOk = $derived(
@@ -92,7 +120,7 @@
 			(keySource === 'saved' ? selectedKeyID !== '' : sshSecret.trim() !== '')
 	);
 	const canInstall = $derived(
-		sshHost.trim() !== '' && keyCredentialOk && !installing
+		effectiveSSHHost !== '' && keyCredentialOk && !installing
 	);
 	const canTest = $derived(!testing);
 
@@ -104,6 +132,12 @@
 		host = '';
 		port = 9273;
 		mode = 'edge';
+		sshUser = 'root';
+		sshHost = '';
+		sshPort = 22;
+		sshAuthType = 'panel_key';
+		keySource = 'paste';
+		selectedKeyID = savedKeys[0]?.id ?? '';
 		createError = '';
 		instanceId = '';
 		installCommand = '';
@@ -200,9 +234,9 @@
 		step = 'installing';
 		try {
 			await api.post(`/instances/${instanceId}/install`, {
-				ssh_host: sshHost.trim(),
-				ssh_port: sshPort ?? 22,
-				ssh_user: sshUser.trim() || 'root',
+				ssh_host: effectiveSSHHost,
+				ssh_port: effectiveSSHPort,
+				ssh_user: effectiveSSHUser,
 				ssh_auth_type: sshAuthType,
 				// Panel-key auth needs no secret — the panel uses its own
 				// generated keypair. Saved keys are referenced by ID (legacy
@@ -241,21 +275,53 @@
 </script>
 
 <div class="max-w-2xl space-y-4">
-	<!-- Step 1 — register instance -->
-	<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5">
-		<div class="flex items-center gap-2 mb-4">
-			<span class="w-6 h-6 rounded-full bg-zinc-800 text-zinc-300 text-xs font-semibold flex items-center justify-center">1</span>
-			<h3 class="text-sm font-semibold text-white">Register server</h3>
-			{#if instanceId}
-				<span class="ml-auto text-xs text-emerald-400">✓ {instanceId}</span>
-			{/if}
-		</div>
+	<!-- Process tab bar -->
+	<div class="flex gap-1 border-b border-zinc-800">
+		{#each tabs as tab (tab.n)}
+			{@const active =
+				(tab.n === 1 && step === 'form') ||
+				(tab.n === 2 && step === 'created') ||
+				(tab.n === 3 && (step === 'installing' || step === 'done'))}
+			{@const clickable =
+				(tab.n === 1 && step !== 'form') ||
+				(tab.n === 2 && instanceId !== '' && step !== 'created' && step !== 'installing')}
+			<button
+				onclick={() => {
+					if (tab.n === 1 && step !== 'form') step = 'form';
+					else if (tab.n === 2 && instanceId && step !== 'installing') step = 'created';
+				}}
+				disabled={!clickable && !active}
+				class="px-3 py-2 text-sm transition-colors border-b-2 -mb-px disabled:cursor-not-allowed"
+				class:border-white={active}
+				class:text-white={active}
+				class:border-transparent={!active}
+				class:text-zinc-500={!active}
+				class:hover:text-zinc-300={!active && clickable}
+			>
+				{tab.n} · {tab.label}
+				{#if tab.n === 1 && instanceId && step !== 'form'}
+					<span class="text-emerald-400">✓</span>
+				{/if}
+				{#if tab.n === 3 && step === 'installing'}
+					<span class="text-blue-400 animate-pulse">…</span>
+				{/if}
+			</button>
+		{/each}
+	</div>
 
-		{#if step === 'form'}
+	<!-- Tab 1 — register server -->
+	{#if step === 'form'}
+		<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5">
+			<div class="flex items-center gap-2 mb-4">
+				<h3 class="text-sm font-semibold text-white">Register server</h3>
+				{#if instanceId}
+					<span class="ml-auto text-xs text-emerald-400">✓ created: {instanceId}</span>
+				{/if}
+			</div>
 			<form class="space-y-3" onsubmit={(e) => { e.preventDefault(); create(); }}>
 				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 					<div>
-						<label for="inst-name" class="block text-xs font-medium text-zinc-400 mb-1">Name</label>
+						<label for="inst-name" class="block text-xs font-medium text-zinc-400 mb-1">Server name</label>
 						<input
 							id="inst-name"
 							type="text"
@@ -278,14 +344,24 @@
 				</div>
 
 				{#if mode === 'direct'}
-					<div class="grid grid-cols-3 gap-3">
-						<div class="col-span-2">
-							<label for="inst-host" class="block text-xs font-medium text-zinc-400 mb-1">Agent host</label>
+					<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+						<div>
+							<label for="inst-host" class="block text-xs font-medium text-zinc-400 mb-1">Host</label>
 							<input
 								id="inst-host"
 								type="text"
 								bind:value={host}
 								placeholder="203.0.113.10"
+								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+							/>
+						</div>
+						<div>
+							<label for="inst-ssh-user" class="block text-xs font-medium text-zinc-400 mb-1">SSH user</label>
+							<input
+								id="inst-ssh-user"
+								type="text"
+								bind:value={sshUser}
+								placeholder="root"
 								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
 							/>
 						</div>
@@ -301,6 +377,17 @@
 							/>
 						</div>
 					</div>
+				{:else}
+					<div class="sm:w-1/2">
+						<label for="inst-ssh-user" class="block text-xs font-medium text-zinc-400 mb-1">SSH user</label>
+						<input
+							id="inst-ssh-user"
+							type="text"
+							bind:value={sshUser}
+							placeholder="root"
+							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+						/>
+					</div>
 				{/if}
 
 				{#if createError}
@@ -311,23 +398,15 @@
 					<Button type="submit" variant="primary" loading={creating} disabled={!canCreate}>Create instance</Button>
 				</div>
 			</form>
-		{:else}
-			<p class="text-xs text-zinc-500">
-				Mode: <span class="text-zinc-300 uppercase">{mode}</span>
-				{#if mode === 'direct'} · {host}:{port}{/if}
-			</p>
-		{/if}
-	</div>
+		</div>
+	{/if}
 
-	<!-- Step 2 — install agent (only after create) -->
-	{#if instanceId && (step === 'created' || step === 'installing')}
+	<!-- Tab 2 — install agent -->
+	{#if step === 'created'}
 		<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5">
 			<div class="flex items-center gap-2 mb-4">
-				<span class="w-6 h-6 rounded-full bg-zinc-800 text-zinc-300 text-xs font-semibold flex items-center justify-center">2</span>
 				<h3 class="text-sm font-semibold text-white">Install agent</h3>
-				{#if step === 'installing'}
-					<span class="ml-auto text-xs text-blue-400 animate-pulse">installing…</span>
-				{/if}
+				<span class="ml-auto text-xs text-zinc-500">{name}</span>
 			</div>
 
 			<!-- SSH auto-install -->
@@ -355,19 +434,18 @@
 							</p>
 							<div>
 								<div class="flex items-center justify-between mb-1">
-									<span class="text-[11px] text-zinc-500">1 · run on the server (or via provider console / cloud-init)</span>
+									<span class="text-[11px] text-zinc-500">1 · run from any machine that can reach the server (or via provider console / cloud-init)</span>
 									<button
 										class="text-xs text-blue-400 hover:text-blue-300"
 										onclick={() => {
-											const cmd = panelKeySetupCommand.replace('user@your-server', `${sshUser.trim() || 'root'}@${sshHost.trim() || 'your-server'}`);
-											navigator.clipboard?.writeText(cmd);
+											navigator.clipboard?.writeText(personalizedSetupCommand);
 											addToast('Setup command copied', 'success');
 										}}
 									>
 										Copy command
 									</button>
 								</div>
-								<pre class="p-2 bg-black border border-zinc-800 rounded-sm text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all overflow-auto max-h-24">{panelKeySetupCommand}</pre>
+								<pre class="p-2 bg-black border border-zinc-800 rounded-sm text-[11px] text-zinc-300 font-mono whitespace-pre-wrap break-all overflow-auto max-h-24">{personalizedSetupCommand}</pre>
 							</div>
 							<div>
 								<div class="flex items-center justify-between mb-1">
@@ -391,39 +469,49 @@
 					</div>
 				{/if}
 
-				<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-					<div>
-						<label for="ssh-host" class="block text-xs font-medium text-zinc-400 mb-1">SSH host</label>
-						<input
-							id="ssh-host"
-							type="text"
-							bind:value={sshHost}
-							placeholder={mode === 'direct' && host ? host : 'same VPS IP'}
-							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-						/>
+				<!-- Connection info — from tab 1 (direct) or editable here (edge). -->
+				{#if mode === 'direct'}
+					<div class="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 bg-zinc-950 border border-zinc-800/60 rounded-sm text-xs">
+						<span class="text-zinc-500">Connecting to</span>
+						<span class="font-mono text-zinc-200">{effectiveSSHUser}@{effectiveSSHHost}</span>
+						<span class="text-zinc-600">SSH port {effectiveSSHPort}</span>
+						<button class="text-blue-400 hover:text-blue-300" onclick={() => (step = 'form')}>edit on tab 1</button>
 					</div>
-					<div>
-						<label for="ssh-port" class="block text-xs font-medium text-zinc-400 mb-1">SSH port</label>
-						<input
-							id="ssh-port"
-							type="number"
-							min="1"
-							max="65535"
-							bind:value={sshPort}
-							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-						/>
+				{:else}
+					<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+						<div>
+							<label for="ssh-host" class="block text-xs font-medium text-zinc-400 mb-1">SSH host</label>
+							<input
+								id="ssh-host"
+								type="text"
+								bind:value={sshHost}
+								placeholder="VPS IP or hostname"
+								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+							/>
+						</div>
+						<div>
+							<label for="ssh-port" class="block text-xs font-medium text-zinc-400 mb-1">SSH port</label>
+							<input
+								id="ssh-port"
+								type="number"
+								min="1"
+								max="65535"
+								bind:value={sshPort}
+								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+							/>
+						</div>
+						<div>
+							<label for="ssh-user" class="block text-xs font-medium text-zinc-400 mb-1">SSH user</label>
+							<input
+								id="ssh-user"
+								type="text"
+								bind:value={sshUser}
+								placeholder="root"
+								class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+							/>
+						</div>
 					</div>
-					<div>
-						<label for="ssh-user" class="block text-xs font-medium text-zinc-400 mb-1">SSH user</label>
-						<input
-							id="ssh-user"
-							type="text"
-							bind:value={sshUser}
-							placeholder="root"
-							class="w-full px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-sm text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-						/>
-					</div>
-				</div>
+				{/if}
 				<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 					<div>
 						<label for="ssh-auth" class="block text-xs font-medium text-zinc-400 mb-1">Auth type</label>
@@ -556,13 +644,14 @@
 		</div>
 	{/if}
 
-	<!-- Step 3 — live logs + verify -->
+	<!-- Tab 3 — live logs + verify -->
 	{#if step === 'installing' || step === 'done'}
 		<div class="bg-zinc-900 border border-zinc-800 rounded-sm p-5">
 			<div class="flex items-center gap-2 mb-3">
-				<span class="w-6 h-6 rounded-full bg-zinc-800 text-zinc-300 text-xs font-semibold flex items-center justify-center">3</span>
 				<h3 class="text-sm font-semibold text-white">Install log</h3>
-				{#if step === 'done'}
+				{#if step === 'installing'}
+					<span class="ml-auto text-xs text-blue-400 animate-pulse">installing…</span>
+				{:else}
 					<span class="ml-auto text-xs text-emerald-400">session finished</span>
 				{/if}
 			</div>
@@ -590,11 +679,11 @@
 				</div>
 			{/if}
 		</div>
-	{/if}
 
-	{#if step === 'done'}
-		<div class="flex justify-end">
-			<Button variant="secondary" size="sm" onclick={reset}>Add another server</Button>
-		</div>
+		{#if step === 'done'}
+			<div class="flex justify-end">
+				<Button variant="secondary" size="sm" onclick={reset}>Add another server</Button>
+			</div>
+		{/if}
 	{/if}
 </div>
