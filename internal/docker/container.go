@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/api/types/container"
@@ -66,39 +67,54 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]ContainerInfo,
 	}
 
 	containers := make([]ContainerInfo, len(result.Items))
-	for i, ctr := range result.Items {
-		name := ""
-		if len(ctr.Names) > 0 {
-			name = trimContainerName(ctr.Names[0])
-		}
-		var (
-			restartPolicy string
-			networks      map[string]string
-		)
-		if inspect, err := c.cli.ContainerInspect(ctx, ctr.ID, client.ContainerInspectOptions{}); err == nil {
-			if inspect.Container.HostConfig != nil {
-				restartPolicy = string(inspect.Container.HostConfig.RestartPolicy.Name)
+	// The Docker API has no bulk inspect, so each container costs one
+	// round-trip; bound them concurrently instead of inspecting serially.
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i := range result.Items {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctr := result.Items[i]
+			name := ""
+			if len(ctr.Names) > 0 {
+				name = trimContainerName(ctr.Names[0])
 			}
-			if inspect.Container.NetworkSettings != nil {
-				networks = make(map[string]string)
-				for netName, ep := range inspect.Container.NetworkSettings.Networks {
-					networks[netName] = ep.IPAddress.String()
+			var (
+				restartPolicy string
+				networks      map[string]string
+			)
+			// Inspect is best-effort: the list still serves without the
+			// restart policy and network detail when a container is racing
+			// removal, and the moby API has no bulk inspect to batch into.
+			if inspect, err := c.cli.ContainerInspect(ctx, ctr.ID, client.ContainerInspectOptions{}); err == nil {
+				if inspect.Container.HostConfig != nil {
+					restartPolicy = string(inspect.Container.HostConfig.RestartPolicy.Name)
+				}
+				if inspect.Container.NetworkSettings != nil {
+					networks = make(map[string]string)
+					for netName, ep := range inspect.Container.NetworkSettings.Networks {
+						networks[netName] = ep.IPAddress.String()
+					}
 				}
 			}
-		}
-		containers[i] = ContainerInfo{
-			ID:            ctr.ID[:12],
-			Name:          name,
-			Image:         ctr.Image,
-			Status:        ctr.Status,
-			State:         string(ctr.State),
-			Ports:         ctr.Ports,
-			Created:       ctr.Created,
-			RestartPolicy: restartPolicy,
-			Networks:      networks,
-			Labels:        ctr.Labels,
-		}
+			containers[i] = ContainerInfo{
+				ID:            ctr.ID[:12],
+				Name:          name,
+				Image:         ctr.Image,
+				Status:        ctr.Status,
+				State:         string(ctr.State),
+				Ports:         ctr.Ports,
+				Created:       ctr.Created,
+				RestartPolicy: restartPolicy,
+				Networks:      networks,
+				Labels:        ctr.Labels,
+			}
+		}()
 	}
+	wg.Wait()
 	return containers, nil
 }
 
