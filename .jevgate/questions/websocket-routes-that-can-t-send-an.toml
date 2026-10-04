@@ -1,0 +1,47 @@
+# Proposed by `jevgate rules propose` from AGENTS.md:85.
+# Jev: a rule to check (0.93), on each function (0.90).
+# Curated 2026-10-04: literal guidance, scoped paths, failing/passing examples.
+# jevgate-proposal: 9c0bca17957b
+question = 'Does this WebSocket handler accept a token from the URL without validating the Origin header, breaking the project rule "WebSocket routes that cannot send an Authorization header accept JWT via ?token= and still validate Origin against the request host" (AGENTS.md:85)?'
+background = 'The rule is from AGENTS.md, section "Architecture rules that matter for edits". Browsers cannot set an Authorization header on a WebSocket handshake, so these routes carry the JWT in the query string, which makes a hostile page able to craft the URL — the Origin check is what keeps cross-site pages out.'
+guidance = 'A violation: a WebSocket or connection-upgrade handler that authenticates from a query-parameter token (c.Query("token") or similar) but never compares the Origin header against the request host before upgrading, or performs the upgrade before that check. Not a violation: plain HTTP/JSON handlers; WebSocket handlers whose upgrade is guarded by middleware that already validated the one-time ticket or the Origin before the handler runs and that may trust that context; handlers that reject query tokens and require the Authorization header; non-browser clients such as the agent WebSocket that validate a panel token another way.'
+unit = "function"
+paths = ["internal/server/**"]
+level = "note"
+next_step = "Validate the Origin header against the request host (upgrader.CheckOrigin) before upgrading the connection."
+
+[[failing]]
+path = "internal/server/terminal_ws.go"
+code = '''
+func handleTerminal(c *gin.Context) {
+	if c.Query("token") == "" {
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	serveTerminal(conn)
+}
+'''
+
+[[passing]]
+path = "internal/server/terminal_ws.go"
+code = '''
+func handleTerminal(c *gin.Context) {
+	if c.Query("token") == "" {
+		c.AbortWithStatus(http.StatusUnauthorized)
+		return
+	}
+	if !originAllowed(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+	serveTerminal(conn)
+}
+'''

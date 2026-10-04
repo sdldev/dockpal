@@ -1,0 +1,31 @@
+# Proposed by `jevgate rules propose` from AGENTS.md:162.
+# Jev: a rule to check (0.93), on each function (0.57).
+# Curated 2026-10-04: literal guidance, scoped paths, failing/passing examples.
+# jevgate-proposal: 9fd1a97fb2d5
+question = 'Does this function switch the visible page by writing the currentPage store directly instead of calling navigate() from $lib/router, breaking the project rule "Navigate programmatically with navigate(page, params) — not currentPage.set(...), which desyncs the URL" (AGENTS.md:162)?'
+background = 'The rule is from AGENTS.md, section "Frontend conventions". navigate() updates the store and the URL path together; writing the store alone leaves the address bar stale so deep links and reloads land on the wrong page.'
+guidance = 'A violation: a function in a Svelte component or module that sets the page store directly — currentPage.set("...") or any equivalent import-and-write of currentPage from the stores — to change which page is shown, instead of calling navigate(page, params) from $lib/router. Not a violation: calling navigate(...); subscribing to or reading currentPage to render; writes to currentPage inside svelte/src/lib/router.ts itself, which owns the store; setting navTitle, selectedInstance, sidebarOpen or other stores; hash manipulation that navigate() itself performs.'
+unit = "function"
+paths = ["svelte/src/**"]
+level = "note"
+next_step = "Call navigate(page, params) from $lib/router so the URL and the store stay in sync."
+
+[[failing]]
+path = "svelte/src/components/pages/ProfilePage.svelte"
+code = '''
+<script lang="ts">
+	function openSettings() {
+		currentPage.set('settings');
+	}
+</script>
+'''
+
+[[passing]]
+path = "svelte/src/components/pages/ProfilePage.svelte"
+code = '''
+<script lang="ts">
+	function openSettings() {
+		navigate('settings');
+	}
+</script>
+'''

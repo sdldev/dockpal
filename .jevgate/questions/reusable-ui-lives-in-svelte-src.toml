@@ -1,0 +1,35 @@
+# Proposed by `jevgate rules propose` from AGENTS.md:178.
+# Jev: a rule to check (0.87), on each file (0.70).
+# Curated 2026-10-04: literal guidance, scoped paths, failing/passing examples.
+# jevgate-proposal: f2a2eebf5d93
+question = 'Does this file re-implement UI that the shared components in svelte/src/components/ui already provide, breaking the project rule "Reusable UI lives in svelte/src/components/ui (Button, Modal, ConfirmDialog, Icon) — prefer these over re-implementing" (AGENTS.md:178)?'
+background = 'The rule is from AGENTS.md, section "Frontend conventions". Destructive actions go through ConfirmDialog so every irreversible step gets the same guard, and shared widgets keep one place to fix styling and accessibility.'
+guidance = 'A violation: a Svelte or TypeScript file under svelte/src that builds its own version of a shared widget instead of importing it from the ui directory — a hand-rolled modal overlay with backdrop markup, its own confirm-style dialog for a destructive action, or its own inline icon set — where Button, Modal, ConfirmDialog or Icon from $lib/components/ui would serve. Not a violation: the files in svelte/src/components/ui/ themselves, which are the shared implementations; pages that import and compose those components; one-off markup that is not a modal, dialog, button or icon; layout and styling-only markup.'
+unit = "file"
+paths = ["svelte/src/**"]
+level = "note"
+next_step = "Import Button, Modal, ConfirmDialog or Icon from $lib/components/ui instead of re-implementing the widget."
+
+[[failing]]
+path = "svelte/src/components/pages/BulkPage.svelte"
+code = '''
+{#if confirmOpen}
+	<div class="fixed inset-0 bg-black/50" on:click={() => (confirmOpen = false)}>
+		<div class="dialog">
+			<p>Delete {name}?</p>
+			<button class="danger" on:click={reallyDelete}>Delete</button>
+		</div>
+	</div>
+{/if}
+'''
+
+[[passing]]
+path = "svelte/src/components/pages/BulkPage.svelte"
+code = '''
+<ConfirmDialog
+	bind:open={confirmOpen}
+	title="Delete {name}?"
+	confirmLabel="Delete"
+	on:confirm={reallyDelete}
+/>
+'''

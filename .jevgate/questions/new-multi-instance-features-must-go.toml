@@ -1,0 +1,32 @@
+# Proposed by `jevgate rules propose` from AGENTS.md:75.
+# Jev: a rule to check (0.96), on each changed hunk (0.40).
+# Curated 2026-10-04: literal guidance, scoped paths, failing/passing examples.
+# jevgate-proposal: cf53bf23b16d
+question = 'Does this change give instance-scoped work to a locally constructed Docker client instead of the AgentClient from the Gin context, breaking the project rule "New multi-instance features must go through the AgentClient interface via instance-scoped routes" (AGENTS.md:75)?'
+background = 'The rule is from AGENTS.md, section "Architecture rules that matter for edits". InstanceMiddleware resolves the instance and puts agent_client / instance_id / database / registry_manager in the Gin context, returning 503 for offline agents.'
+guidance = 'A violation: a changed hunk in a Gin handler or endpoint that creates or uses a client for the local Docker daemon directly (constructing a client from internal/docker, the stackCLI seam, or a package-level local client) to serve containers, stacks, images or files, instead of taking the agent_client value InstanceMiddleware put in the Gin context and serving the route under /api/instances/:instance_id/... Not a violation: code inside internal/docker, internal/agent, internal/composecli or internal/ssh themselves, which implement the transports; InstanceMiddleware and the route wiring in routes.go; endpoints that serve only the panel host itself (health, metrics); tests and mock clients.'
+unit = "hunk"
+paths = ["internal/server/**"]
+level = "note"
+next_step = "Take agent_client from the Gin context and register the route under /api/instances/:instance_id/..."
+
+[[failing]]
+path = "internal/server/local_logs.go"
+code = '''
++	r.GET("/api/containers/:id/logs", func(ctx *gin.Context) {
++		local := docker.NewLocalClient()
++		out, _ := local.ContainerLogs(ctx.Request.Context(), ctx.Param("id"))
++		ctx.String(200, out)
++	})
+'''
+
+[[passing]]
+path = "internal/server/instance_logs.go"
+code = '''
++	agentClient := ctx.MustGet("agent_client").(agent.Client)
++	logs, err := agentClient.ContainerLogs(ctx.Request.Context(), instanceID, opts)
++	if err != nil {
++		ctx.JSON(503, gin.H{"error": "agent offline"})
++		return
++	}
+'''

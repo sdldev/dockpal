@@ -1,0 +1,26 @@
+# Proposed by `jevgate rules propose` from AGENTS.md:80.
+# Jev: a rule to check (0.85), on each file (0.80).
+# Curated 2026-10-04: reshaped to a hunk question (registering a route outside
+# RegisterRoutes is what a change can break), literal guidance, examples.
+# jevgate-proposal: 9c9f2e36a33d
+question = 'Does this change register an HTTP route somewhere other than RegisterRoutes in internal/server/routes.go, breaking the project rule "Routes register in internal/server/routes.go via RegisterRoutes(...)" (AGENTS.md:80)?'
+background = 'The rule is from AGENTS.md, section "Architecture rules that matter for edits". Central registration is what keeps the RBAC tiers (unauthenticated, any user, Operator, Admin) auditable in one place.'
+guidance = 'A violation: a changed hunk that adds a route registration call — r.GET/POST/PUT/DELETE(...), a group or router .GET/.POST/.Handle(...), or a new route group with handlers — outside RegisterRoutes in internal/server/routes.go, for example in main.go, in another handler file, or in an init(). Not a violation: edits inside RegisterRoutes itself; helper functions that RegisterRoutes calls while it passes them the router or group; middleware, CORS and static-file setup; the NoRoute SPA fallback in main.go; tests that build their own gin engine; the CLI subcommands in main.go.'
+unit = "hunk"
+paths = ["internal/server/**", "main.go"]
+level = "note"
+next_step = "Register the route in RegisterRoutes (internal/server/routes.go) so the RBAC tier is visible in one place."
+
+[[failing]]
+path = "main.go"
+code = '''
++	// convenience debug endpoint
++	router.GET("/api/debug/instances", debugListInstances)
+'''
+
+[[passing]]
+path = "internal/server/routes.go"
+code = '''
++	debug := baseProtected.Group("/debug")
++	debug.GET("/instances", server.handleDebugInstances)
+'''
