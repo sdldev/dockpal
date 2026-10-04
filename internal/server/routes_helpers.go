@@ -427,9 +427,12 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 		// when the middleware let the request through unauthenticated (e.g.
 		// ticket-less first-message protocol clients) do we authenticate
 		// in-handler.
+		// The close-message writes below are best-effort notifications: the
+		// handshake is already failing and there is no caller left to report
+		// an error to.
 		if role := c.GetString("role"); role != "" {
 			if !auth.HasRole(role, auth.RoleViewer) {
-				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
 				return
 			}
 		} else if q := c.Query("token"); q != "" {
@@ -437,11 +440,11 @@ func handleDeployStreamWS(jwtSecret string, database *db.DB, deployManager *dock
 			// middleware, so the query token is validated here directly.
 			claims, err := auth.ValidateJWTWithVersionCheck(q, jwtSecret, database)
 			if err != nil {
-				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
 				return
 			}
 			if !auth.HasRole(claims.Role, auth.RoleViewer) {
-				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4003, "insufficient permissions"))
 				return
 			}
 		} else if !authenticateWebSocketFirstMessage(conn, c) {

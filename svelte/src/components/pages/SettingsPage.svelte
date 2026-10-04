@@ -78,7 +78,9 @@
 	}
 
 	function logout() {
-		api.post('/logout').catch(() => {});
+		// Best-effort revoke (see App.svelte logout); local session is cleared
+		// regardless, a failing revoke shows in the console.
+		api.post('/logout').catch((e) => console.warn('logout request failed', e));
 		clearToken();
 		currentUser.set(null);
 		addToast('Logged out', 'info');

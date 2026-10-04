@@ -98,7 +98,9 @@ func execCommandWithInput(ctx context.Context, cli *client.Client, containerID s
 	}
 
 	var buf bytes.Buffer
-	io.Copy(&buf, resp.Reader)
+	if _, err := io.Copy(&buf, resp.Reader); err != nil {
+		return "", fmt.Errorf("read exec output: %w", err)
+	}
 	return buf.String(), nil
 }
 

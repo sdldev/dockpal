@@ -251,10 +251,14 @@ func (c *Client) RemoveContainer(ctx context.Context, id string, force bool) err
 		_, err := c.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true})
 		return err
 	}
-	// Graceful: try to stop first, then remove
+	// Graceful: try to stop first, then remove. The remove result is what
+	// counts; a stop failure only surfaces when it also blocks the removal.
 	timeout := DefaultStopTimeout
-	c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
+	_, stopErr := c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
 	_, err := c.cli.ContainerRemove(ctx, id, client.ContainerRemoveOptions{})
+	if err != nil && stopErr != nil {
+		return fmt.Errorf("stop container: %v; remove container: %w", stopErr, err)
+	}
 	return err
 }
 
@@ -596,16 +600,21 @@ func (c *Client) recreateContainer(ctx context.Context, id string, req Container
 	// Check if container was running before recreation
 	wasRunning := ctr.State != nil && strings.ToLower(string(ctr.State.Status)) == "running"
 
-	// Stop and remove the old container
+	// Stop and remove the old container. Removal is forced, so a failed stop
+	// only matters when it also blocks the removal.
+	var stopErr error
 	if wasRunning {
 		timeout := DefaultStopTimeout
-		c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
+		_, stopErr = c.cli.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &timeout})
 	}
 	removeOpts := client.ContainerRemoveOptions{
 		RemoveVolumes: false, // preserve volumes
 		Force:         true,
 	}
 	if _, err := c.cli.ContainerRemove(ctx, id, removeOpts); err != nil {
+		if stopErr != nil {
+			return fmt.Errorf("stop old container: %v; remove old container: %w", stopErr, err)
+		}
 		return fmt.Errorf("failed to remove old container: %w", err)
 	}
 

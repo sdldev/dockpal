@@ -188,7 +188,11 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 		}
 
 		// Generate instance ID
-		instanceID := generateInstanceID()
+		instanceID, err := generateInstanceID()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate instance ID"})
+			return
+		}
 
 		// Default port for direct mode
 		port := req.Port
@@ -592,10 +596,12 @@ func handleRotateToken(database *db.DB, jwtSecret string) gin.HandlerFunc {
 // === Helper functions ===
 
 // generateInstanceID creates a unique instance ID.
-func generateInstanceID() string {
+func generateInstanceID() (string, error) {
 	bytes := make([]byte, 8)
-	rand.Read(bytes)
-	return fmt.Sprintf("inst-%s", hex.EncodeToString(bytes)[:12])
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("generate instance id: %w", err)
+	}
+	return fmt.Sprintf("inst-%s", hex.EncodeToString(bytes)[:12]), nil
 }
 
 // generateInstallCommand generates the Docker run command for agent installation.

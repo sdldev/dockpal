@@ -37,7 +37,9 @@
   }
 
   function logout() {
-    api.post('/logout').catch(() => {});
+    // Server-side revocation is best-effort; the local session is cleared
+    // regardless, but a failing revoke is worth seeing in the console.
+    api.post('/logout').catch((e) => console.warn('logout request failed', e));
     clearToken();
     currentUser.set(null);
     navigate('servers', {}, true);

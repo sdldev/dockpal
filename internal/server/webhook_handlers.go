@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,12 +23,12 @@ import (
 )
 
 // generateRandomToken generates a random hex string.
-func generateRandomToken() string {
+func generateRandomToken() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return ""
+		return "", fmt.Errorf("generate random token: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // hmacSha256 computes HMAC-SHA256 signature.
@@ -114,7 +116,13 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 
 		// Resolve git credentials
 		regMgr := registry.NewManager(database, jwtSecret)
-		token, _ := regMgr.GetTokenForDomain("github.com")
+		token, err := regMgr.GetTokenForDomain("github.com")
+		if err != nil {
+			// Stored credentials exist but are unreadable; cloning without
+			// them would fail later with a misleading "not found".
+			internalError(c, err)
+			return
+		}
 
 		// Clone repository
 		info, err := git.Clone(wh.Repo, wh.Branch, token)
@@ -171,14 +179,19 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 		}
 
 		// Save/update service info in DB
-		database.SaveService(db.Service{
-			ID:         "svc-" + generateRandomToken()[:12],
-			Name:       projectName,
-			Type:       "git",
-			Repo:       wh.Repo,
-			InstanceID: wh.InstanceID,
-			CreatedAt:  time.Now().Unix(),
-		})
+		svcToken, err := generateRandomToken()
+		if err != nil {
+			log.Printf("webhook deploy: skip service record for %s: %v", projectName, err)
+		} else {
+			database.SaveService(db.Service{
+				ID:         "svc-" + svcToken[:12],
+				Name:       projectName,
+				Type:       "git",
+				Repo:       wh.Repo,
+				InstanceID: wh.InstanceID,
+				CreatedAt:  time.Now().Unix(),
+			})
+		}
 
 		c.JSON(http.StatusOK, gin.H{"status": "deployed", "project": projectName})
 	}
@@ -221,15 +234,21 @@ func HandleCreateWebhook(database *db.DB) gin.HandlerFunc {
 		// (audit-auth M2). Generate one server-side when the caller leaves it
 		// empty so every webhook is HMAC-protected by default.
 		if req.Secret == "" {
-			req.Secret = generateRandomToken()
-			if req.Secret == "" {
+			secret, err := generateRandomToken()
+			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate webhook secret"})
 				return
 			}
+			req.Secret = secret
 		}
 
+		whToken, err := generateRandomToken()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate webhook ID"})
+			return
+		}
 		wh := db.Webhook{
-			ID:          "wh-" + generateRandomToken()[:16],
+			ID:          "wh-" + whToken[:16],
 			InstanceID:  req.InstanceID,
 			Name:        req.Name,
 			Repo:        req.Repo,

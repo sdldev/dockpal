@@ -65,8 +65,14 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 
 		// Set deadline for receiving authentication message (10 seconds)
 		deadline := time.Now().Add(10 * time.Second)
-		conn.SetReadDeadline(deadline)
-		conn.SetWriteDeadline(deadline)
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			log.Printf("Agent WebSocket: set read deadline: %v", err)
+			return
+		}
+		if err := conn.SetWriteDeadline(deadline); err != nil {
+			log.Printf("Agent WebSocket: set write deadline: %v", err)
+			return
+		}
 
 		// Auth token: current agent images send it as ?token= on the WS URL;
 		// older images send it as a {token} first message. Accept both.

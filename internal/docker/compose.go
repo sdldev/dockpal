@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -535,13 +536,18 @@ func (c *Client) RemoveCompose(ctx context.Context, projectName string) error {
 		return err
 	}
 
+	var errs []error
 	for _, ctr := range result.Items {
-		c.cli.ContainerRemove(ctx, ctr.ID, client.ContainerRemoveOptions{Force: true})
+		if _, err := c.cli.ContainerRemove(ctx, ctr.ID, client.ContainerRemoveOptions{Force: true}); err != nil {
+			errs = append(errs, fmt.Errorf("remove container %s: %w", ctr.ID, err))
+		}
 	}
 
-	os.RemoveAll(composeDir)
+	if err := os.RemoveAll(composeDir); err != nil {
+		errs = append(errs, fmt.Errorf("remove compose dir %s: %w", composeDir, err))
+	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // SetServiceLabel returns the compose YAML with the label `key` set to

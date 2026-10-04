@@ -82,10 +82,13 @@ func (ct *CloudflareTunnel) Deploy(ctx context.Context, token string) error {
 // Remove stops and removes the cloudflared container.
 func (ct *CloudflareTunnel) Remove(ctx context.Context) error {
 	timeout := docker.DefaultStopTimeout
-	ct.docker.ContainerStop(ctx, CloudflaredContainer, client.ContainerStopOptions{Timeout: &timeout})
+	_, stopErr := ct.docker.ContainerStop(ctx, CloudflaredContainer, client.ContainerStopOptions{Timeout: &timeout})
 
 	_, err := ct.docker.ContainerRemove(ctx, CloudflaredContainer, client.ContainerRemoveOptions{Force: true})
 	if err != nil {
+		if stopErr != nil {
+			return fmt.Errorf("stop cloudflared container: %v; remove: %w", stopErr, err)
+		}
 		return fmt.Errorf("failed to remove cloudflared container: %w", err)
 	}
 	return nil

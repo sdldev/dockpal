@@ -102,7 +102,9 @@ func RemoveDomain(serviceName string) error {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil
+		// Not-exist is handled above; anything else must not pass as success,
+		// or the domain silently stays routed.
+		return fmt.Errorf("read traefik config: %w", err)
 	}
 
 	var config TraefikConfig

@@ -1210,7 +1210,14 @@ func handleInstanceForcePullImage(c *gin.Context) {
 	registryMgr := getRegistryManager(c)
 	authHeader := ""
 	if registryMgr != nil {
-		authHeader, _ = registryMgr.GetAuthHeader(req.Image)
+		var err error
+		authHeader, err = registryMgr.GetAuthHeader(req.Image)
+		if err != nil {
+			// Credentials exist but are unreadable; pulling without them
+			// would fail later with a misleading "image not found".
+			internalError(c, err)
+			return
+		}
 	}
 
 	if err := client.ForcePullImage(c.Request.Context(), req.Image, authHeader); err != nil {
