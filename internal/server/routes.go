@@ -59,7 +59,6 @@ type routeDeps struct {
 }
 
 func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Client, jwtSecret string, database *db.DB, agentMgr *agent.Manager, dataDir string, dbPath string, version string) {
-	// Health check endpoints (public, no authentication required)
 	healthHandlers := health.NewHandlers(database, dataDir, dockerClient.RawClient(), "v"+version)
 	healthHandlers.RegisterHealthRoutes(r)
 
@@ -68,7 +67,6 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	api := r.Group("/api")
 	api.Use(legacyAPIWarningMiddleware())
 
-	// Rate limiters
 	readRateLimiter := NewRateLimiterWithPolicy(ReadRateLimit)
 	mutationRateLimiter := NewRateLimiterWithPolicy(MutationRateLimit)
 	readLimit := RateLimitMiddleware(readRateLimiter)
@@ -111,8 +109,6 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 		readLimit:     readLimit,
 	}
 
-	// One function per route domain; registration order matches the original
-	// single-function layout.
 	registerPublicRoutes(api, version)
 	registerUnauthenticatedRoutes(api, jwtSecret, database, agentMgr)
 	registerAccountRoutes(deps)
@@ -125,7 +121,10 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	registerLegacyLogStreamRoutes(deps)
 	registerDeployRoutes(deps)
 	registerDeployStreamRoutes(deps)
-	registerRepoAndTemplateRoutes(deps)
+	registerGitHubRepoRoutes(deps)
+	registerServiceRoutes(deps)
+	registerTemplateRoutes(deps)
+	registerTemplateDeployRoutes(deps)
 	registerImageRoutes(deps)
 	registerFileManagerRoutes(deps)
 	registerSystemRoutes(deps)
@@ -133,7 +132,6 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 
 // registerPublicRoutes serves the API docs, the legacy v1 alias and the public boot config.
 func registerPublicRoutes(api *gin.RouterGroup, version string) {
-	// API Docs (Redoc + OpenAPI spec)
 	api.GET("/docs/swagger.json", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json")
 		c.String(http.StatusOK, SwaggerJSON)
@@ -163,16 +161,7 @@ func registerPublicRoutes(api *gin.RouterGroup, version string) {
 </html>`)
 	})
 
-	// Public client-facing configuration (task 8.2). The UI reads this on
-	// boot — before the user logs in — to decide whether to render the
-	// auto-update toggle and "Update now" affordances. The endpoint is
-	// intentionally unauthenticated and exposes only feature flags, never
-	// any secret or operator-scoped value.
-	//
-	// `auto_update_enabled` reflects the worker's state for the local edge
-	// process (DOCKPAL_AUTO_UPDATE_ENABLED). Remote agents have their own
-	// worker; the UI banner is a global hint and per-instance overrides
-	// are out of scope (see design.md "Components and Interfaces").
+	// Public boot config for the UI; intentionally unauthenticated — flags only, never secrets.
 	api.GET("/config", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"auto_update_enabled": globalAutoUpdateWorker.Enabled(),
@@ -187,14 +176,11 @@ func registerUnauthenticatedRoutes(api *gin.RouterGroup, jwtSecret string, datab
 	loginRateLimiter := NewRateLimiterWithPolicy(LoginRateLimit)
 	webhookRateLimiter := NewRateLimiterWithPolicy(WebhookRateLimit)
 
-	// Auth (unprotected)
 	api.POST("/login", RateLimitMiddleware(loginRateLimiter), func(c *gin.Context) { auth.HandleLogin(c, jwtSecret, database) })
 
-	// Webhooks public trigger
 	api.POST("/webhooks/deploy/:webhook_id", RateLimitMiddleware(webhookRateLimiter), HandleWebhookDeploy(database, agentMgr, jwtSecret))
 
-	// Wire auth events (login/logout/password/role) into the audit log. The
-	// hook indirection avoids an auth → server import cycle (audit-auth M8).
+	// Audit hook indirection avoids an auth → server import cycle.
 	auth.AuditHook = func(c *gin.Context, action, resource, status, details string) {
 		LogAudit(c, database, action, resource, status, details)
 	}
@@ -205,39 +191,29 @@ func registerUnauthenticatedRoutes(api *gin.RouterGroup, jwtSecret string, datab
 func registerAccountRoutes(deps *routeDeps) {
 	jwtSecret, database, dataDir, baseProtected, viewerGroup, adminGroup := deps.jwtSecret, deps.database, deps.dataDir, deps.baseProtected, deps.viewerGroup, deps.adminGroup
 
-	// Prometheus metrics endpoint. Requires an authenticated viewer — the
-	// series carry container/image/hostname labels that amount to a full
-	// workload inventory (audit-auth M1). External scrapers must pass a
-	// bearer token (JWT or API key).
+	// Metrics requires a viewer: the series amount to a full workload inventory.
 	viewerGroup.GET("/metrics", func(c *gin.Context) {
 		metrics.Handler().ServeHTTP(c.Writer, c.Request)
 	})
 
-	// Auth protected (self-service account actions — any authenticated user,
-	// including viewers; audit-auth H2). baseProtected already applies the
-	// mutation rate limiter to POST/PUT, so no per-route limiter here (M7).
+	// Self-service actions; baseProtected already rate-limits POST/PUT.
 	baseProtected.POST("/logout", func(c *gin.Context) { auth.HandleLogout(c, database) })
 	baseProtected.POST("/auth/reset-password", func(c *gin.Context) { auth.HandleResetPassword(c, database) })
 
-	// Profile (all authenticated users)
 	baseProtected.GET("/profile", func(c *gin.Context) { auth.HandleGetProfile(c, database) })
 	baseProtected.PUT("/profile/password", func(c *gin.Context) { auth.HandleChangePassword(c, database) })
 
-	// Short-lived, single-use tickets for WebSocket upgrades — keeps 4h JWTs
-	// out of WS URL query strings (audit-auth L1).
+	// Single-use tickets keep 4h JWTs out of WS URL query strings.
 	baseProtected.GET("/ws-ticket", handleWSTicket)
 
-	// User management (admin only)
 	adminGroup.GET("/users", func(c *gin.Context) { auth.HandleListUsers(c, database) })
 	adminGroup.PUT("/users/:username/role", func(c *gin.Context) { auth.HandleUpdateUserRole(c, database) })
 	adminGroup.GET("/api-keys", handleListAPIKeys(database))
 	adminGroup.POST("/api-keys", handleCreateAPIKey(database))
 	adminGroup.DELETE("/api-keys/:id", handleDeleteAPIKey(database))
 
-	// Backup (admin only)
 	adminGroup.POST("/backup", HandleTriggerBackup(database, dataDir))
 
-	// Saved SSH keys (admin only) — reused by the Add Server installer.
 	adminGroup.GET("/ssh-keys", HandleListSSHKeys(database))
 	adminGroup.POST("/ssh-keys", HandleCreateSSHKey(database, jwtSecret))
 	adminGroup.DELETE("/ssh-keys/:id", HandleDeleteSSHKey(database))
@@ -247,11 +223,8 @@ func registerAccountRoutes(deps *routeDeps) {
 func registerSystemUpdateRoutes(deps *routeDeps) {
 	ctx, database, dataDir, version, viewerGroup, adminGroup := deps.ctx, deps.database, deps.dataDir, deps.version, deps.viewerGroup, deps.adminGroup
 
-	// System self-update wiring. The checker polls GitHub for the latest
-	// release in the background and caches it; the manager turns an admin's
-	// update request into a trigger file the privileged systemd updater unit
-	// consumes (the panel itself is too locked-down to replace its own
-	// binary). Both are reassigned per RegisterRoutes call for test isolation.
+	// The checker polls GitHub in the background; the manager turns an admin's request into
+	// a trigger file for the privileged systemd updater. Reassigned per call for test isolation.
 	updateChecker := update.NewChecker(database, "", "", update.EnvCheckInterval())
 	updateChecker.Start(ctx)
 	updateManager := update.NewManager(database, updateChecker, dataDir, version)
@@ -259,8 +232,7 @@ func registerSystemUpdateRoutes(deps *routeDeps) {
 	globalUpdateChecker = updateChecker
 	globalUpdateManager = updateManager
 
-	// Update status is readable by any authenticated user (the NavHeader
-	// badge polls it); checking for updates and triggering one are admin-only.
+	// Status is viewer-readable (NavHeader badge); check/trigger are admin-only.
 	viewerGroup.GET("/system/update/status", func(c *gin.Context) {
 		status, err := updateManager.Status()
 		if err != nil {
@@ -309,19 +281,15 @@ func registerSystemUpdateRoutes(deps *routeDeps) {
 func registerWebhookAndInstanceRoutes(deps *routeDeps) {
 	jwtSecret, database, agentMgr, api, baseProtected, protected, viewerGroup, operatorGroup, readLimit, r := deps.jwtSecret, deps.database, deps.agentMgr, deps.api, deps.baseProtected, deps.protected, deps.viewerGroup, deps.operatorGroup, deps.readLimit, deps.r
 
-	// Webhooks management
 	protected.GET("/webhooks", HandleListWebhooks(database))
 	protected.POST("/webhooks", HandleCreateWebhook(database))
 	protected.DELETE("/webhooks/:webhook_id", HandleDeleteWebhook(database))
 
-	// Instance management routes (new)
 	logsManager := NewInstallLogsManager()
 	RegisterInstanceRoutes(baseProtected, database, agentMgr, jwtSecret, logsManager)
 
-	// Agent WebSocket endpoint (unauthenticated — agent uses token in message)
 	r.GET("/api/agent/connect", HandleAgentConnect(database, agentMgr))
 
-	// Instance-scoped operations (new route group)
 	instanceBase := api.Group("/instances/:instance_id")
 	instanceBase.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
 	instanceBase.GET("/containers/:id/logs", readLimit, handleInstanceContainerLogs)
@@ -330,7 +298,6 @@ func registerWebhookAndInstanceRoutes(deps *routeDeps) {
 	instances.Use(InstanceMiddleware(agentMgr, database, jwtSecret))
 	RegisterInstanceScopedRoutes(instances)
 
-	// Dockge-style compose stacks (local host only, via docker compose CLI)
 	composecli.Register()
 	registerStackRoutes(viewerGroup, operatorGroup, database)
 }
@@ -342,41 +309,19 @@ func registerWebhookAndInstanceRoutes(deps *routeDeps) {
 func wireLocalRuntime(deps *routeDeps) {
 	ctx, dockerClient, jwtSecret, database, agentMgr := deps.ctx, deps.dockerClient, deps.jwtSecret, deps.database, deps.agentMgr
 
-	// Registry credentials
 	registryManager := registry.NewManager(database, jwtSecret)
 
-	// Image update monitor
 	imageUpdateMonitor := docker.NewImageUpdateMonitor(dockerClient, func(imageRef string) (string, error) {
 		return registryManager.GetAuthHeader(imageRef)
 	})
 	imageUpdateMonitor.Start()
 
-	// Auto-update wiring (task 5.2):
-	//   - AppUpdateFeed broadcasts stage events to SSE subscribers.
-	//   - AutoUpdateWorker consumes ImageUpdateMonitor cycle events and
-	//     drives the per-app pull → recreate → verify → rollback pipeline.
-	//
-	// The worker uses docker.AppUpdateFeedPayload (not server.AppUpdateFeedEvent
-	// directly) to avoid a server → docker import cycle. We provide a small
-	// adapter that translates the worker payload into the server event type
-	// before calling feed.Publish.
-	//
-	// The compose YAML for an app is resolved by name from the local-instance
-	// services bucket. Apps that have not been deployed via Dockpal (or that
-	// have no compose body persisted) cause TriggerApp to return an error,
-	// matching the design for "compose not configured for app".
-	//
-	// instanceID is "local" because this worker runs in the local edge
-	// process. Remote agents wire their own AutoUpdateWorker inside the
-	// agent process (task 6.4).
+	// Auto-update wiring: the feed broadcasts stage events to SSE subscribers; the worker
+	// drives the per-app pull → recreate → verify → rollback pipeline.
 	feed := NewAppUpdateFeed()
 
-	// getCompose resolves the compose YAML for a project (dockpal.project
-	// label). The project name corresponds to db.Service.Name on the local
-	// instance, which is the only instance the worker manages today.
-	// We search all services because some may have been deployed via the
-	// instance-scoped route (InstanceID="local") while others via the
-	// legacy route (InstanceID="").
+	// getCompose resolves a project's compose YAML from the services bucket; both the
+	// instance-scoped ("local") and legacy ("") deploy paths are searched.
 	getCompose := func(project string) (string, error) {
 		services, err := database.ListServices()
 		if err != nil {
@@ -387,9 +332,7 @@ func wireLocalRuntime(deps *routeDeps) {
 				return s.Compose, nil
 			}
 		}
-		// Fallback: read compose from the filesystem via the dockpal.compose
-		// label on running containers. This handles apps deployed via CLI
-		// that are not yet tracked in the services database.
+		// Fallback: read the compose via the dockpal.compose label for CLI-deployed apps.
 		containers, lErr := dockerClient.ListContainersWithLabel(context.Background(), "dockpal.project="+project)
 		if lErr == nil && len(containers) > 0 {
 			composePath := containers[0].Labels["dockpal.compose"]
@@ -413,10 +356,7 @@ func wireLocalRuntime(deps *routeDeps) {
 		return "", fmt.Errorf("compose not found for project %q", project)
 	}
 
-	// feedAdapter translates the worker's internal payload into the
-	// server-side feed event. The payload struct mirrors the event shape
-	// field-for-field so this is a one-to-one copy; the indirection exists
-	// only to avoid a server → docker import cycle.
+	// feedAdapter avoids a server → docker import cycle.
 	feedAdapter := func(p docker.AppUpdateFeedPayload) {
 		feed.Publish(AppUpdateFeedEvent{
 			AttemptID:  p.AttemptID,
@@ -438,44 +378,25 @@ func wireLocalRuntime(deps *routeDeps) {
 		getCompose,
 		"local", // instanceID="local" — this worker drives the local edge process
 	)
-	// Install Prometheus instrumentation hooks (task 9.1, R10.1-R10.3).
-	// The worker stays decoupled from internal/metrics through this
-	// indirection, which keeps the metrics package importable from
-	// internal/server (where the registrar lives) without forcing a
-	// docker → metrics → agent → docker import cycle.
+	// Prometheus hooks keep the worker decoupled from internal/metrics.
 	worker.SetMetricsHooks(docker.AutoUpdateMetricsHooks{
 		Attempt:       metrics.AutoUpdateAttempt,
 		Duration:      metrics.AutoUpdateDuration,
 		PendingUpdate: metrics.SetAppsPendingUpdate,
 	})
-	// Install webhook lister so the worker can send best-effort notifications
-	// on rolled_back or failed (rollback_failed) outcomes (task 10.1, R3.5).
 	worker.SetWebhookLister(database.ListNotificationWebhooks)
 	worker.Start(ctx)
 
-	// Expose the feed and worker to handler tasks (5.3, 5.4) and the
-	// agent client local impl (6.2) via package-level references. They
-	// are reassigned per RegisterRoutes call so tests stay isolated.
+	// Globals are reassigned per RegisterRoutes call so tests stay isolated.
 	globalAppUpdateFeed = feed
 	globalAutoUpdateWorker = worker
-	// globalDockerClient and globalImageUpdateMonitor let the
-	// instance-scoped handlers (task 5.4) reuse the local docker layer
-	// when instance_id == "local". globalRegistryManager exposes the
-	// in-process registry manager for the same path so the local SetApp
-	// AutoUpdate handler can resolve registry auths during the redeploy.
+	// Globals let instance-scoped handlers reuse the local docker layer for instance "local".
 	globalDockerClient = dockerClient
 	globalImageUpdateMonitor = imageUpdateMonitor
 	globalRegistryManager = registryManager
 
-	// Wire the agent.LocalClient app-ops dependencies (task 6.2). The
-	// LocalClient methods ListApps / ListAppUpdates / GetAppUpdate /
-	// TriggerAppUpdate / SetAppAutoUpdate previously returned
-	// errAppOpsNotWired stubs; with the worker, monitor, store, and a
-	// SetAutoUpdate closure they delegate properly. The closure mirrors
-	// PATCH /apps/:name/auto-update: rewrite the compose YAML via
-	// docker.SetServiceLabel, persist db.Service, and redeploy with
-	// forcePull=false. Threading this work through a closure keeps the
-	// agent package free of *db.DB and *registry.Manager imports.
+	// Wire the agent LocalClient app-ops; the closure mirrors PATCH /apps/:name/auto-update
+	// and keeps *db.DB out of the agent package.
 	localSetAutoUpdate := func(ctx context.Context, app string, enabled bool) error {
 		if app == "" {
 			return fmt.Errorf("set auto-update: empty app")
@@ -505,9 +426,7 @@ func wireLocalRuntime(deps *routeDeps) {
 		if err != nil {
 			return err
 		}
-		// Persist the updated compose body before redeploying so a redeploy
-		// failure does not leave the DB out of sync with the actual
-		// containers.
+		// Persist before redeploying so a failure cannot desync DB and containers.
 		updated := *svc
 		updated.Compose = newCompose
 		if err := database.SaveService(updated); err != nil {
@@ -535,7 +454,6 @@ func wireLocalRuntime(deps *routeDeps) {
 func registerAppUpdateRoutes(deps *routeDeps) {
 	dockerClient, database, agentMgr, protected, registryManager, imageUpdateMonitor := deps.dockerClient, deps.database, deps.agentMgr, deps.protected, deps.registryManager, deps.imageUpdateMonitor
 
-	// =============================================================================
 	// App auto-update HTTP endpoints (task 5.3).
 	//
 	// Routes:
@@ -552,12 +470,8 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 	// `agentMgr` from the surrounding RegisterRoutes scope.
 
 	protected.GET("/apps", func(c *gin.Context) {
-		// The handler here lists local apps; the docker.Client.ListApps method
-		// requires a *docker.Client (not the agent.AgentClient interface) so
-		// we use dockerClient directly. The optional `instance_id` query is a
-		// filter passthrough — when set to anything other than "local" or
-		// empty the response is an empty slice, matching R9.3 (instance-scoped
-		// requests use the /instances/:instance_id/apps route added in 5.4).
+		// Lists local apps via *docker.Client (not the AgentClient interface); a non-local
+		// instance_id filter yields an empty slice.
 		instanceFilter := c.Query("instance_id")
 		if instanceFilter != "" && instanceFilter != "local" {
 			c.JSON(http.StatusOK, []docker.AppSummary{})
@@ -568,8 +482,6 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			internalError(c, err)
 			return
 		}
-		// Stamp instance_id on each summary so the UI can route per-instance
-		// without a second lookup.
 		for i := range apps {
 			apps[i].InstanceID = "local"
 		}
@@ -607,8 +519,7 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
 			return
 		}
-		// Defensive cross-check: the attempt's App must match the URL :name
-		// so the endpoint cannot be used to enumerate other apps' attempts.
+		// Defensive cross-check: the attempt must belong to the URL's app.
 		if name := c.Param("name"); name != "" && rec.App != name {
 			c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})
 			return
@@ -627,7 +538,6 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Resolve the actor for the App_Update_Record's `triggered_by` field.
 		username := "user"
 		if v, ok := c.Get("username"); ok {
 			if s, ok := v.(string); ok && s != "" {
@@ -636,35 +546,22 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 		}
 		triggeredBy := "user:" + username
 
-		// Audit logging (R8.4): every user-triggered TriggerApp call
-		// records one `app_update_attempted` entry once the response code
-		// is known. The defer reads c.Writer.Status() after the handler
-		// has called c.JSON(...) so the audit `result` reflects the same
-		// outcome the operator saw on the wire. The wrapping closure is
-		// load-bearing: argument expressions to a deferred call are
-		// evaluated at defer-registration time, but the status code is
-		// only set later by c.JSON, so the read must happen inside the
-		// deferred function body.
+		// The wrapping closure is load-bearing: c.Writer.Status() is only set after c.JSON,
+		// so the audit result must be read inside the deferred body.
 		defer func() {
 			LogAppUpdateAttempt(c, database, dockerClient, name, auditAppUpdateResultFor(c.Writer.Status()))
 		}()
 
-		// Snapshot the latest attempt id so we can detect the new record once
-		// the worker has persisted its first stage event. A nil/empty result
-		// here just means this app has no prior attempts — that is normal.
+		// Snapshot the latest attempt to detect the new record; empty means no prior attempts.
 		var prevAttempt string
 		if recs, err := database.ListAppUpdates(name, 1); err == nil && len(recs) > 0 {
 			prevAttempt = recs[0].AttemptID
 		}
 
-		// Run the pipeline asynchronously so the HTTP request returns
-		// quickly. The TriggerApp call holds a per-app mutex; if another
-		// trigger is already in flight, it returns an error containing
-		// docker.ErrUpdateAlreadyRunning (mapped to HTTP 409 below).
+		// Asynchronous trigger; a concurrent run maps to HTTP 409 via ErrUpdateAlreadyRunning.
 		errCh := make(chan error, 1)
 		go func() {
-			// Use context.Background() so the pipeline can outlive the HTTP
-			// request. Cancellation comes from the worker's own Stop() path.
+			// context.Background(): the pipeline must outlive the HTTP request.
 			errCh <- globalAutoUpdateWorker.TriggerApp(context.Background(), name, true, true, triggeredBy)
 		}()
 
@@ -684,16 +581,11 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 					internalError(c, err)
 					return
 				}
-				// TriggerApp finished without error before the poll picked up
-				// a new record. Look up the most recent attempt to return its
-				// id (the pipeline always saves at least one record on the
-				// happy path).
+				// TriggerApp finished before the poll saw a record; return the newest attempt.
 				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
 					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
 					return
 				}
-				// No new record (cooldown/window skipped despite bypass=true,
-				// or the trigger short-circuited before the first save).
 				c.JSON(http.StatusAccepted, gin.H{"status": "ok"})
 				return
 			case <-ticker.C:
@@ -727,11 +619,7 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Locate the db.Service for this app on the local instance. The
-		// project name on running containers (dockpal.project label) matches
-		// db.Service.Name, so we look it up by name. Services may have been
-		// deployed via the instance-scoped route (InstanceID="local") or the
-		// legacy route (InstanceID="").
+		// Match by service name; InstanceID "" or "local" (two deploy paths).
 		services, err := database.ListServices()
 		if err != nil {
 			internalError(c, err)
@@ -753,9 +641,6 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Rewrite the compose YAML: set or remove the dockpal.auto-update
-		// label on every service. SetServiceLabel preserves comments and
-		// sibling labels.
 		labelValue := "true"
 		if !req.Enabled {
 			labelValue = "" // empty string removes the label
@@ -766,8 +651,7 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Persist the updated compose body before redeploying so a redeploy
-		// failure does not leave the DB out of sync with the actual containers.
+		// Persist before redeploying so a failure cannot desync DB and containers.
 		updated := *svc
 		updated.Compose = newCompose
 		if err := database.SaveService(updated); err != nil {
@@ -775,9 +659,7 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Recreate containers with the new label. forcePull=false means the
-		// existing local image is reused; the only change is the container's
-		// label set.
+		// forcePull=false: only the label changes; the existing image is reused.
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
 			internalError(c, err)
@@ -798,22 +680,18 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		// SSE headers. X-Accel-Buffering=no disables buffering on
-		// nginx/reverse proxies so events arrive at the client promptly.
+		// X-Accel-Buffering=no keeps reverse proxies from buffering the stream.
 		c.Header("Content-Type", "text/event-stream")
 		c.Header("Cache-Control", "no-cache")
 		c.Header("Connection", "keep-alive")
 		c.Header("X-Accel-Buffering", "no")
 
-		// This SSE response never hijacks, so the server-wide WriteTimeout would
-		// otherwise cut the stream off 60s in regardless of activity.
+		// Without this the server-wide WriteTimeout would cut SSE off 60s in.
 		clearWriteDeadline(c)
 
 		ch, unsubscribe := globalAppUpdateFeed.Subscribe()
 		defer unsubscribe()
 
-		// Flush headers immediately so the client transitions out of "loading"
-		// state even before the first event arrives.
 		c.Writer.Flush()
 
 		ctx := c.Request.Context()
@@ -932,7 +810,6 @@ func registerRegistryRoutes(deps *routeDeps) {
 func registerContainerRoutes(deps *routeDeps) {
 	database, agentMgr, protected := deps.database, deps.agentMgr, deps.protected
 
-	// Containers
 	protected.GET("/containers", func(c *gin.Context) {
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -1029,7 +906,6 @@ func registerContainerRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
 	})
 
-	// Container edit (in-place + recreate)
 	protected.PUT("/containers/:id", func(c *gin.Context) {
 		containerID := c.Param("id")
 
@@ -1045,7 +921,6 @@ func registerContainerRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Validate name if provided
 		if req.Name != nil {
 			if err := validator.ValidateContainerName(*req.Name); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
@@ -1053,7 +928,6 @@ func registerContainerRoutes(deps *routeDeps) {
 			}
 		}
 
-		// Validate restart policy if provided
 		if req.RestartPolicy != nil {
 			if err := validator.ValidateRestartPolicy(*req.RestartPolicy); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1061,19 +935,16 @@ func registerContainerRoutes(deps *routeDeps) {
 			}
 		}
 
-		// Validate memory limit if provided (must be non-negative)
 		if req.MemoryLimit != nil && *req.MemoryLimit < 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "memory limit must be non-negative"})
 			return
 		}
 
-		// Validate CPU limit if provided (must be non-negative; 0 means unlimited)
 		if req.CPULimit != nil && *req.CPULimit < 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "CPU limit must be non-negative"})
 			return
 		}
 
-		// Validate env vars if provided
 		if req.Env != nil {
 			for _, env := range *req.Env {
 				if err := validator.ValidateEnvVarValue(env); err != nil {
@@ -1083,7 +954,6 @@ func registerContainerRoutes(deps *routeDeps) {
 			}
 		}
 
-		// Validate ports if provided
 		if req.Ports != nil {
 			for _, pm := range *req.Ports {
 				if err := validator.ValidatePortMapping(pm.HostPort, pm.ContainerPort, pm.Protocol); err != nil {
@@ -1093,7 +963,6 @@ func registerContainerRoutes(deps *routeDeps) {
 			}
 		}
 
-		// Validate volumes if provided
 		if req.Volumes != nil {
 			for _, vm := range *req.Volumes {
 				if vm.ContainerPath == "" {
@@ -1107,7 +976,6 @@ func registerContainerRoutes(deps *routeDeps) {
 			}
 		}
 
-		// Warn if recreate is needed
 		needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
 		if needsRecreate {
 			if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
@@ -1156,7 +1024,6 @@ func registerContainerRoutes(deps *routeDeps) {
 func registerLegacyLogStreamRoutes(deps *routeDeps) {
 	jwtSecret, database, agentMgr, api, readLimit := deps.jwtSecret, deps.database, deps.agentMgr, deps.api, deps.readLimit
 
-	// WebSocket logs
 	api.GET("/containers/:id/logs", readLimit, func(c *gin.Context) {
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -1171,9 +1038,8 @@ func registerLegacyLogStreamRoutes(deps *routeDeps) {
 		}
 		defer conn.Close()
 
-		// Auth: query token (browser WS) or first {token} message (API clients) —
-		// same protocol as the instance-scoped logs handler. The query value
-		// may be a single-use ws-ticket (what the browser sends) or a raw JWT.
+		// Auth: query token (browser WS) or first {token} message (API clients); the query
+		// value may be a single-use ws-ticket or a raw JWT.
 		if q := c.Query("token"); q != "" {
 			role := resolveWSQueryRole(c, q)
 			if role == "" || !auth.HasRole(role, auth.RoleViewer) {
@@ -1200,10 +1066,8 @@ func registerLegacyLogStreamRoutes(deps *routeDeps) {
 func registerDeployRoutes(deps *routeDeps) {
 	database, agentMgr, protected, registryManager := deps.database, deps.agentMgr, deps.protected, deps.registryManager
 
-	// Deploy
 	deployManager := globalDeployManager
 
-	// Streamed deploy endpoint - returns deploy session ID
 	protected.POST("/deploy/stream", func(c *gin.Context) {
 		var req struct {
 			Name          string `json:"name" binding:"required"`
@@ -1229,7 +1093,6 @@ func registerDeployRoutes(deps *routeDeps) {
 
 		req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
 
-		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, req.Compose)
 
 		client, err := agentMgr.GetClient("local")
@@ -1240,7 +1103,6 @@ func registerDeployRoutes(deps *routeDeps) {
 
 		session := deployManager.CreateSession()
 
-		// Run deploy in background goroutine
 		go func() {
 			err := client.DeployComposeStreamed(context.Background(), req.Name, req.Compose, session, registryAuths, false)
 			if err == nil {
@@ -1262,7 +1124,6 @@ func registerDeployRoutes(deps *routeDeps) {
 					}
 				}
 			}
-			// Clean up session after 30 seconds
 			time.AfterFunc(30*time.Second, func() {
 				deployManager.RemoveSession(session.ID)
 			})
@@ -1277,16 +1138,11 @@ func registerDeployRoutes(deps *routeDeps) {
 func registerDeployStreamRoutes(deps *routeDeps) {
 	jwtSecret, database, agentMgr, baseProtected, protected, registryManager, deployManager := deps.jwtSecret, deps.database, deps.agentMgr, deps.baseProtected, deps.protected, deps.registryManager, deps.deployManager
 
-	// WebSocket endpoint for deploy log streaming. Registered under
-	// baseProtected so AuthMiddleware + rate limiting apply (the ?token=
-	// query-param branch is honored for WS upgrades); the handler's own
-	// query-token auth remains as defense in depth. The endpoint is
-	// read-only (streaming logs only) and requires the viewer role.
+	// Registered under baseProtected: AuthMiddleware + rate limiting apply; the handler's
+	// own query-token auth is defense in depth. Read-only, viewer role.
 	deployStreamWS := handleDeployStreamWS(jwtSecret, database, deployManager)
 	baseProtected.GET("/deploy/stream/:id", legacyAPIWarningMiddleware(), RequireRole(auth.RoleViewer), deployStreamWS)
 
-	// Instance-scoped WebSocket endpoint for deploy log streaming.
-	// Same logic as above but matches the instance-scoped URL pattern used by the frontend.
 	baseProtected.GET("/instances/:instance_id/deploy/stream/:id", legacyAPIWarningMiddleware(), RequireRole(auth.RoleViewer), deployStreamWS)
 
 	protected.POST("/deploy/compose", func(c *gin.Context) {
@@ -1309,7 +1165,6 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 
 		req.Compose = ensureAutoStart(req.Compose, req.RestartPolicy, req.AutoStart)
 
-		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, req.Compose)
 
 		client, err := agentMgr.GetClient("local")
@@ -1332,7 +1187,6 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 			CreatedAt: time.Now().Unix(),
 		})
 
-		// Generate Traefik config when domain is specified
 		if req.Domain != "" {
 			port := extractFirstPort(req.Compose)
 			if err := traefik.GenerateConfig(req.Domain, req.Name, port); err != nil {
@@ -1366,7 +1220,6 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 			}
 		}
 
-		// Auto-fetch GitHub token from stored registry credentials
 		token, _ := registryManager.GetTokenForDomain("github.com")
 
 		info, err := git.Clone(req.Repo, req.Branch, token)
@@ -1386,19 +1239,16 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 			return
 		}
 
-		// If multiple compose files and none selected, return list for user to choose
 		if len(info.ComposeFiles) > 1 && req.ComposeFile == "" {
 			c.JSON(http.StatusOK, gin.H{"status": "select_compose", "compose_files": info.ComposeFiles, "info": info})
 			return
 		}
 
-		// Determine which compose file to use
 		selectedFile := req.ComposeFile
 		if selectedFile == "" {
 			selectedFile = info.ComposeFiles[0]
 		}
 
-		// Validate selected file exists in the list
 		validFile := false
 		for _, f := range info.ComposeFiles {
 			if f == selectedFile {
@@ -1411,7 +1261,6 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Use repo name as project name (not full path), or user-provided name
 		projectName := req.Name
 		if projectName == "" {
 			projectName = filepath.Base(info.Path)
@@ -1429,7 +1278,6 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 		}
 		composeYAML := ensureAutoStart(string(composeData), "", nil)
 
-		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, composeYAML)
 
 		client, err := agentMgr.GetClient("local")
@@ -1455,12 +1303,10 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 	})
 }
 
-// registerRepoAndTemplateRoutes serves GitHub repo listing, deploy templates and the
-// streamed template deploy.
-func registerRepoAndTemplateRoutes(deps *routeDeps) {
-	dockerClient, database, agentMgr, protected, registryManager, deployManager := deps.dockerClient, deps.database, deps.agentMgr, deps.protected, deps.registryManager, deps.deployManager
+// registerGitHubRepoRoutes serves the stored-credential GitHub repository listing.
+func registerGitHubRepoRoutes(deps *routeDeps) {
+	protected, registryManager := deps.protected, deps.registryManager
 
-	// GitHub repository listing — uses stored github.com registry credential
 	protected.GET("/github/repos", func(c *gin.Context) {
 		token, _ := registryManager.GetTokenForDomain("github.com")
 		if token == "" {
@@ -1543,6 +1389,11 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 
 		c.JSON(http.StatusOK, results)
 	})
+}
+
+// registerServiceRoutes serves the deployed-services list and deletion.
+func registerServiceRoutes(deps *routeDeps) {
+	dockerClient, database, protected := deps.dockerClient, deps.database, deps.protected
 
 	protected.GET("/services", func(c *gin.Context) {
 		services, err := database.ListServices()
@@ -1550,9 +1401,7 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 			internalError(c, err)
 			return
 		}
-		// Compose bodies routinely embed secrets (DB passwords, API keys) —
-		// viewers get metadata only; the UI list view doesn't use the compose
-		// field (audit-auth L5).
+		// Compose bodies embed secrets — viewers get metadata only; the list view doesn't use it.
 		if !auth.HasRole(c.GetString("role"), auth.RoleOperator) {
 			redacted := make([]db.Service, len(services))
 			copy(redacted, services)
@@ -1576,7 +1425,6 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 			dockerClient.RemoveCompose(c.Request.Context(), svc.Name)
 		}
 
-		// Remove Traefik config when service has an associated domain
 		if svc.Domain != "" {
 			if err := traefik.RemoveDomain(svc.Name); err != nil {
 				log.Printf("Warning: failed to remove traefik config for %s: %v", svc.Name, err)
@@ -1587,7 +1435,12 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
 
-	// Templates
+}
+
+// registerTemplateRoutes serves the deploy template catalog and single deploy.
+func registerTemplateRoutes(deps *routeDeps) {
+	database, agentMgr, protected, registryManager := deps.database, deps.agentMgr, deps.protected, deps.registryManager
+
 	protected.GET("/templates", func(c *gin.Context) {
 		templates, err := getCachedTemplates(5 * time.Minute)
 		if err != nil {
@@ -1636,7 +1489,6 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 		}
 		c.ShouldBindJSON(&req)
 
-		// Validate environment variable names and values
 		for k, v := range req.Env {
 			if err := validator.ValidateEnvVarName(k); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var name '%s': %s", k, err.Error())})
@@ -1654,7 +1506,6 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 		}
 		compose = ensureAutoStart(compose, "", nil)
 
-		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, compose)
 
 		client, err := agentMgr.GetClient("local")
@@ -1680,7 +1531,12 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "deployed", "name": name})
 	})
 
-	// Streamed template deploy
+}
+
+// registerTemplateDeployRoutes serves the streamed template deploy.
+func registerTemplateDeployRoutes(deps *routeDeps) {
+	database, agentMgr, protected, registryManager, deployManager := deps.database, deps.agentMgr, deps.protected, deps.registryManager, deps.deployManager
+
 	protected.POST("/templates/:id/deploy/stream", func(c *gin.Context) {
 		templates, err := getCachedTemplates(5 * time.Minute)
 		if err != nil {
@@ -1725,7 +1581,6 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 			}
 			compose = strings.ReplaceAll(compose, "${"+k+"}", v)
 		}
-		// Replace port placeholders
 		for _, p := range tpl.Ports {
 			hostPort := p.Default
 			if customPort, ok := req.Ports[fmt.Sprintf("%d", p.ContainerPort)]; ok && customPort > 0 {
@@ -1739,11 +1594,9 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 			newPort := fmt.Sprintf("'%d:%d'", hostPort, p.ContainerPort)
 			compose = strings.ReplaceAll(compose, oldPort, newPort)
 		}
-		// Apply network mode after env and ports substitution (Requirements 13.3–13.4)
 		compose = applyNetworkMode(compose, req.NetworkMode, req.CustomNetwork)
 		// Normalize restart policy so apps come back up after a host reboot.
 		compose = ensureAutoStart(compose, req.RestartPolicy, req.AutoStart)
-		// Add auto-recover label if requested
 		if req.AutoRecover {
 			compose = strings.ReplaceAll(compose, "image: ", "labels:\n      dockpal.auto-recover: \"true\"\n    image: ")
 		}
@@ -1757,7 +1610,6 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 			name = req.CustomName
 		}
 
-		// Get auth headers for registries
 		registryAuths := getRegistryAuths(registryManager, compose)
 
 		client, err := agentMgr.GetClient("local")
@@ -1797,7 +1649,6 @@ func registerRepoAndTemplateRoutes(deps *routeDeps) {
 func registerImageRoutes(deps *routeDeps) {
 	agentMgr, protected, registryManager, imageUpdateMonitor := deps.agentMgr, deps.protected, deps.registryManager, deps.imageUpdateMonitor
 
-	// Images
 	protected.GET("/images", func(c *gin.Context) {
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -1826,7 +1677,6 @@ func registerImageRoutes(deps *routeDeps) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 			return
 		}
-		// Try authenticated pull if credentials are available
 		authHeader, _ := registryManager.GetAuthHeader(req.Image)
 		if authHeader != "" {
 			if err := client.PullImageWithAuth(c.Request.Context(), req.Image, authHeader); err != nil {
@@ -1834,7 +1684,6 @@ func registerImageRoutes(deps *routeDeps) {
 				return
 			}
 		} else {
-			// Fallback to unauthenticated pull
 			if err := client.PullImage(c.Request.Context(), req.Image); err != nil {
 				internalError(c, err)
 				return
@@ -1856,7 +1705,6 @@ func registerImageRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "removed"})
 	})
 
-	// Image Update Mechanism
 	protected.GET("/images/updates", func(c *gin.Context) {
 		if imageUpdateMonitor == nil {
 			c.JSON(http.StatusOK, gin.H{"updates": []docker.ImageUpdateStatus{}})
@@ -1908,7 +1756,6 @@ func registerImageRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "pulled"})
 	})
 
-	// Image Prune
 	protected.POST("/images/prune", RequireRole(auth.RoleOperator), func(c *gin.Context) {
 		var req struct {
 			DanglingOnly bool `json:"dangling_only"`
@@ -1934,9 +1781,8 @@ func registerImageRoutes(deps *routeDeps) {
 func registerFileManagerRoutes(deps *routeDeps) {
 	dockerClient, protected, operatorGroup := deps.dockerClient, deps.protected, deps.operatorGroup
 
-	// File Manager. Read endpoints (list/read/download) are operator-gated —
-	// they run `docker exec <container> cat/ls`, the same capability class as
-	// the exec route, so a viewer must not reach them (audit-auth C1).
+	// File reads run docker exec cat/ls — the same capability class as the exec route,
+	// so a viewer must not reach them.
 	operatorGroup.GET("/files", func(c *gin.Context) {
 		containerID := c.Query("container")
 		path := c.Query("path")
@@ -1979,7 +1825,6 @@ func registerFileManagerRoutes(deps *routeDeps) {
 	})
 
 	protected.POST("/files/upload", func(c *gin.Context) {
-		// Limit upload size to 10MB
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 		file, err := c.FormFile("file")
 		if err != nil {
@@ -2028,7 +1873,6 @@ func registerFileManagerRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
 
-	// Container file write (RESTful endpoint)
 	protected.POST("/containers/:id/files/write", func(c *gin.Context) {
 		containerID := c.Param("id")
 		var req struct {
@@ -2052,7 +1896,6 @@ func registerFileManagerRoutes(deps *routeDeps) {
 func registerSystemRoutes(deps *routeDeps) {
 	dockerClient, database, agentMgr, protected, adminGroup := deps.dockerClient, deps.database, deps.agentMgr, deps.protected, deps.adminGroup
 
-	// System
 	protected.GET("/system/info", func(c *gin.Context) {
 		client, err := agentMgr.GetClient("local")
 		if err != nil {
@@ -2060,7 +1903,6 @@ func registerSystemRoutes(deps *routeDeps) {
 			return
 		}
 
-		// Get host info and stats
 		hostInfo, err := client.GetHostInfo(c.Request.Context())
 		if err != nil {
 			internalError(c, err)
@@ -2087,17 +1929,13 @@ func registerSystemRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, info)
 	})
 
-	// Version and update routes removed
-
 	// Audit logs (requires admin authentication)
 	adminGroup.GET("/audit-logs", handleListAuditLogs(database))
 
-	// WebSocket stats streaming
 	protected.GET("/containers/:id/stats/ws", func(c *gin.Context) {
 		handleStatsStream(c, agentMgr)
 	})
 
-	// Domains (Fase 4)
 	protected.GET("/domains", func(c *gin.Context) {
 		domains, err := database.ListDomains()
 		if err != nil {
@@ -2142,7 +1980,6 @@ func registerSystemRoutes(deps *routeDeps) {
 		c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 	})
 
-	// Cloudflare Tunnel
 	cfTunnel := tunnel.NewCloudflareTunnel(dockerClient.RawClient())
 
 	protected.POST("/tunnel", func(c *gin.Context) {
