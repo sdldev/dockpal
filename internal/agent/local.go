@@ -459,6 +459,8 @@ func (c *LocalClient) StackAction(ctx context.Context, name, action string) (*do
 		err = docker.StackStop(ctx, name)
 	case "restart":
 		err = docker.StackRestart(ctx, name)
+	case "recreate":
+		err = docker.StackRecreate(ctx, name)
 	case "down":
 		err = docker.StackDown(ctx, name)
 	case "update":
@@ -481,6 +483,8 @@ func (c *LocalClient) StackServiceAction(ctx context.Context, name, service, act
 		err = docker.StackServiceStop(ctx, name, service)
 	case "restart":
 		err = docker.StackServiceRestart(ctx, name, service)
+	case "recreate":
+		err = docker.StackServiceRecreate(ctx, name, service)
 	default:
 		return nil, fmt.Errorf("unknown action")
 	}

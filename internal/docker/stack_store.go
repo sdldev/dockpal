@@ -692,6 +692,16 @@ func StackRestart(ctx context.Context, name string) error {
 	return stackRun(ctx, name, "restart")
 }
 
+// StackRecreate: docker compose up -d --remove-orphans --force-recreate
+//
+// Unlike restart, this re-reads the compose file and recreates containers so
+// config changes that live in the container spec (network_mode, ports,
+// volumes, cap_add, ...) actually take effect — restart alone keeps the old
+// container config (issue #29).
+func StackRecreate(ctx context.Context, name string) error {
+	return stackRun(ctx, name, "up", "-d", "--remove-orphans", "--force-recreate")
+}
+
 // StackDown: docker compose down
 func StackDown(ctx context.Context, name string) error {
 	return stackRun(ctx, name, "down")
@@ -763,6 +773,13 @@ func StackServiceStop(ctx context.Context, name, service string) error {
 // StackServiceRestart: docker compose restart <service>
 func StackServiceRestart(ctx context.Context, name, service string) error {
 	return stackRun(ctx, name, "restart", service)
+}
+
+// StackServiceRecreate: docker compose up -d --force-recreate <service>
+// Recreates a single service's container so compose config changes for that
+// service take effect (issue #29).
+func StackServiceRecreate(ctx context.Context, name, service string) error {
+	return stackRun(ctx, name, "up", "-d", "--force-recreate", service)
 }
 
 // ListDockerNetworks returns host docker network names (sorted, without the

@@ -99,7 +99,7 @@ type AgentClient interface {
 	GetStack(ctx context.Context, name string) (*docker.Stack, error)
 	SaveStack(ctx context.Context, name, composeYAML, composeENV string, isAdd bool) (*docker.Stack, error)
 	DeleteStack(ctx context.Context, name string) error
-	StackAction(ctx context.Context, name, action string) (*docker.Stack, error)            // up/start/stop/restart/down/update
+	StackAction(ctx context.Context, name, action string) (*docker.Stack, error)            // up/start/stop/restart/recreate/down/update
 	StackServiceAction(ctx context.Context, name, service, action string) (*docker.Stack, error)
 	DeployStackStreamed(ctx context.Context, name, composeYAML, composeENV string, isAdd bool, session *docker.DeploySession) error
 	ListDockerNetworks(ctx context.Context) ([]string, error)

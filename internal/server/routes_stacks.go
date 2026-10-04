@@ -38,7 +38,7 @@ func registerStackRoutes(viewerGroup, operatorGroup *gin.RouterGroup, database *
 	operatorGroup.PUT("/stacks/meta/globalenv", func(c *gin.Context) { handleSetGlobalEnv(c, database) })
 
 	operatorGroup.POST("/stacks/:name/deploy", func(c *gin.Context) { handleDeployStack(c, database) })
-	for _, action := range []string{"up", "start", "stop", "restart", "down", "update"} {
+	for _, action := range []string{"up", "start", "stop", "restart", "recreate", "down", "update"} {
 		action := action
 		operatorGroup.POST("/stacks/:name/"+action, func(c *gin.Context) {
 			handleStackAction(c, action, database)
@@ -48,6 +48,7 @@ func registerStackRoutes(viewerGroup, operatorGroup *gin.RouterGroup, database *
 	operatorGroup.POST("/stacks/:name/services/:service/up", func(c *gin.Context) { handleStackServiceAction(c, "up") })
 	operatorGroup.POST("/stacks/:name/services/:service/stop", func(c *gin.Context) { handleStackServiceAction(c, "stop") })
 	operatorGroup.POST("/stacks/:name/services/:service/restart", func(c *gin.Context) { handleStackServiceAction(c, "restart") })
+	operatorGroup.POST("/stacks/:name/services/:service/recreate", func(c *gin.Context) { handleStackServiceAction(c, "recreate") })
 }
 
 // stackCLIUnavailable responds 501 when the docker compose plugin is missing.
@@ -307,6 +308,8 @@ func handleStackAction(c *gin.Context, action string, database *db.DB) {
 		err = docker.StackStop(ctx, name)
 	case "restart":
 		err = docker.StackRestart(ctx, name)
+	case "recreate":
+		err = docker.StackRecreate(ctx, name)
 	case "down":
 		err = docker.StackDown(ctx, name)
 	case "update":
@@ -356,6 +359,8 @@ func handleStackServiceAction(c *gin.Context, action string) {
 		err = docker.StackServiceStop(ctx, name, service)
 	case "restart":
 		err = docker.StackServiceRestart(ctx, name, service)
+	case "recreate":
+		err = docker.StackServiceRecreate(ctx, name, service)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown action"})
 		return

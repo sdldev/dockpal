@@ -55,7 +55,7 @@ func registerInstanceStackRoutes(g *gin.RouterGroup) {
 	g.DELETE("/stacks/:name", RequireRole(auth.RoleOperator), handleInstanceDeleteStack)
 
 	g.POST("/stacks/:name/deploy", RequireRole(auth.RoleOperator), handleInstanceDeployStack)
-	for _, action := range []string{"up", "start", "stop", "restart", "down", "update"} {
+	for _, action := range []string{"up", "start", "stop", "restart", "recreate", "down", "update"} {
 		action := action
 		g.POST("/stacks/:name/"+action, RequireRole(auth.RoleOperator), func(c *gin.Context) {
 			handleInstanceStackAction(c, action)
@@ -70,6 +70,9 @@ func registerInstanceStackRoutes(g *gin.RouterGroup) {
 	})
 	g.POST("/stacks/:name/services/:service/restart", RequireRole(auth.RoleOperator), func(c *gin.Context) {
 		handleInstanceStackServiceAction(c, "restart")
+	})
+	g.POST("/stacks/:name/services/:service/recreate", RequireRole(auth.RoleOperator), func(c *gin.Context) {
+		handleInstanceStackServiceAction(c, "recreate")
 	})
 }
 

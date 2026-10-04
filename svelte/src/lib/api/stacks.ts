@@ -87,7 +87,7 @@ export function deleteStack(name: string, instanceId = 'local'): Promise<{ messa
   return api.delete<{ message: string }>(`${stacksBasePath(instanceId)}/${encodeURIComponent(name)}`);
 }
 
-export type StackAction = 'up' | 'start' | 'stop' | 'restart' | 'down' | 'update';
+export type StackAction = 'up' | 'start' | 'stop' | 'restart' | 'recreate' | 'down' | 'update';
 
 export function stackAction(name: string, action: StackAction, instanceId = 'local'): Promise<Stack> {
   return api.post<Stack>(`${stacksBasePath(instanceId)}/${encodeURIComponent(name)}/${action}`);
@@ -106,7 +106,7 @@ export function deployStack(
   );
 }
 
-export type ServiceAction = 'up' | 'stop' | 'restart';
+export type ServiceAction = 'up' | 'stop' | 'restart' | 'recreate';
 
 export function stackServiceAction(
   name: string,
