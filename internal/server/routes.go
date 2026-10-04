@@ -126,6 +126,7 @@ func RegisterRoutes(ctx context.Context, r *gin.Engine, dockerClient *docker.Cli
 	registerImageRoutes(deps)
 	registerFileManagerRoutes(deps)
 	registerSystemRoutes(deps)
+	registerFleetRoutes(deps)
 }
 
 // registerPublicRoutes serves the API docs, the legacy v1 alias and the public boot config.

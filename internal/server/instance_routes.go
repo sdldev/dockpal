@@ -294,25 +294,31 @@ func handleListInstances(database *db.DB) gin.HandlerFunc {
 
 		result := make([]InstanceListItem, len(instances))
 		for i, inst := range instances {
-			result[i] = InstanceListItem{
-				ID:                 inst.ID,
-				Name:               inst.Name,
-				Host:               inst.Host,
-				Port:               inst.Port,
-				Mode:               inst.Mode,
-				Status:             inst.Status,
-				LastSeen:           inst.LastSeen,
-				SSHAuthType:        inst.SSHAuthType,
-				SSHHardeningStatus: inst.SSHHardeningStatus,
-				SSHHardenedAt:      inst.SSHHardenedAt,
-				SecPasswordAuth:    inst.SecPasswordAuth,
-				SecFail2ban:        inst.SecFail2ban,
-				SecFirewall:        inst.SecFirewall,
-				SecCheckedAt:       inst.SecCheckedAt,
-			}
+			result[i] = instanceListRow(inst)
 		}
 
 		c.JSON(http.StatusOK, result)
+	}
+}
+
+// instanceListRow builds the servers-table row from an instance record —
+// shared by GET /instances and the fleet summary.
+func instanceListRow(inst db.Instance) InstanceListItem {
+	return InstanceListItem{
+		ID:                 inst.ID,
+		Name:               inst.Name,
+		Host:               inst.Host,
+		Port:               inst.Port,
+		Mode:               inst.Mode,
+		Status:             inst.Status,
+		LastSeen:           inst.LastSeen,
+		SSHAuthType:        inst.SSHAuthType,
+		SSHHardeningStatus: inst.SSHHardeningStatus,
+		SSHHardenedAt:      inst.SSHHardenedAt,
+		SecPasswordAuth:    inst.SecPasswordAuth,
+		SecFail2ban:        inst.SecFail2ban,
+		SecFirewall:        inst.SecFirewall,
+		SecCheckedAt:       inst.SecCheckedAt,
 	}
 }
 
