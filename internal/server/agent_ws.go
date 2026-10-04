@@ -75,20 +75,22 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 		}
 
 		// Auth token: current agent images send it as ?token= on the WS URL;
-		// older images send it as a {token} first message. Accept both.
+		// older images send it as a {token} first message. Accept both. The
+		// close-message writes below are best-effort notifications on a
+		// handshake that is already failing (see handleDeployStreamWS).
 		token := c.Query("token")
 		if token == "" {
 			var msg agentMessage
 			_, rawMsg, err := conn.ReadMessage()
 			if err != nil {
 				log.Printf("Agent WebSocket: failed to read auth message: %v", err)
-				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication timeout"))
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication timeout"))
 				return
 			}
 
 			if err := json.Unmarshal(rawMsg, &msg); err != nil {
 				log.Printf("Agent WebSocket: invalid auth message format: %v", err)
-				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
 				return
 			}
 			token = msg.Token
@@ -98,7 +100,7 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 		instance, err := verifyAgentToken(database, token)
 		if err != nil {
 			log.Printf("Agent WebSocket: authentication failed for token: %v", err)
-			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "authentication failed"))
 			return
 		}
 

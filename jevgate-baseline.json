@@ -315,6 +315,15 @@
       "message": "This test file may test several separate subjects."
     },
     {
+      "fingerprint": "931c4ef0b1f8bc8bd85654f10a34c179dbe6502dfd28db588a6f83b6807693c3",
+      "rule": "custom/swallowed-errors",
+      "path": "internal/db/sshkeys.go",
+      "line": 52,
+      "strength": "review",
+      "message": "`DB::ListSSHKeys`: Does this function catch or receive an error that means something went wrong, and then drop it without logging, returning, rethrowing or reporting it? Yes.",
+      "reason": "intended"
+    },
+    {
       "fingerprint": "0514f4e8a37132a2dc7a0201ae5ea787a0d6b68614c03c1c65b0353f08fc1d44",
       "rule": "maintainability/shared-logic",
       "path": "internal/docker/auto_updater.go",
@@ -481,6 +490,15 @@
       "line": 660,
       "strength": "review",
       "message": "`stackRun` (internal/docker/stack_store.go:660), `StackUpdate` (internal/docker/stack_store.go:703) and 1 more copy may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "6cb13e2ad1204d89841819ea92d0965fc9f452106e1df7b447951ca0ed3c79f7",
+      "rule": "custom/swallowed-errors",
+      "path": "internal/docker/stack_store.go",
+      "line": 255,
+      "strength": "review",
+      "message": "`SaveStack`: Does this function catch or receive an error that means something went wrong, and then drop it without logging, returning, rethrowing or reporting it? Yes.",
+      "reason": "intended"
     },
     {
       "fingerprint": "8f912b9a6c974baa82f6799e596afd1cf6558b7cf3cea88366e9d603e9817799",
@@ -1061,6 +1079,15 @@
       "message": "`handleDetectSecurity` places values from another party into a URL it requests without binding, escaping or checking them."
     },
     {
+      "fingerprint": "4fa8e3a2a1e2b135024fd8fd7afdf4407dd43ee4e7f925f6d615a2ab009e1403",
+      "rule": "custom/swallowed-errors",
+      "path": "internal/server/security_routes.go",
+      "line": 76,
+      "strength": "review",
+      "message": "`persistSecurityState`: Does this function catch or receive an error that means something went wrong, and then drop it without logging, returning, rethrowing or reporting it? Yes.",
+      "reason": "intended"
+    },
+    {
       "fingerprint": "b8f27fed680cc888269f05e7b0739f60e51870a84742c9c23529d0cbe6ac74f9",
       "rule": "maintainability/function-simplification",
       "path": "internal/server/security_routes.go",
@@ -1636,6 +1663,15 @@
       "line": 57,
       "strength": "review",
       "message": "`loadContainers` (svelte/src/components/pages/ContainersPage.svelte:57) and `load` (svelte/src/components/pages/ImagesPage.svelte:34) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "48ed53df9cb05bf8d27faf45ac34a19481de7bd30e5c169b3f2ed3eb8acf878b",
+      "rule": "custom/swallowed-errors",
+      "path": "svelte/src/components/pages/ServerDetailPage.svelte",
+      "line": 125,
+      "strength": "review",
+      "message": "`loadImageCount`: Does this function catch or receive an error that means something went wrong, and then drop it without logging, returning, rethrowing or reporting it? Yes.",
+      "reason": "intended"
     },
     {
       "fingerprint": "7b1b38b5e44c9827ae0b39c91734b1004127e782ffae8cd38bf556e7eb6b2e55",
