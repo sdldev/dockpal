@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import Button from '../ui/Button.svelte';
-  import { api, getToken } from '../../lib/api/client';
+  import { api } from '../../lib/api/client';
+  import { instanceWSURL, wsCredential } from '../../lib/ws';
   import { addToast, currentStackName } from '../../lib/store';
   import { navigate } from '../../lib/router';
   import { buildCustomCompose, type CustomEnvRow, type CustomPortRow, type CustomVolumeRow } from '../../lib/compose-builder';
@@ -232,16 +233,9 @@
   }
 
   async function openLogStream(deployId: string) {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     // Single-use 60s ticket instead of the 4h JWT in the URL (audit L1).
-    let credential = getToken() ?? '';
-    try {
-      const res = await api.get<{ ticket: string }>('/ws-ticket');
-      credential = res.ticket;
-    } catch {
-      // Older backend without /ws-ticket — fall back to the JWT.
-    }
-    const wsUrl = `${proto}//${location.host}/api/instances/${instanceId}/deploy/stream/${deployId}?token=${credential}`;
+    const credential = await wsCredential();
+    const wsUrl = instanceWSURL(instanceId, `/deploy/stream/${deployId}`, credential);
 
     socket = new WebSocket(wsUrl);
     socket.onmessage = (event) => {

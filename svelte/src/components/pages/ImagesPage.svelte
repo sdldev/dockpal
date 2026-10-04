@@ -3,6 +3,7 @@
 	import { imagesBasePath } from '$lib/api/containers';
 	import { addToast, selectedInstance } from '$lib/store';
 	import type { ImageInfo } from '$lib/types/generated';
+	import { formatBytes } from '$lib/format';
 	import Button from '../ui/Button.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
@@ -108,13 +109,6 @@
 		} finally {
 			pruneBusy = false;
 		}
-	}
-
-	function formatBytes(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const units = ['B', 'KB', 'MB', 'GB'];
-		const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-		return `${(bytes / Math.pow(1024, idx)).toFixed(1)} ${units[idx]}`;
 	}
 
 	async function checkUpdates() {

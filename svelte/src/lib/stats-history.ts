@@ -31,17 +31,6 @@ export function dynamicYBounds(values: number[]): { min: number; max: number } {
   };
 }
 
-/** Format bytes like legacy formatBytes (B → KB → MB → GB → TB). */
-export function formatBytes(bytes: number, decimals = 1): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const idx = Math.min(i, units.length - 1);
-  const value = bytes / Math.pow(k, idx);
-  return `${value.toFixed(idx === 0 ? 0 : decimals)} ${units[idx]}`;
-}
-
 /** Max of a series with a floor (for network chart dynamic max). */
 export function seriesMax(values: number[]): number {
   return values.length ? Math.max(...values) : 0;

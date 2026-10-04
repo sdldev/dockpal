@@ -10,6 +10,7 @@
   import { selectedInstance } from '$lib/store';
   import { get } from 'svelte/store';
   import LineChart from '../stats/LineChart.svelte';
+  import { formatBps } from '$lib/format';
 
   interface HistorySample {
     ts: number;
@@ -154,12 +155,6 @@
 
   const noHistory = $derived(!usingLive && !loading && samples.length === 0);
 
-  function formatBps(bps: number): string {
-    if (bps < 1024) return `${bps.toFixed(0)} B/s`;
-    if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
-    if (bps < 1024 * 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
-    return `${(bps / 1024 / 1024 / 1024).toFixed(2)} GB/s`;
-  }
 </script>
 
 <div class="space-y-4">

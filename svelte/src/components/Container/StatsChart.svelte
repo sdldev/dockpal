@@ -9,7 +9,8 @@
 	import { selectedInstance } from '$lib/store';
 	import { getToken } from '$lib/api/client';
 	import LineChart from '../stats/LineChart.svelte';
-	import { newStatBuffer, pushPoint, formatBytes, seriesMax, type StatBuffer } from '$lib/stats-history';
+	import { newStatBuffer, pushPoint, seriesMax, type StatBuffer } from '$lib/stats-history';
+	import { formatBytes } from '$lib/format';
 
 	interface Props {
 		containerId: string;

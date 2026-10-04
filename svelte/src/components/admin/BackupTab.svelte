@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import { addToast } from '$lib/store';
+	import { formatBytes } from '$lib/format';
 	import type { BackupResult } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
 
@@ -23,12 +24,6 @@
 		}
 	}
 
-	function formatSize(bytes: number) {
-		if (!bytes) return '0 B';
-		const units = ['B', 'KB', 'MB', 'GB'];
-		const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-		return `${(bytes / Math.pow(1024, idx)).toFixed(1)} ${units[idx]}`;
-	}
 </script>
 
 <div class="space-y-4">
@@ -59,7 +54,7 @@
 				</div>
 				<div class="flex gap-2">
 					<dt class="text-zinc-500 w-32">Size</dt>
-					<dd class="text-zinc-400">{formatSize(result.size)}</dd>
+					<dd class="text-zinc-400">{formatBytes(result.size)}</dd>
 				</div>
 				<div class="flex gap-2">
 					<dt class="text-zinc-500 w-32">Checksum</dt>

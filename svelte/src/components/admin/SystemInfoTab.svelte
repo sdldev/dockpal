@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import type { SystemInfo } from '$lib/types/generated';
+	import { formatBytes } from '$lib/format';
 	import Button from '../ui/Button.svelte';
 
 	let info = $state<SystemInfo | null>(null);
@@ -22,13 +23,6 @@
 	$effect(() => {
 		load();
 	});
-
-	function formatBytes(bytes: number) {
-		if (!bytes) return '0 B';
-		const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-		return `${(bytes / Math.pow(1024, idx)).toFixed(1)} ${units[idx]}`;
-	}
 
 	function pct(used: number, total: number) {
 		return total > 0 ? ((used / total) * 100).toFixed(1) : '0';

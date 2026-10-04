@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+/* Honor the OS reduced-motion preference: keep the state change (colors,
+   visibility) but drop the motion itself. Spinners freeze on a static frame
+   next to their label instead of spinning at a cost-free 0.01ms loop. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

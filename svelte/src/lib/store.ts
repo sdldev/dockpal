@@ -2,7 +2,7 @@
 
 import { writable, derived } from 'svelte/store';
 import { api } from './api/client';
-import type { User, Template, ContainerInfo, InstanceListItem, SystemInfo } from './types/api';
+import type { User, Template, ContainerInfo, InstanceListItem, SystemInfo, FleetSummary } from './types/api';
 
 export const currentUser = writable<User | null>(null);
 
@@ -123,38 +123,19 @@ export function createServersStore() {
 		return inst.id === 'local' || inst.status === 'online';
 	}
 
-	// Fetch the instance list, then sysInfo + containers + image count for
-	// every reachable instance in parallel. Flattens containers into the
-	// global servers view.
+	// One aggregated poll: the backend collects sysInfo, containers and image
+	// count for every reachable instance (bounded fan-out server-side) and
+	// returns them in a single response. This replaced the 3-requests-per-
+	// instance fan-out that tripped the read rate limit with a full fleet.
 	async function fetchMetrics() {
 		try {
-			const list = await api.get<InstanceListItem[]>('/instances');
-			const resolved = await Promise.all(
-				list.map(async (inst) => {
-					let sysInfo: SystemInfo | null = null;
-					let containers: ContainerInfo[] = [];
-					let imageCount = 0;
-					if (isOnline(inst)) {
-						try {
-							sysInfo = await api.get<SystemInfo>(`/instances/${inst.id}/system/info`);
-						} catch (e) {
-							console.error(`Failed to get system info for instance ${inst.id}:`, e);
-						}
-						try {
-							containers = await api.get<ContainerInfo[]>(`/instances/${inst.id}/containers`);
-						} catch (e) {
-							console.error(`Failed to get containers for instance ${inst.id}:`, e);
-						}
-						try {
-							const images = await api.get<unknown[]>(`/instances/${inst.id}/images`);
-							imageCount = Array.isArray(images) ? images.length : 0;
-						} catch (e) {
-							console.error(`Failed to get images for instance ${inst.id}:`, e);
-						}
-					}
-					return { ...inst, sysInfo, containers, imageCount };
-				})
-			);
+			const summary = await api.get<FleetSummary>('/fleet/summary');
+			const resolved: ServersInstance[] = summary.instances.map((row) => ({
+				...row,
+				sysInfo: row.sys_info,
+				containers: row.containers,
+				imageCount: row.image_count
+			}));
 
 			const allContainers: ServersContainer[] = [];
 			for (const inst of resolved) {
@@ -174,7 +155,7 @@ export function createServersStore() {
 		}
 	}
 
-	function startPolling(intervalMs = 5000) {
+	function startPolling(intervalMs = 15000) {
 		if (intervalId) return;
 		fetchMetrics();
 		intervalId = setInterval(fetchMetrics, intervalMs);

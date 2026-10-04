@@ -4,7 +4,7 @@
 	import type { ServersInstance } from '../../lib/store';
 	import { api, ApiError } from '../../lib/api/client';
 	import { updateInstance } from '../../lib/api/stacks';
-	import { formatBytes } from '../../lib/stats-history';
+	import { formatBytes } from '$lib/format';
 	import { formatPorts } from '../../lib/format';
 	import { navigate } from '../../lib/router';
 	import AddServerPanel from '../servers/AddServerPanel.svelte';
@@ -328,7 +328,7 @@
 				</div>
 				<div class="bg-zinc-900 border border-zinc-800/60 rounded-sm p-5">
 					<div class="text-xs text-zinc-500 uppercase tracking-wider mb-1">Total Memory Capacity</div>
-					<div class="text-3xl font-bold text-violet-400">{formatBytes(totalMemory)}</div>
+					<div class="text-3xl font-bold text-blue-400">{formatBytes(totalMemory)}</div>
 					<div class="text-[10px] text-zinc-500 mt-1">Total RAM capacity</div>
 				</div>
 			</div>

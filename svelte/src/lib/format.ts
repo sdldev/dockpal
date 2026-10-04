@@ -30,3 +30,23 @@ export function formatPorts(ports: PortSummary[] | undefined | null): string {
   if (!Array.isArray(ports) || ports.length === 0) return '—';
   return dedupePorts(ports).map(formatPort).join(', ');
 }
+
+// Human-readable byte size (B → KB → MB → GB → TB). Single home for the
+// copies that used to live inline in BackupTab, SystemInfoTab, ImagesPage,
+// ContainerPage, MetricsHistory and stats-history.
+export function formatBytes(bytes: number, decimals = 1): string {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), units.length - 1);
+  const value = bytes / Math.pow(k, idx);
+  return `${value.toFixed(idx === 0 ? 0 : decimals)} ${units[idx]}`;
+}
+
+// Human-readable network rate from bytes/sec.
+export function formatBps(bps: number): string {
+  if (bps < 1024) return `${bps.toFixed(0)} B/s`;
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+  if (bps < 1024 * 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(1)} MB/s`;
+  return `${(bps / 1024 / 1024 / 1024).toFixed(2)} GB/s`;
+}

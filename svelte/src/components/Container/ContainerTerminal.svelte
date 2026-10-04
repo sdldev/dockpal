@@ -10,6 +10,7 @@
   import type { Terminal } from '@xterm/xterm';
   import type { FitAddon } from '@xterm/addon-fit';
   import { getWSTicket } from '$lib/api/containers';
+  import { instanceWSURL } from '$lib/ws';
 
   // xterm.js (~250 kB minified) is imported on demand: only this component
   // needs the emulator, so it ships as its own lazy chunk (like the YAML
@@ -41,8 +42,7 @@
   let termEl: HTMLDivElement | undefined = $state();
 
   function wsURL(ticket: string): string {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/exec?shell=${shell}&token=${encodeURIComponent(ticket)}`;
+    return instanceWSURL(instanceId, `/containers/${encodeURIComponent(containerId)}/exec?shell=${shell}`, ticket);
   }
 
   function sendResize(cols: number, rows: number) {

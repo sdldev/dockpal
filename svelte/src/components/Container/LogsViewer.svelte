@@ -3,6 +3,7 @@
   // GET /api/instances/:id/containers/:id/logs?tail=N&token=...
   import { onDestroy } from 'svelte';
   import { getWSTicket } from '$lib/api/containers';
+  import { instanceWSURL } from '$lib/ws';
   import Icon from '../ui/Icon.svelte';
 
   interface Props {
@@ -27,8 +28,7 @@
   let lastContainerId = '';
 
   function wsURL(tailN: string, ticket: string): string {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/api/instances/${encodeURIComponent(instanceId)}/containers/${encodeURIComponent(containerId)}/logs?tail=${tailN}&token=${encodeURIComponent(ticket)}`;
+    return instanceWSURL(instanceId, `/containers/${encodeURIComponent(containerId)}/logs?tail=${tailN}`, ticket);
   }
 
   async function connect() {

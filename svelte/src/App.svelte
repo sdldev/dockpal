@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, getToken, clearToken } from './lib/api/client';
+  import { performLogout as logout, clearSession } from './lib/auth';
   import { currentUser, currentPage, selectedInstance, sidebarOpen, navTitle } from './lib/store';
-  import { initRouter, navigate } from './lib/router';
+  import { initRouter } from './lib/router';
   import type { User } from './lib/types/api';
   import Login from './components/pages/Login.svelte';
   import Sidebar from './components/layout/Sidebar.svelte';
@@ -36,15 +37,6 @@
     }
   }
 
-  function logout() {
-    // Server-side revocation is best-effort; the local session is cleared
-    // regardless, but a failing revoke is worth seeing in the console.
-    api.post('/logout').catch((e) => console.warn('logout request failed', e));
-    clearToken();
-    currentUser.set(null);
-    navigate('servers', {}, true);
-  }
-
   // Sidebar: open by default on desktop, closed on mobile (evaluated once
   // at app start so innerWidth is measured after hydration, not at import).
   // The 768px threshold must match the md: breakpoint used on the wrapper.
@@ -76,8 +68,7 @@
     // Global 401 handler: any API call with an expired/revoked token
     // dispatches this event so we drop the session back to login.
     const onUnauthorized = () => {
-      currentUser.set(null);
-      navigate('servers', {}, true);
+      clearSession();
     };
     window.addEventListener('dockpal:unauthorized', onUnauthorized);
     return () => window.removeEventListener('dockpal:unauthorized', onUnauthorized);

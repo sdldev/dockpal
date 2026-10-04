@@ -4,7 +4,7 @@
 	import { addToast, selectedInstance, isOperator } from '$lib/store';
 	import { routeParams } from '$lib/router';
 	import type { ContainerDetail, ContainerInfo } from '$lib/types/generated';
-	import { formatPorts } from '$lib/format';
+	import { formatPorts, formatBytes } from '$lib/format';
 	import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -37,13 +37,6 @@
 	type Tab = (typeof tabs)[number];
 	let activeTab = $state<Tab>('overview');
 	const isRunning = $derived((detail?.state ?? '').toLowerCase() === 'running');
-
-	function formatBytes(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-	}
 
 	async function load() {
 		if (!containerId) return;

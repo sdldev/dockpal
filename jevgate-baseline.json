@@ -1779,7 +1779,8 @@
       "path": "svelte/src/components/servers/AddServerPanel.svelte",
       "line": 165,
       "strength": "review",
-      "message": "`openLogStream` (svelte/src/components/servers/AddServerPanel.svelte:165), `openLogStream` (svelte/src/components/servers/SecurityTab.svelte:203) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`openLogStream` (svelte/src/components/servers/AddServerPanel.svelte:165), `openLogStream` (svelte/src/components/servers/SecurityTab.svelte:203) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "44cc09e411f62cf33ab12409c623037d6533050bd9776cb0d658619b51769c85",
@@ -1787,7 +1788,8 @@
       "path": "svelte/src/components/servers/AddServerPanel.svelte",
       "line": 68,
       "strength": "review",
-      "message": "`$effect(…)` (svelte/src/components/servers/AddServerPanel.svelte:68) and `$effect(…)` (svelte/src/components/servers/SecurityTab.svelte:119) may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`$effect(…)` (svelte/src/components/servers/AddServerPanel.svelte:68) and `$effect(…)` (svelte/src/components/servers/SecurityTab.svelte:119) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "9ebdefdd808a836946e47e0506cc76e73aaa07ed4a785a260cc49d6cb8589f2a",
@@ -1795,7 +1797,8 @@
       "path": "svelte/src/components/servers/AddServerPanel.svelte",
       "line": 241,
       "strength": "review",
-      "message": "`testConnection` (svelte/src/components/servers/AddServerPanel.svelte:241) and `loadHealth` (svelte/src/components/servers/HealthWidget.svelte:17) may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`testConnection` (svelte/src/components/servers/AddServerPanel.svelte:241) and `loadHealth` (svelte/src/components/servers/HealthWidget.svelte:17) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "fa5983084dbbb607ebfc2128610cb13fc178b14177a79143a9a8cbd5b42f5817",
@@ -1803,7 +1806,8 @@
       "path": "svelte/src/components/servers/AddServerPanel.svelte",
       "line": 185,
       "strength": "review",
-      "message": "Lines 185 and 189 of `openLogStream` (svelte/src/components/servers/AddServerPanel.svelte) may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "Lines 185 and 189 of `openLogStream` (svelte/src/components/servers/AddServerPanel.svelte) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "3d67e2388cc6a75f2f5cfd6f438b0213110a3197992ec5e09d996121e7559c1e",

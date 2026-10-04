@@ -95,3 +95,16 @@ export interface SystemInfo {
   network_tx_bps: number;
 }
 
+// GET /api/fleet/summary — one aggregated servers-page poll. Each row is the
+// /instances list item plus the live data the UI used to fetch with three
+// requests per instance on every poll.
+export interface FleetSummaryInstance extends InstanceListItem {
+  sys_info: SystemInfo | null;
+  containers: ContainerInfo[];
+  image_count: number;
+}
+
+export interface FleetSummary {
+  instances: FleetSummaryInstance[];
+}
+

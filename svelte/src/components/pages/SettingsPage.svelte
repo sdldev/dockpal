@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, clearToken } from '$lib/api/client';
-	import { currentUser, isAdmin, addToast } from '$lib/store';
-	import { navigate } from '$lib/router';
-	import Button from '../ui/Button.svelte';
+	import { api } from '$lib/api/client';
+	import { performLogout } from '$lib/auth';
+	import { isAdmin, addToast } from '$lib/store';
+		import Button from '../ui/Button.svelte';
 	import Modal from '../ui/Modal.svelte';
 	import AdminPage from './AdminPage.svelte';
 
@@ -78,13 +78,8 @@
 	}
 
 	function logout() {
-		// Best-effort revoke (see App.svelte logout); local session is cleared
-		// regardless, a failing revoke shows in the console.
-		api.post('/logout').catch((e) => console.warn('logout request failed', e));
-		clearToken();
-		currentUser.set(null);
 		addToast('Logged out', 'info');
-		navigate('servers', {}, true);
+		performLogout();
 	}
 
 	async function quickReset() {

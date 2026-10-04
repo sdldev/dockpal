@@ -13,7 +13,8 @@
 	// instance (set during Add Server). Everything is fail-closed: an unknown
 	// state is displayed as NOT secured.
 	import { onDestroy } from 'svelte';
-	import { api, getToken } from '$lib/api/client';
+	import { api } from '$lib/api/client';
+	import { instanceWSURL, wsCredential } from '$lib/ws';
 	import { listSSHKeys, type SSHKeyInfo } from '$lib/api/sshkeys';
 	import { addToast, isAdmin, isOperator } from '$lib/store';
 	import type { InstanceListItem } from '$lib/types/api';
@@ -200,18 +201,9 @@
 	}
 
 	async function openLogStream() {
-		const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 		// Single-use 60s ticket instead of the 4h JWT in the URL (audit L1).
-		let credential = getToken() ?? '';
-		try {
-			const res = await api.get<{ ticket: string }>('/ws-ticket');
-			credential = res.ticket;
-		} catch {
-			// Older backend without /ws-ticket — fall back to the JWT.
-		}
-		socket = new WebSocket(
-			`${proto}//${location.host}/api/instances/${instanceId}/security/logs?token=${credential}`
-		);
+		const credential = await wsCredential();
+		socket = new WebSocket(instanceWSURL(instanceId, '/security/logs', credential));
 		socket.onmessage = (event) => {
 			const line = String(event.data);
 			logs = [...logs, line];
