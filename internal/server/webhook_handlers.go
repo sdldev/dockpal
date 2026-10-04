@@ -10,15 +10,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/db"
-	"github.com/sdldev/dockpal/internal/git"
 	"github.com/sdldev/dockpal/internal/registry"
 )
 
@@ -124,54 +121,30 @@ func HandleWebhookDeploy(database *db.DB, agentMgr *agent.Manager, jwtSecret str
 			return
 		}
 
-		// Clone repository
-		info, err := git.Clone(wh.Repo, wh.Branch, token)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-
-		selectedFile := wh.ComposeFile
-		if selectedFile == "" {
-			if len(info.ComposeFiles) > 0 {
-				selectedFile = info.ComposeFiles[0]
-			} else {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "no docker-compose file found in repository"})
-				return
-			}
-		}
-
-		composePath := filepath.Join(info.Path, selectedFile)
-		composeData, err := os.ReadFile(composePath)
-		if err != nil {
-			internalError(c, err)
+		// Clone repository and read the stored compose file. Webhooks redeploy
+		// non-interactively: pick the first compose file when none is stored.
+		prep := prepareGitDeploy(c, gitDeployOptions{
+			Repo:             wh.Repo,
+			Branch:           wh.Branch,
+			ComposeFile:      wh.ComposeFile,
+			Name:             wh.Name,
+			Token:            token,
+			AutoSelect:       true,
+			TrustComposeFile: true,
+		})
+		if prep == nil {
 			return
 		}
 		// Webhook redeploys pull a fresh compose from git; normalize so a
 		// reboot-unsafe restart policy in the repo does not silently disable
 		// auto-start after a host reboot.
-		composeYAML := ensureAutoStart(string(composeData), "", nil)
+		composeYAML := ensureAutoStart(prep.ComposeData, "", nil)
 
 		// Resolve registry auths from compose file using direct DB lookup
-		var domains []string
-		for _, line := range strings.Split(composeYAML, "\n") {
-			if strings.Contains(line, "image:") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					img := parts[1]
-					if domain := registry.ExtractDomain(img); domain != "" {
-						domains = append(domains, domain)
-					}
-				}
-			}
-		}
-		registryAuths := resolveRegistryAuthsWithDB(database, wh.InstanceID, domains)
+		registryAuths := resolveRegistryAuthsWithDB(database, wh.InstanceID, extractDomainsFromCompose(composeYAML))
 
 		// Deploy
-		projectName := wh.Name
-		if projectName == "" {
-			projectName = filepath.Base(info.Path)
-		}
+		projectName := prep.ProjectName
 
 		if err := client.DeployCompose(c.Request.Context(), projectName, composeYAML, registryAuths, false); err != nil {
 			internalError(c, err)

@@ -15,13 +15,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"github.com/sdldev/dockpal/internal/agent"
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/composecli"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
-	"github.com/sdldev/dockpal/internal/git"
 	"github.com/sdldev/dockpal/internal/health"
 	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
@@ -538,70 +536,13 @@ func registerAppUpdateRoutes(deps *routeDeps) {
 			return
 		}
 
-		username := "user"
-		if v, ok := c.Get("username"); ok {
-			if s, ok := v.(string); ok && s != "" {
-				username = s
-			}
-		}
-		triggeredBy := "user:" + username
-
 		// The wrapping closure is load-bearing: c.Writer.Status() is only set after c.JSON,
 		// so the audit result must be read inside the deferred body.
 		defer func() {
 			LogAppUpdateAttempt(c, database, dockerClient, name, auditAppUpdateResultFor(c.Writer.Status()))
 		}()
 
-		// Snapshot the latest attempt to detect the new record; empty means no prior attempts.
-		var prevAttempt string
-		if recs, err := database.ListAppUpdates(name, 1); err == nil && len(recs) > 0 {
-			prevAttempt = recs[0].AttemptID
-		}
-
-		// Asynchronous trigger; a concurrent run maps to HTTP 409 via ErrUpdateAlreadyRunning.
-		errCh := make(chan error, 1)
-		go func() {
-			// context.Background(): the pipeline must outlive the HTTP request.
-			errCh <- globalAutoUpdateWorker.TriggerApp(context.Background(), name, true, true, triggeredBy)
-		}()
-
-		timeout := time.NewTimer(5 * time.Second)
-		defer timeout.Stop()
-		ticker := time.NewTicker(25 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case err := <-errCh:
-				if err != nil && strings.Contains(err.Error(), docker.ErrUpdateAlreadyRunning) {
-					c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
-					return
-				}
-				if err != nil {
-					internalError(c, err)
-					return
-				}
-				// TriggerApp finished before the poll saw a record; return the newest attempt.
-				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
-					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
-					return
-				}
-				c.JSON(http.StatusAccepted, gin.H{"status": "ok"})
-				return
-			case <-ticker.C:
-				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
-					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
-					return
-				}
-			case <-timeout.C:
-				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
-					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "trigger did not produce a record in time"})
-				return
-			}
-		}
+		startLocalAppUpdate(c, database, name, triggeredByFor(c), newAppUpdateAttempt(database, name, ""))
 	})
 
 	protected.PATCH("/apps/:name/auto-update", func(c *gin.Context) {
@@ -915,91 +856,17 @@ func registerContainerRoutes(deps *routeDeps) {
 			return
 		}
 
-		var req docker.ContainerEditRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		result, ok := applyContainerEdit(c, client, containerID)
+		if !ok {
 			return
 		}
-
-		if req.Name != nil {
-			if err := validator.ValidateContainerName(*req.Name); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
-				return
-			}
-		}
-
-		if req.RestartPolicy != nil {
-			if err := validator.ValidateRestartPolicy(*req.RestartPolicy); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		}
-
-		if req.MemoryLimit != nil && *req.MemoryLimit < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "memory limit must be non-negative"})
-			return
-		}
-
-		if req.CPULimit != nil && *req.CPULimit < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "CPU limit must be non-negative"})
-			return
-		}
-
-		if req.Env != nil {
-			for _, env := range *req.Env {
-				if err := validator.ValidateEnvVarValue(env); err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var: %s", err.Error())})
-					return
-				}
-			}
-		}
-
-		if req.Ports != nil {
-			for _, pm := range *req.Ports {
-				if err := validator.ValidatePortMapping(pm.HostPort, pm.ContainerPort, pm.Protocol); err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-					return
-				}
-			}
-		}
-
-		if req.Volumes != nil {
-			for _, vm := range *req.Volumes {
-				if vm.ContainerPath == "" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "volume container path cannot be empty"})
-					return
-				}
-				if vm.HostPath == "" {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "volume host path cannot be empty"})
-					return
-				}
-			}
-		}
-
-		needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
-		if needsRecreate {
-			if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
-				if errors.Is(err, errProtectedDockpalAgentContainer) {
-					c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be recreated from Dockpal", "protected": true})
-					return
-				}
-				internalError(c, err)
-				return
-			}
-		}
-
-		detail, err := client.EditContainer(c.Request.Context(), containerID, req)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		LogAudit(c, database, "container.edit", "containers/"+containerID, "success", fmt.Sprintf("recreated=%v", needsRecreate))
+		LogAudit(c, database, "container.edit", "containers/"+containerID, "success", fmt.Sprintf("recreated=%v", result.NeedsRecreate))
 
 		response := gin.H{
 			"status":    "updated",
-			"container": detail,
+			"container": result.Detail,
 		}
-		if needsRecreate {
+		if result.NeedsRecreate {
 			response["recreated"] = true
 		}
 		c.JSON(http.StatusOK, response)
@@ -1032,32 +899,7 @@ func registerLegacyLogStreamRoutes(deps *routeDeps) {
 		}
 		c.Set("jwt_secret", jwtSecret)
 		c.Set("database", database)
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		// Auth: query token (browser WS) or first {token} message (API clients); the query
-		// value may be a single-use ws-ticket or a raw JWT.
-		if q := c.Query("token"); q != "" {
-			role := resolveWSQueryRole(c, q)
-			if role == "" || !auth.HasRole(role, auth.RoleViewer) {
-				conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(4001, "authentication failed"))
-				return
-			}
-		} else if !authenticateWebSocketFirstMessage(conn, c) {
-			return
-		}
-
-		reader, err := client.ContainerLogs(c.Request.Context(), c.Param("id"), c.DefaultQuery("tail", "100"))
-		if err != nil {
-			conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
-			return
-		}
-
-		streamContainerLogs(conn, reader)
+		serveContainerLogsWS(c, client, c.Param("id"))
 	})
 }
 
@@ -1222,61 +1064,18 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 
 		token, _ := registryManager.GetTokenForDomain("github.com")
 
-		info, err := git.Clone(req.Repo, req.Branch, token)
-		if err != nil {
-			errMsg := err.Error()
-			if strings.Contains(errMsg, "authentication") || strings.Contains(errMsg, "Authorization") ||
-				strings.Contains(errMsg, "denied") || strings.Contains(errMsg, "not found") {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. Add a GitHub credential in Settings > Registry with registry 'github.com' and a PAT with repo scope."})
-				return
-			}
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to clone repository: %s", errMsg)})
+		prep := prepareGitDeploy(c, gitDeployOptions{
+			Repo:        req.Repo,
+			Branch:      req.Branch,
+			ComposeFile: req.ComposeFile,
+			Name:        req.Name,
+			Token:       token,
+		})
+		if prep == nil {
 			return
 		}
 
-		if len(info.ComposeFiles) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no docker-compose file found in repository"})
-			return
-		}
-
-		if len(info.ComposeFiles) > 1 && req.ComposeFile == "" {
-			c.JSON(http.StatusOK, gin.H{"status": "select_compose", "compose_files": info.ComposeFiles, "info": info})
-			return
-		}
-
-		selectedFile := req.ComposeFile
-		if selectedFile == "" {
-			selectedFile = info.ComposeFiles[0]
-		}
-
-		validFile := false
-		for _, f := range info.ComposeFiles {
-			if f == selectedFile {
-				validFile = true
-				break
-			}
-		}
-		if !validFile {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("compose file '%s' not found in repository", selectedFile)})
-			return
-		}
-
-		projectName := req.Name
-		if projectName == "" {
-			projectName = filepath.Base(info.Path)
-		}
-		if err := validator.ValidateContainerName(projectName); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
-			return
-		}
-
-		composePath := filepath.Join(info.Path, selectedFile)
-		composeData, err := os.ReadFile(composePath)
-		if err != nil {
-			internalError(c, err)
-			return
-		}
-		composeYAML := ensureAutoStart(string(composeData), "", nil)
+		composeYAML := ensureAutoStart(prep.ComposeData, "", nil)
 
 		registryAuths := getRegistryAuths(registryManager, composeYAML)
 
@@ -1286,20 +1085,20 @@ func registerDeployStreamRoutes(deps *routeDeps) {
 			return
 		}
 
-		if err := client.DeployCompose(c.Request.Context(), projectName, composeYAML, registryAuths, false); err != nil {
+		if err := client.DeployCompose(c.Request.Context(), prep.ProjectName, composeYAML, registryAuths, false); err != nil {
 			internalError(c, err)
 			return
 		}
 
 		database.SaveService(db.Service{
 			ID:        generateID("svc"),
-			Name:      projectName,
+			Name:      prep.ProjectName,
 			Type:      "git",
 			Repo:      req.Repo,
 			CreatedAt: time.Now().Unix(),
 		})
 
-		c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": info})
+		c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": prep.Info})
 	})
 }
 

@@ -436,6 +436,24 @@
       "message": "`Client::recreateContainer` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
     },
     {
+      "fingerprint": "235773454007340ffc3a9c86ee4b781736f2c5485ceec62e7df4359dae5f401f",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/docker/container.go",
+      "line": 63,
+      "strength": "review",
+      "message": "`Client::ListContainers` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "intended"
+    },
+    {
+      "fingerprint": "26024eba71e2c960e5b9af8a7a3f844fe43b01d12d57708e35eb4a11199d4be4",
+      "rule": "custom/n-plus-one",
+      "path": "internal/docker/container.go",
+      "line": 63,
+      "strength": "review",
+      "message": "`Client::ListContainers`: Does this function run a database query or a network call once per item inside a loop, where one query or call could handle all the items? Yes.",
+      "reason": "intended"
+    },
+    {
       "fingerprint": "c93dff0e8551831886f00b55f17a0daf638b72bf577c444a6d3f3d534e878db5",
       "rule": "documentation/comments",
       "path": "internal/docker/container.go",
@@ -597,6 +615,15 @@
       "message": "`HandleTriggerBackup` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
     },
     {
+      "fingerprint": "b0de5ea641cf09392cba6731853a38cee260b538e6ba9252bf87a5ef702e87ed",
+      "rule": "maintainability/file-organization",
+      "path": "internal/server/handlers_shared.go",
+      "line": 23,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "intended"
+    },
+    {
       "fingerprint": "1c5a36ebfdd8c5950049db4776bfbefefeec7e1da481f868a7de1791e924f460",
       "rule": "documentation/comments",
       "path": "internal/server/instance_routes.go",
@@ -651,6 +678,15 @@
       "line": 733,
       "strength": "review",
       "message": "`handleInstallAgent` (internal/server/instance_routes.go:733) and `handleApplySecurity` (internal/server/security_routes.go:202) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "8d995948ab00a47fc90daddb55ed915eaf81276e8fe3f6366d4714d06fae6399",
+      "rule": "security/injection",
+      "path": "internal/server/instance_routes.go",
+      "line": 709,
+      "strength": "review",
+      "message": "`handleInstallAgent` places values from another party into a URL it requests without binding, escaping or checking them.",
+      "reason": "wrong"
     },
     {
       "fingerprint": "8fc779855644ea2aa600f697a442322c7002f65c252bbe1001e3f10b509526ff",

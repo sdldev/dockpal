@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +22,6 @@ import (
 	"github.com/sdldev/dockpal/internal/auth"
 	"github.com/sdldev/dockpal/internal/db"
 	"github.com/sdldev/dockpal/internal/docker"
-	"github.com/sdldev/dockpal/internal/git"
 	"github.com/sdldev/dockpal/internal/metrics"
 	"github.com/sdldev/dockpal/internal/registry"
 	"github.com/sdldev/dockpal/internal/traefik"
@@ -217,105 +215,24 @@ func handleInstanceRemoveContainer(c *gin.Context) {
 }
 
 // handleInstanceEditContainer edits a container (in-place updates or recreate).
+// Validation and the EditContainer call are shared with the local edit route.
 func handleInstanceEditContainer(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	instanceID := c.MustGet("instance_id").(string)
 	containerID := c.Param("id")
 
-	var req docker.ContainerEditRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+	result, ok := applyContainerEdit(c, client, containerID)
+	if !ok {
 		return
 	}
-
-	// Validate name if provided
-	if req.Name != nil {
-		if err := validator.ValidateContainerName(*req.Name); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
-			return
-		}
-	}
-
-	// Validate restart policy if provided
-	if req.RestartPolicy != nil {
-		if err := validator.ValidateRestartPolicy(*req.RestartPolicy); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	// Validate memory limit if provided (must be non-negative)
-	if req.MemoryLimit != nil && *req.MemoryLimit < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "memory limit must be non-negative"})
-		return
-	}
-
-	// Validate CPU limit if provided (must be non-negative; 0 means unlimited)
-	if req.CPULimit != nil && *req.CPULimit < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CPU limit must be non-negative"})
-		return
-	}
-
-	// Validate env vars if provided
-	if req.Env != nil {
-		for _, env := range *req.Env {
-			if err := validator.ValidateEnvVarValue(env); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid env var: %s", err.Error())})
-				return
-			}
-		}
-	}
-
-	// Validate ports if provided
-	if req.Ports != nil {
-		for _, pm := range *req.Ports {
-			if err := validator.ValidatePortMapping(pm.HostPort, pm.ContainerPort, pm.Protocol); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		}
-	}
-
-	// Validate volumes if provided
-	if req.Volumes != nil {
-		for _, vm := range *req.Volumes {
-			if vm.ContainerPath == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "volume container path cannot be empty"})
-				return
-			}
-			if vm.HostPath == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "volume host path cannot be empty"})
-				return
-			}
-		}
-	}
-
-	// Determine if recreate is needed
-	needsRecreate := req.Image != nil || req.Env != nil || req.Ports != nil || req.Volumes != nil
-	if needsRecreate {
-		if err := ensureContainerRemovable(c.Request.Context(), client, containerID); err != nil {
-			if errors.Is(err, errProtectedDockpalAgentContainer) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be recreated from Dockpal", "protected": true})
-				return
-			}
-			internalError(c, err)
-			return
-		}
-	}
-
-	detail, err := client.EditContainer(c.Request.Context(), containerID, req)
-	if err != nil {
-		internalError(c, err)
-		return
-	}
-	auditInstanceContainer(c, "container.edit", containerID, fmt.Sprintf("recreated=%v", needsRecreate))
+	auditInstanceContainer(c, "container.edit", containerID, fmt.Sprintf("recreated=%v", result.NeedsRecreate))
 
 	response := gin.H{
 		"status":    "updated",
 		"instance":  instanceID,
-		"container": detail,
+		"container": result.Detail,
 	}
-	if needsRecreate {
+	if result.NeedsRecreate {
 		response["recreated"] = true
 	}
 
@@ -379,42 +296,11 @@ func handleInstanceContainerStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// handleInstanceContainerLogs streams container logs via WebSocket.
+// handleInstanceContainerLogs streams container logs via WebSocket. The
+// upgrade/auth/stream protocol is shared with the local log route.
 func handleInstanceContainerLogs(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
-	containerID := c.Param("id")
-
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	// Auth: query token (browser WS) or first {token} message (API clients) —
-	// same protocol as the exec handler below. The query value may be a
-	// single-use ws-ticket (what the browser sends) or a raw JWT.
-	if q := c.Query("token"); q != "" {
-		role := resolveWSQueryRole(c, q)
-		if role == "" || !auth.HasRole(role, auth.RoleViewer) {
-			conn.WriteMessage(websocket.CloseMessage,
-				websocket.FormatCloseMessage(4001, "authentication failed"))
-			return
-		}
-	} else if !authenticateWebSocketFirstMessage(conn, c) {
-		return
-	}
-
-	// Get tail parameter, default to "100"
-	tail := c.DefaultQuery("tail", "100")
-
-	reader, err := client.ContainerLogs(c.Request.Context(), containerID, tail)
-	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("Error: failed to retrieve container logs"))
-		conn.Close()
-		return
-	}
-
-	streamContainerLogs(conn, reader)
+	serveContainerLogsWS(c, client, c.Param("id"))
 }
 
 // handleInstanceContainerExec upgrades a browser WebSocket into an
@@ -845,65 +731,18 @@ func handleInstanceDeployGit(c *gin.Context) {
 		token, _ = registryMgr.GetTokenForDomain("github.com")
 	}
 
-	info, err := git.Clone(req.Repo, req.Branch, token)
-	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "authentication") || strings.Contains(errMsg, "Authorization") ||
-			strings.Contains(errMsg, "denied") || strings.Contains(errMsg, "not found") {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed: repository not accessible. Add a GitHub credential in Settings > Registry with registry 'github.com' and a PAT with repo scope."})
-			return
-		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("failed to clone repository: %s", errMsg)})
+	prep := prepareGitDeploy(c, gitDeployOptions{
+		Repo:        req.Repo,
+		Branch:      req.Branch,
+		ComposeFile: req.ComposeFile,
+		Name:        req.Name,
+		Token:       token,
+	})
+	if prep == nil {
 		return
 	}
 
-	if len(info.ComposeFiles) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no docker-compose file found in repository"})
-		return
-	}
-
-	// If multiple compose files and none selected, return list for user to choose
-	if len(info.ComposeFiles) > 1 && req.ComposeFile == "" {
-		c.JSON(http.StatusOK, gin.H{"status": "select_compose", "compose_files": info.ComposeFiles, "info": info})
-		return
-	}
-
-	// Determine which compose file to use
-	selectedFile := req.ComposeFile
-	if selectedFile == "" {
-		selectedFile = info.ComposeFiles[0]
-	}
-
-	// Validate selected file exists in the list
-	validFile := false
-	for _, f := range info.ComposeFiles {
-		if f == selectedFile {
-			validFile = true
-			break
-		}
-	}
-	if !validFile {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("compose file '%s' not found in repository", selectedFile)})
-		return
-	}
-
-	// Use repo name as project name (not full path), or user-provided name
-	projectName := req.Name
-	if projectName == "" {
-		projectName = filepath.Base(info.Path)
-	}
-	if err := validator.ValidateContainerName(projectName); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid name: %s", err.Error())})
-		return
-	}
-
-	composePath := filepath.Join(info.Path, selectedFile)
-	composeData, err := os.ReadFile(composePath)
-	if err != nil {
-		internalError(c, err)
-		return
-	}
-	composeYAML, err := prepareDeployCompose(string(composeData), req.Env)
+	composeYAML, err := prepareDeployCompose(prep.ComposeData, req.Env)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -914,7 +753,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 	registryAuths := resolveRegistryAuths(c, composeYAML)
 
 	// Deploy compose via agent client
-	if err := client.DeployCompose(c.Request.Context(), projectName, composeYAML, registryAuths, false); err != nil {
+	if err := client.DeployCompose(c.Request.Context(), prep.ProjectName, composeYAML, registryAuths, false); err != nil {
 		internalError(c, err)
 		return
 	}
@@ -923,7 +762,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 	if database := getDatabase(c); database != nil {
 		database.SaveService(db.Service{
 			ID:         generateID("svc"),
-			Name:       projectName,
+			Name:       prep.ProjectName,
 			Type:       "git",
 			Repo:       req.Repo,
 			InstanceID: instanceID,
@@ -931,7 +770,7 @@ func handleInstanceDeployGit(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": info})
+	c.JSON(http.StatusOK, gin.H{"status": "deployed", "info": prep.Info})
 }
 
 func prepareDeployCompose(composeYAML string, env map[string]string) (string, error) {
@@ -1996,14 +1835,10 @@ func handleInstanceGetAppUpdate(c *gin.Context) {
 // handleInstanceTriggerAppUpdate runs the manual auto-update pipeline for
 // one app on one instance.
 //
-// For "local" the same async/poll pattern as the /apps/:name/update handler
-// is reused: the worker's TriggerApp runs in a goroutine while the request
-// thread polls the database for a new attempt id. A worker error containing
-// docker.ErrUpdateAlreadyRunning maps to HTTP 409.
-//
-// For remote instances the AgentClient call is synchronous in this layer and
-// returns the attempt id directly; the agent-side handler is responsible for
-// the same async behavior.
+// For "local" it shares the async trigger/poll flow with the panel-wide
+// /apps/:name/update route via startLocalAppUpdate. For remote instances the
+// AgentClient call is synchronous in this layer and returns the attempt id
+// directly; the agent-side handler is responsible for the same async behavior.
 func handleInstanceTriggerAppUpdate(c *gin.Context) {
 	instanceID := c.MustGet("instance_id").(string)
 	name := c.Param("name")
@@ -2023,81 +1858,18 @@ func handleInstanceTriggerAppUpdate(c *gin.Context) {
 			return
 		}
 
-		// Resolve the actor for the App_Update_Record's `triggered_by` field.
-		username := "user"
-		if v, ok := c.Get("username"); ok {
-			if s, ok := v.(string); ok && s != "" {
-				username = s
-			}
-		}
-		triggeredBy := "user:" + username
-
-		// Audit logging (R8.4): every user-triggered TriggerApp call
-		// records one `app_update_attempted` entry once the response code
-		// is known. The defer reads c.Writer.Status() after the handler
-		// has called c.JSON(...) so the audit `result` reflects the same
-		// outcome the operator saw on the wire. Auto-update cycles do
-		// not pass through this handler and therefore do not emit an
-		// audit entry, matching the user-only scope of R8.4. The wrapping
-		// closure is load-bearing: argument expressions to a deferred
-		// call are evaluated at defer-registration time, but the status
-		// code is only set later by c.JSON, so the read must happen
-		// inside the deferred function body.
+		// Audit logging (R8.4): every user-triggered trigger records one
+		// `app_update_attempted` entry once the response code is known.
+		// Auto-update cycles do not pass through this handler and therefore
+		// do not emit an audit entry, matching the user-only scope of R8.4.
+		// The wrapping closure is load-bearing: c.Writer.Status() is only
+		// set after c.JSON, so the read must happen inside the deferred body.
 		defer func() {
 			LogAppUpdateAttempt(c, database, globalDockerClient, name, auditAppUpdateResultFor(c.Writer.Status()))
 		}()
 
-		// Snapshot the latest attempt id so we can detect the new record
-		// once the worker has persisted its first stage event.
-		var prevAttempt string
-		if recs, err := database.ListAppUpdates(name, 1); err == nil && len(recs) > 0 {
-			prevAttempt = recs[0].AttemptID
-		}
-
-		// Run the pipeline asynchronously so the HTTP request returns
-		// quickly. Use context.Background() so the pipeline outlives the
-		// request; cancellation comes from the worker's Stop() path.
-		errCh := make(chan error, 1)
-		go func() {
-			errCh <- globalAutoUpdateWorker.TriggerApp(context.Background(), name, true, true, triggeredBy)
-		}()
-
-		timeout := time.NewTimer(5 * time.Second)
-		defer timeout.Stop()
-		ticker := time.NewTicker(25 * time.Millisecond)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case err := <-errCh:
-				if err != nil && strings.Contains(err.Error(), docker.ErrUpdateAlreadyRunning) {
-					c.JSON(http.StatusConflict, gin.H{"error": "update_already_running"})
-					return
-				}
-				if err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("trigger app failed: %v", err)})
-					return
-				}
-				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
-					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
-					return
-				}
-				c.JSON(http.StatusAccepted, gin.H{"status": "ok"})
-				return
-			case <-ticker.C:
-				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
-					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
-					return
-				}
-			case <-timeout.C:
-				if recs, lerr := database.ListAppUpdates(name, 1); lerr == nil && len(recs) > 0 && recs[0].AttemptID != prevAttempt {
-					c.JSON(http.StatusAccepted, gin.H{"attempt_id": recs[0].AttemptID})
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "trigger did not produce a record in time"})
-				return
-			}
-		}
+		startLocalAppUpdate(c, database, name, triggeredByFor(c), newAppUpdateAttempt(database, name, ""))
+		return
 	}
 
 	client := c.MustGet("agent_client").(agent.AgentClient)

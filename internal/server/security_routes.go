@@ -195,31 +195,9 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 
 		// The panel key that stays on the server: prefer the key generated at
 		// create time; without one (legacy instances) generate one now.
-		panelPriv := ""
-		panelPub := strings.TrimSpace(inst.SSHPublicKey)
-		panelFP := inst.SSHKeyFingerprint
-		if len(inst.SSHKeyEncrypted) > 0 {
-			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
-			if derr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
-				return
-			}
-			panelPriv = string(plain)
-			if panelPub == "" {
-				pub, _, derr := ssh.PublicKeyFromPrivate(panelPriv)
-				if derr != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive the panel public key"})
-					return
-				}
-				panelPub = pub
-			}
-		} else {
-			pub, priv, fp, gerr := ssh.GenerateKeyPair("dockpal-" + id)
-			if gerr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": gerr.Error()})
-				return
-			}
-			panelPub, panelPriv, panelFP = pub, priv, fp
+		panelPriv, panelPub, panelFP, ok := resolvePanelKey(c, cryptoKey, inst)
+		if !ok {
+			return
 		}
 
 		// Disabling password auth can be verified end-to-end when the panel
@@ -234,25 +212,9 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 		// Validate the operator's own public keys BEFORE taking the in-flight
 		// slot: a synchronous 400 must not leak the slot (a leaked slot made
 		// every later run return a false 409).
-		publicKeys := []string{panelPub}
-		for _, raw := range req.ExtraPublicKeys {
-			line := strings.TrimSpace(raw)
-			if line == "" {
-				continue
-			}
-			if err := ssh.ValidatePublicKeyLine(line); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid public key %q: %v", truncateForLog(line), err)})
-				return
-			}
-			publicKeys = append(publicKeys, line)
-		}
-		for _, keyID := range req.ExtraKeyIDs {
-			line, rerr := resolveSSHPublicLine(database, cryptoKey, keyID)
-			if rerr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
-				return
-			}
-			publicKeys = append(publicKeys, line)
+		publicKeys, ok := collectAuthorizedPublicKeys(c, database, cryptoKey, panelPub, req)
+		if !ok {
+			return
 		}
 
 		if _, loaded := running.LoadOrStore(id, struct{}{}); loaded {
@@ -262,62 +224,157 @@ func handleApplySecurity(database *db.DB, jwtSecret string, logsManager *Install
 
 		sessionKey := securitySessionKey(id)
 		logsManager.RemoveSession(sessionKey)
-	LogAudit(c, database, "instance.security", id, "success",
-		fmt.Sprintf("Security apply: password_auth=%t root_login=%t fail2ban=%t firewall=%t on %s:%d", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, *req.Firewall, host, port))
+		LogAudit(c, database, "instance.security", id, "success",
+			fmt.Sprintf("Security apply: password_auth=%t root_login=%t fail2ban=%t firewall=%t on %s:%d", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, *req.Firewall, host, port))
 
-	update := ssh.SecurityUpdate{
-		PasswordAuth: *req.PasswordAuth,
-		RootLogin:    *req.RootLogin,
-		Fail2ban:     *req.Fail2ban,
-		Firewall:     *req.Firewall,
-		PanelKeyPEM:  panelPriv,
-		PublicKeys:   publicKeys,
-		TestPassword: testPassword,
-	}
-
+		job := &securityApplyJob{
+			InstanceID: id,
+			SessionKey: sessionKey,
+			Host:       host,
+			Port:       port,
+			User:       user,
+			AuthType:   authType,
+			Secret:     secret,
+			Update: ssh.SecurityUpdate{
+				PasswordAuth: *req.PasswordAuth,
+				RootLogin:    *req.RootLogin,
+				Fail2ban:     *req.Fail2ban,
+				Firewall:     *req.Firewall,
+				PanelKeyPEM:  panelPriv,
+				PublicKeys:   publicKeys,
+				TestPassword: testPassword,
+			},
+			PanelPub:  panelPub,
+			PanelFP:   panelFP,
+			Database:  database,
+			CryptoKey: cryptoKey,
+			Logs:      logsManager,
+		}
 		go func() {
 			defer running.Delete(id)
-			defer logsManager.CompleteSession(sessionKey)
-			lw := &logWriter{instanceID: sessionKey, mgr: logsManager}
-			logsManager.WriteLogf(sessionKey, "[Dockpal Security] Applying desired state (password_auth=%t root_login=%t fail2ban=%t) on %s:%d...\n", *req.PasswordAuth, *req.RootLogin, *req.Fail2ban, host, port)
-
-			if err := ssh.ApplySecurity(host, port, user, authType, secret, "", update, lw); err != nil {
-				log.Printf("Security update on instance %s failed: %v", id, err)
-				logsManager.WriteLogf(sessionKey, "[Dockpal Security] Error: %v\n", err)
-				return
-			}
-			// Persist the outcome: panel keeps its key, the password is gone
-			// once passwords are disabled, and the badge reads "hardened".
-			instCopy, gerr := database.GetInstance(id)
-			if gerr == nil {
-				encPriv, eerr := registry.Encrypt([]byte(panelPriv), cryptoKey)
-				if eerr == nil {
-					instCopy.SSHKeyEncrypted = encPriv
-					instCopy.SSHPublicKey = panelPub
-					instCopy.SSHKeyFingerprint = panelFP
-					if !*req.PasswordAuth {
-						instCopy.SSHAuthType = "key"
-						instCopy.SSHPasswordEncrypted = nil
-					}
-					if !*req.PasswordAuth {
-						instCopy.SSHHardeningStatus = "hardened"
-						instCopy.SSHHardenedAt = time.Now().Unix()
-					}
-					if serr := database.SaveInstance(*instCopy); serr != nil {
-						log.Printf("Security apply on instance %s: persisting state failed: %v", id, serr)
-					}
-				}
-			}
-			// Refresh the cached state from the server after the change.
-			if state, derr := ssh.DetectSecurity(host, port, user, authType, secret, "", lw); derr == nil {
-				persistSecurityState(database, id, state)
-			}
-			log.Printf("Security update on instance %s completed", id)
-			logsManager.WriteLog(sessionKey, "[Dockpal Security] Update completed successfully.")
+			job.run()
 		}()
 
 		c.JSON(http.StatusAccepted, gin.H{"message": "security update started", "session": sessionKey})
 	}
+}
+
+// resolvePanelKey returns the panel key that stays on the server: the key
+// generated at create time when present, otherwise a newly generated pair
+// (legacy instances). It writes the error response itself and returns
+// ok=false when the caller must stop.
+func resolvePanelKey(c *gin.Context, cryptoKey []byte, inst *db.Instance) (priv, pub, fp string, ok bool) {
+	panelPriv := ""
+	panelPub := strings.TrimSpace(inst.SSHPublicKey)
+	panelFP := inst.SSHKeyFingerprint
+	if len(inst.SSHKeyEncrypted) > 0 {
+		plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+		if derr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
+			return "", "", "", false
+		}
+		panelPriv = string(plain)
+		if panelPub == "" {
+			derivedPub, _, derr := ssh.PublicKeyFromPrivate(panelPriv)
+			if derr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive the panel public key"})
+				return "", "", "", false
+			}
+			panelPub = derivedPub
+		}
+	} else {
+		genPub, genPriv, genFP, gerr := ssh.GenerateKeyPair("dockpal-" + inst.ID)
+		if gerr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": gerr.Error()})
+			return "", "", "", false
+		}
+		panelPub, panelPriv, panelFP = genPub, genPriv, genFP
+	}
+	return panelPriv, panelPub, panelFP, true
+}
+
+// collectAuthorizedPublicKeys validates the request's extra keys and returns
+// the full authorized_keys list with the panel key first. It writes the error
+// response itself and returns ok=false when the caller must stop.
+func collectAuthorizedPublicKeys(c *gin.Context, database *db.DB, cryptoKey []byte, panelPub string, req SecurityApplyRequest) ([]string, bool) {
+	publicKeys := []string{panelPub}
+	for _, raw := range req.ExtraPublicKeys {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		if err := ssh.ValidatePublicKeyLine(line); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid public key %q: %v", truncateForLog(line), err)})
+			return nil, false
+		}
+		publicKeys = append(publicKeys, line)
+	}
+	for _, keyID := range req.ExtraKeyIDs {
+		line, rerr := resolveSSHPublicLine(database, cryptoKey, keyID)
+		if rerr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+			return nil, false
+		}
+		publicKeys = append(publicKeys, line)
+	}
+	return publicKeys, true
+}
+
+// securityApplyJob carries everything the background security convergence
+// needs once the request has been validated.
+type securityApplyJob struct {
+	InstanceID string
+	SessionKey string
+	Host       string
+	Port       int
+	User       string
+	AuthType   string
+	Secret     string
+	Update     ssh.SecurityUpdate
+	PanelPub   string
+	PanelFP    string
+	Database   *db.DB
+	CryptoKey  []byte
+	Logs       *InstallLogsManager
+}
+
+// run converges the server to the requested state and persists the outcome:
+// the panel keeps its key, the password is gone once passwords are disabled,
+// and the badge reads "hardened".
+func (j *securityApplyJob) run() {
+	defer j.Logs.CompleteSession(j.SessionKey)
+	lw := &logWriter{instanceID: j.SessionKey, mgr: j.Logs}
+	j.Logs.WriteLogf(j.SessionKey, "[Dockpal Security] Applying desired state (password_auth=%t root_login=%t fail2ban=%t) on %s:%d...\n", j.Update.PasswordAuth, j.Update.RootLogin, j.Update.Fail2ban, j.Host, j.Port)
+
+	if err := ssh.ApplySecurity(j.Host, j.Port, j.User, j.AuthType, j.Secret, "", j.Update, lw); err != nil {
+		log.Printf("Security update on instance %s failed: %v", j.InstanceID, err)
+		j.Logs.WriteLogf(j.SessionKey, "[Dockpal Security] Error: %v\n", err)
+		return
+	}
+	instCopy, gerr := j.Database.GetInstance(j.InstanceID)
+	if gerr == nil {
+		encPriv, eerr := registry.Encrypt([]byte(j.Update.PanelKeyPEM), j.CryptoKey)
+		if eerr == nil {
+			instCopy.SSHKeyEncrypted = encPriv
+			instCopy.SSHPublicKey = j.PanelPub
+			instCopy.SSHKeyFingerprint = j.PanelFP
+			if !j.Update.PasswordAuth {
+				instCopy.SSHAuthType = "key"
+				instCopy.SSHPasswordEncrypted = nil
+				instCopy.SSHHardeningStatus = "hardened"
+				instCopy.SSHHardenedAt = time.Now().Unix()
+			}
+			if serr := j.Database.SaveInstance(*instCopy); serr != nil {
+				log.Printf("Security apply on instance %s: persisting state failed: %v", j.InstanceID, serr)
+			}
+		}
+	}
+	// Refresh the cached state from the server after the change.
+	if state, derr := ssh.DetectSecurity(j.Host, j.Port, j.User, j.AuthType, j.Secret, "", lw); derr == nil {
+		persistSecurityState(j.Database, j.InstanceID, state)
+	}
+	log.Printf("Security update on instance %s completed", j.InstanceID)
+	j.Logs.WriteLog(j.SessionKey, "[Dockpal Security] Update completed successfully.")
 }
 
 // truncateForLog keeps validation error messages readable.

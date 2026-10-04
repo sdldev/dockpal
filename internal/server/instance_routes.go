@@ -124,139 +124,156 @@ func handleCreateInstance(database *db.DB, jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// Validate mode-specific fields. A port of 0 means "use the default
-		// (9273)" and is normalized below, so it is allowed here.
-		if req.Mode == "direct" {
-			if req.Host == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "host is required for direct mode"})
-				return
-			}
-			if req.Port < 0 || req.Port > 65535 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "port must be between 0 (default 9273) and 65535"})
-				return
-			}
-		}
-
-		// Uniqueness checks. Registering the same direct host:port twice creates
-		// two records fighting over a single agent container (they desync each
-		// other's tokens — see the vps-schoolhub/vps-media duplicate); a name
-		// collision is almost as confusing in the UI. Reject both up front.
-		if existing, err := database.ListInstances(); err == nil {
-			normalizedHost := strings.ToLower(strings.TrimSpace(req.Host))
-			targetPort := req.Port
-			if req.Mode == "direct" && targetPort == 0 {
-				targetPort = 9273
-			}
-			for _, inst := range existing {
-				if strings.EqualFold(inst.Name, strings.TrimSpace(req.Name)) {
-					c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("an instance named %q already exists", req.Name)})
-					return
-				}
-				if req.Mode == "direct" && inst.Mode == "direct" &&
-					strings.ToLower(strings.TrimSpace(inst.Host)) == normalizedHost && inst.Port == targetPort {
-					c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("an instance for %s:%d already exists (%q)", req.Host, targetPort, inst.Name)})
-					return
-				}
-			}
-		}
-
-		// Generate 32-byte random token
-		tokenBytes := make([]byte, 32)
-		if _, err := rand.Read(tokenBytes); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
-			return
-		}
-		token := hex.EncodeToString(tokenBytes)
-
-		// Hash token with bcrypt
-		hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash token"})
+		prov := provisionInstance(c, database, jwtSecret, req)
+		if prov == nil {
 			return
 		}
 
-		// Derive encryption key and encrypt token
-		cryptoKey, err := registry.DeriveKey(jwtSecret)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive encryption key"})
-			return
-		}
-		encryptedToken, err := registry.Encrypt([]byte(token), cryptoKey)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt token"})
-			return
-		}
-
-		// Generate instance ID
-		instanceID, err := generateInstanceID()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate instance ID"})
-			return
-		}
-
-		// Default port for direct mode
-		port := req.Port
-		if req.Mode == "direct" && port == 0 {
-			port = 9273
-		}
-
-		// Generate the panel's dedicated management keypair NOW, at create
-		// time: the public half is shown so the operator can authorize it on
-		// the server (ssh-copy-id style) BEFORE the install — then the panel
-		// connects with its own key and no operator password or private key
-		// is ever needed.
-		panelPub, panelPriv, panelFP, err := ssh.GenerateKeyPair("dockpal-" + instanceID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate panel SSH key"})
-			return
-		}
-		encPanelKey, err := registry.Encrypt([]byte(panelPriv), cryptoKey)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt panel SSH key"})
-			return
-		}
-
-		// Create instance record
-		instance := db.Instance{
-			ID:                  instanceID,
-			Name:                req.Name,
-			Host:                req.Host,
-			Port:                port,
-			Mode:                req.Mode,
-			AgentTokenHash:      string(hash),
-			AgentTokenEncrypted: encryptedToken,
-			Status:              "enrolling",
-			CreatedAt:           time.Now().Unix(),
-			SSHKeyEncrypted:     encPanelKey,
-			SSHPublicKey:        panelPub,
-			SSHKeyFingerprint:   panelFP,
-		}
-
-		if err := database.SaveInstance(instance); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save instance"})
-			return
-		}
-
-		LogAudit(c, database, "instance.create", instanceID, "success", fmt.Sprintf("Created instance '%s' in mode '%s'", req.Name, req.Mode))
+		LogAudit(c, database, "instance.create", prov.Instance.ID, "success", fmt.Sprintf("Created instance '%s' in mode '%s'", req.Name, req.Mode))
 
 		// Generate install command
-		serverHost := c.Request.Host
-		installCmd := generateInstallCommand(req.Mode, serverHost, token)
+		installCmd := generateInstallCommand(req.Mode, c.Request.Host, prov.Token)
 
 		c.JSON(http.StatusCreated, InstanceResponse{
-			ID:                 instanceID,
+			ID:                 prov.Instance.ID,
 			Name:               req.Name,
 			Host:               req.Host,
-			Port:               port,
+			Port:               prov.Instance.Port,
 			Mode:               req.Mode,
 			Status:             "enrolling",
-			CreatedAt:          instance.CreatedAt,
+			CreatedAt:          prov.Instance.CreatedAt,
 			InstallCommand:     installCmd,
-			SSHPublicKey:       panelPub,
-			SSHKeyFingerprint:  panelFP,
-			SSHKeySetupCommand: generatePanelKeySetupCommand(panelPub),
+			SSHPublicKey:       prov.PubKey,
+			SSHKeyFingerprint:  prov.KeyFP,
+			SSHKeySetupCommand: generatePanelKeySetupCommand(prov.PubKey),
 		})
 	}
+}
+
+// provisionedInstance is a persisted new instance plus the secrets the create
+// response needs: the plaintext agent token (for the install command) and the
+// panel SSH key material.
+type provisionedInstance struct {
+	Instance db.Instance
+	Token    string
+	PubKey   string
+	KeyFP    string
+}
+
+// provisionInstance validates the request, rejects duplicate names and
+// host:port pairs and persists the instance record with a generated agent
+// token and panel SSH keypair. It writes the error response itself and
+// returns nil when the caller must stop.
+func provisionInstance(c *gin.Context, database *db.DB, jwtSecret string, req CreateInstanceRequest) *provisionedInstance {
+	// Validate mode-specific fields. A port of 0 means "use the default
+	// (9273)" and is normalized below, so it is allowed here.
+	if req.Mode == "direct" {
+		if req.Host == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "host is required for direct mode"})
+			return nil
+		}
+		if req.Port < 0 || req.Port > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "port must be between 0 (default 9273) and 65535"})
+			return nil
+		}
+	}
+
+	// Uniqueness checks. Registering the same direct host:port twice creates
+	// two records fighting over a single agent container (they desync each
+	// other's tokens — see the vps-schoolhub/vps-media duplicate); a name
+	// collision is almost as confusing in the UI. Reject both up front.
+	if existing, err := database.ListInstances(); err == nil {
+		normalizedHost := strings.ToLower(strings.TrimSpace(req.Host))
+		targetPort := req.Port
+		if req.Mode == "direct" && targetPort == 0 {
+			targetPort = 9273
+		}
+		for _, inst := range existing {
+			if strings.EqualFold(inst.Name, strings.TrimSpace(req.Name)) {
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("an instance named %q already exists", req.Name)})
+				return nil
+			}
+			if req.Mode == "direct" && inst.Mode == "direct" &&
+				strings.ToLower(strings.TrimSpace(inst.Host)) == normalizedHost && inst.Port == targetPort {
+				c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("an instance for %s:%d already exists (%q)", req.Host, targetPort, inst.Name)})
+				return nil
+			}
+		}
+	}
+
+	cryptoKey, err := registry.DeriveKey(jwtSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to derive encryption key"})
+		return nil
+	}
+
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return nil
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash token"})
+		return nil
+	}
+
+	encryptedToken, err := registry.Encrypt([]byte(token), cryptoKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt token"})
+		return nil
+	}
+
+	instanceID, err := generateInstanceID()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate instance ID"})
+		return nil
+	}
+
+	port := req.Port
+	if req.Mode == "direct" && port == 0 {
+		port = 9273
+	}
+
+	// Generate the panel's dedicated management keypair NOW, at create
+	// time: the public half is shown so the operator can authorize it on
+	// the server (ssh-copy-id style) BEFORE the install — then the panel
+	// connects with its own key and no operator password or private key
+	// is ever needed.
+	panelPub, panelPriv, panelFP, err := ssh.GenerateKeyPair("dockpal-" + instanceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate panel SSH key"})
+		return nil
+	}
+	encPanelKey, err := registry.Encrypt([]byte(panelPriv), cryptoKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt panel SSH key"})
+		return nil
+	}
+
+	instance := db.Instance{
+		ID:                  instanceID,
+		Name:                req.Name,
+		Host:                req.Host,
+		Port:                port,
+		Mode:                req.Mode,
+		AgentTokenHash:      string(hash),
+		AgentTokenEncrypted: encryptedToken,
+		Status:              "enrolling",
+		CreatedAt:           time.Now().Unix(),
+		SSHKeyEncrypted:     encPanelKey,
+		SSHPublicKey:        panelPub,
+		SSHKeyFingerprint:   panelFP,
+	}
+
+	if err := database.SaveInstance(instance); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save instance"})
+		return nil
+	}
+
+	return &provisionedInstance{Instance: instance, Token: token, PubKey: panelPub, KeyFP: panelFP}
 }
 
 // generatePanelKeySetupCommand builds the one-liner the operator runs ON the
@@ -720,87 +737,12 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 		// 128-char token that can never match, breaking every edge install.
 		token := string(tokenBytes)
 
-		// Credential resolution by auth type:
-		//   panel_key — the keypair the panel generated at create time; the
-		//     operator already authorized its public half on the server. No
-		//     secret travels in the request at all.
-		//   key — an ad-hoc pasted private key or a legacy saved private key.
-		//   password — bootstrap password.
-		sshSecret := req.SSHSecret
-		if req.SSHAuthType == "panel_key" {
-			if req.SSHKeyID != "" || strings.TrimSpace(sshSecret) != "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "panel_key auth takes no ssh_secret or ssh_key_id"})
-				return
-			}
-			if len(inst.SSHKeyEncrypted) == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "this instance has no panel key — create a new server or use password auth"})
-				return
-			}
-			plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
-			if derr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
-				return
-			}
-			sshSecret = string(plain)
-		} else if req.SSHKeyID != "" {
-			if req.SSHAuthType != "key" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_key_id requires key auth"})
-				return
-			}
-			if strings.TrimSpace(sshSecret) != "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "provide either ssh_key_id or ssh_secret, not both"})
-				return
-			}
-			resolved, rerr := resolveSSHKeySecret(database, cryptoKey, req.SSHKeyID)
-			if rerr != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
-				return
-			}
-			sshSecret = resolved
-		}
-		if strings.TrimSpace(sshSecret) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_secret or ssh_key_id is required"})
+		sshSecret, ok := resolveInstallSSHCredential(c, database, cryptoKey, inst, req)
+		if !ok {
 			return
 		}
 
-		// Encrypt SSH Secret (password or key)
-		encryptedSecret, err := registry.Encrypt([]byte(sshSecret), cryptoKey)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt SSH secret"})
-			return
-		}
-
-		// Update SSH details in database
-		inst.SSHHost = req.SSHHost
-		inst.SSHPort = req.SSHPort
-		if inst.SSHPort == 0 {
-			inst.SSHPort = 22
-		}
-		inst.SSHUser = req.SSHUser
-		if inst.SSHUser == "" {
-			inst.SSHUser = "root"
-		}
-		switch req.SSHAuthType {
-		case "panel_key":
-			// The stored key IS the credential — keep it as-is and never
-			// keep a password alongside it.
-			inst.SSHAuthType = "key"
-			inst.SSHPasswordEncrypted = nil
-		case "key":
-			inst.SSHAuthType = "key"
-			inst.SSHKeyEncrypted = encryptedSecret
-			inst.SSHPasswordEncrypted = nil
-		default:
-			inst.SSHAuthType = "password"
-			inst.SSHPasswordEncrypted = encryptedSecret
-			// The panel key generated at create time stays stored: hardening
-			// installs exactly that key when disabling passwords, so the
-			// instance keeps a single panel key for its whole life.
-		}
-		inst.Status = "enrolling"
-
-		if err := database.SaveInstance(*inst); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save instance details"})
+		if !applyInstallSSHDetails(c, database, inst, req, cryptoKey, sshSecret) {
 			return
 		}
 
@@ -819,56 +761,153 @@ func handleInstallAgent(database *db.DB, jwtSecret string, logsManager *InstallL
 		}
 		isSecureWS := c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https"
 
-		go func() {
-			lw := &logWriter{instanceID: id, mgr: logsManager}
-			logsManager.WriteLogf(id, "[Dockpal Installer] Initializing installation on remote host %s:%d...\n", req.SSHHost, req.SSHPort)
-
-			agentImg := os.Getenv("DOCKPAL_AGENT_IMAGE")
-			if agentImg == "" {
-				agentImg = "ghcr.io/sdldev/dockpal-agent:latest"
-			}
-
-			// The installer only knows "password" and "key" — panel_key IS key
-			// auth (the panel's own generated keypair resolved above).
-			installAuthType := req.SSHAuthType
-			if installAuthType == "panel_key" {
-				installAuthType = "key"
-			}
-			params := ssh.InstallParams{
-				Host:            req.SSHHost,
-				Port:            req.SSHPort,
-				User:            req.SSHUser,
-				AuthType:        installAuthType,
-				AuthSecret:      sshSecret,
-				InstallDocker:   req.InstallDocker,
-				Mode:            inst.Mode,
-				Token:           token,
-				ServerHost:      host,
-				AgentImage:      agentImg,
-				IsSecureWS:      isSecureWS,
-				ExpectedHostKey: req.SSHHostKey,
-			}
-
-			err := ssh.InstallAgent(params, lw)
-			if err != nil {
-				log.Printf("SSH Install on instance %s failed: %v", id, err)
-				logsManager.WriteLogf(id, "[Dockpal Installer] Error: %v\n", err)
-
-				// update status to offline if failed
-				instCopy, _ := database.GetInstance(id)
-				if instCopy != nil {
-					instCopy.Status = "offline"
-					database.SaveInstance(*instCopy)
-				}
-			} else {
-				log.Printf("SSH Install on instance %s completed successfully", id)
-				logsManager.WriteLog(id, "[Dockpal Installer] Installation completed successfully! Waiting for agent to connect...")
-			}
-			logsManager.CompleteSession(id)
-		}()
+		go runAgentInstall(id, inst, req, sshSecret, token, host, isSecureWS, database, logsManager)
 
 		c.JSON(http.StatusAccepted, gin.H{"message": "installation started"})
 	}
+}
+
+// resolveInstallSSHCredential resolves the SSH secret for an install request
+// by auth type: panel_key — the keypair the panel generated at create time
+// (no secret travels in the request); key — an ad-hoc pasted private key or a
+// legacy saved private key; password — bootstrap password. It writes the
+// error response itself and returns ok=false when the caller must stop.
+func resolveInstallSSHCredential(c *gin.Context, database *db.DB, cryptoKey []byte, inst *db.Instance, req InstallAgentRequest) (string, bool) {
+	sshSecret := req.SSHSecret
+	if req.SSHAuthType == "panel_key" {
+		if req.SSHKeyID != "" || strings.TrimSpace(sshSecret) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "panel_key auth takes no ssh_secret or ssh_key_id"})
+			return "", false
+		}
+		if len(inst.SSHKeyEncrypted) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "this instance has no panel key — create a new server or use password auth"})
+			return "", false
+		}
+		plain, derr := registry.Decrypt(inst.SSHKeyEncrypted, cryptoKey)
+		if derr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt the panel SSH key"})
+			return "", false
+		}
+		sshSecret = string(plain)
+	} else if req.SSHKeyID != "" {
+		if req.SSHAuthType != "key" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_key_id requires key auth"})
+			return "", false
+		}
+		if strings.TrimSpace(sshSecret) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "provide either ssh_key_id or ssh_secret, not both"})
+			return "", false
+		}
+		resolved, rerr := resolveSSHKeySecret(database, cryptoKey, req.SSHKeyID)
+		if rerr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": rerr.Error()})
+			return "", false
+		}
+		sshSecret = resolved
+	}
+	if strings.TrimSpace(sshSecret) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ssh_secret or ssh_key_id is required"})
+		return "", false
+	}
+	return sshSecret, true
+}
+
+// applyInstallSSHDetails encrypts the resolved SSH secret and stores the
+// request's connection details on the instance. It writes the error response
+// itself and returns ok=false when the caller must stop.
+func applyInstallSSHDetails(c *gin.Context, database *db.DB, inst *db.Instance, req InstallAgentRequest, cryptoKey []byte, sshSecret string) bool {
+	// Encrypt SSH Secret (password or key)
+	encryptedSecret, err := registry.Encrypt([]byte(sshSecret), cryptoKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to encrypt SSH secret"})
+		return false
+	}
+
+	// Update SSH details in database
+	inst.SSHHost = req.SSHHost
+	inst.SSHPort = req.SSHPort
+	if inst.SSHPort == 0 {
+		inst.SSHPort = 22
+	}
+	inst.SSHUser = req.SSHUser
+	if inst.SSHUser == "" {
+		inst.SSHUser = "root"
+	}
+	switch req.SSHAuthType {
+	case "panel_key":
+		// The stored key IS the credential — keep it as-is and never
+		// keep a password alongside it.
+		inst.SSHAuthType = "key"
+		inst.SSHPasswordEncrypted = nil
+	case "key":
+		inst.SSHAuthType = "key"
+		inst.SSHKeyEncrypted = encryptedSecret
+		inst.SSHPasswordEncrypted = nil
+	default:
+		inst.SSHAuthType = "password"
+		inst.SSHPasswordEncrypted = encryptedSecret
+		// The panel key generated at create time stays stored: hardening
+		// installs exactly that key when disabling passwords, so the
+		// instance keeps a single panel key for its whole life.
+	}
+	inst.Status = "enrolling"
+
+	if err := database.SaveInstance(*inst); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save instance details"})
+		return false
+	}
+	return true
+}
+
+// runAgentInstall performs the background SSH install for an instance,
+// streaming progress into the install-log session and updating the instance
+// status from the outcome.
+func runAgentInstall(id string, inst *db.Instance, req InstallAgentRequest, sshSecret, token, panelAddress string, isSecureWS bool, database *db.DB, logsManager *InstallLogsManager) {
+	lw := &logWriter{instanceID: id, mgr: logsManager}
+	logsManager.WriteLogf(id, "[Dockpal Installer] Initializing installation on remote host %s:%d...\n", req.SSHHost, req.SSHPort)
+
+	agentImg := os.Getenv("DOCKPAL_AGENT_IMAGE")
+	if agentImg == "" {
+		agentImg = "ghcr.io/sdldev/dockpal-agent:latest"
+	}
+
+	// The installer only knows "password" and "key" — panel_key IS key
+	// auth (the panel's own generated keypair resolved above).
+	installAuthType := req.SSHAuthType
+	if installAuthType == "panel_key" {
+		installAuthType = "key"
+	}
+	params := ssh.InstallParams{
+		Host:            req.SSHHost,
+		Port:            req.SSHPort,
+		User:            req.SSHUser,
+		AuthType:        installAuthType,
+		AuthSecret:      sshSecret,
+		InstallDocker:   req.InstallDocker,
+		Mode:            inst.Mode,
+		Token:           token,
+		ServerHost:      panelAddress,
+		AgentImage:      agentImg,
+		IsSecureWS:      isSecureWS,
+		ExpectedHostKey: req.SSHHostKey,
+	}
+
+	err := ssh.InstallAgent(params, lw)
+	if err != nil {
+		log.Printf("SSH Install on instance %s failed: %v", id, err)
+		logsManager.WriteLogf(id, "[Dockpal Installer] Error: %v\n", err)
+
+		// update status to offline if failed
+		instCopy, _ := database.GetInstance(id)
+		if instCopy != nil {
+			instCopy.Status = "offline"
+			database.SaveInstance(*instCopy)
+		}
+	} else {
+		log.Printf("SSH Install on instance %s completed successfully", id)
+		logsManager.WriteLog(id, "[Dockpal Installer] Installation completed successfully! Waiting for agent to connect...")
+	}
+	logsManager.CompleteSession(id)
 }
 
 var installWebSocketUpgrader = websocket.Upgrader{
