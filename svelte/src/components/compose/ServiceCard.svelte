@@ -20,6 +20,7 @@
     onstart?: () => void;
     onstop?: () => void;
     onrestart?: () => void;
+    onrecreate?: () => void;
     onremove?: () => void;
   }
 
@@ -35,10 +36,36 @@
     onstart,
     onstop,
     onrestart,
+    onrecreate,
     onremove
   }: Props = $props();
 
   let showConfig = $state(false);
+
+  // --- network mode (issue #28) ---
+  // Compose forbids combining network_mode with networks; host mode also
+  // makes port bindings meaningless. The UI picks one of the two surfaces.
+  const NETWORK_MODES = ['host', 'none'] as const;
+  const networkMode = $derived(
+    typeof service.network_mode === 'string' && NETWORK_MODES.includes(service.network_mode as any)
+      ? (service.network_mode as string)
+      : ''
+  );
+  const hasNetworkMode = $derived(networkMode !== '');
+  const hasCustomNetworkMode = $derived(
+    typeof service.network_mode === 'string' && service.network_mode !== '' && networkMode === ''
+  );
+
+  function setNetworkMode(mode: string) {
+    if (mode === '') {
+      delete service.network_mode;
+    } else {
+      service.network_mode = mode;
+      // network_mode and networks are mutually exclusive in compose —
+      // drop the attachment list so the generated YAML stays valid.
+      delete service.networks;
+    }
+  }
 
   const imageFull = $derived((envsubstService?.image ?? service.image ?? '') as string);
   const imageName = $derived(imageFull ? imageFull.split(':')[0] : '');
@@ -94,6 +121,13 @@
           </button>
           <button
             class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600"
+            title="Recreate this container so saved compose changes take effect"
+            onclick={onrecreate}
+          >
+            ♻ Recreate
+          </button>
+          <button
+            class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600"
             onclick={onstop}
           >
             ⏹ Stop
@@ -142,7 +176,11 @@
       <!-- Ports -->
       <div>
         <span class="mb-1 block text-sm text-zinc-300">Ports</span>
-        <ArrayInput bind:values={service.ports} placeholder="HOST:CONTAINER" addLabel="Add port" />
+        {#if networkMode === 'host'}
+          <p class="text-xs text-amber-400">Port bindings are ignored with network_mode: host — the container shares the host's network directly.</p>
+        {:else}
+          <ArrayInput bind:values={service.ports} placeholder="HOST:CONTAINER" addLabel="Add port" />
+        {/if}
       </div>
 
       <!-- Volumes -->
@@ -171,10 +209,34 @@
         <ArrayInput bind:values={service.environment} placeholder="KEY=VALUE" addLabel="Add variable" />
       </div>
 
+      <!-- Network mode (issue #28) -->
+      <div>
+        <label class="mb-1 block text-sm text-zinc-300" for="netmode-{name}">Network Mode</label>
+        <select
+          id="netmode-{name}"
+          class="w-full rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+          value={networkMode}
+          onchange={(e) => setNetworkMode(e.currentTarget.value)}
+        >
+          <option value="">default (bridge)</option>
+          <option value="host">host</option>
+          <option value="none">none</option>
+        </select>
+        {#if hasCustomNetworkMode}
+          <p class="mt-1 text-xs text-amber-400">
+            Custom network_mode "{service.network_mode}" is set in YAML — choosing a mode here will replace it.
+          </p>
+        {/if}
+      </div>
+
       <!-- Networks -->
       <div>
         <span class="mb-1 block text-sm text-zinc-300">Networks</span>
-        <ArraySelect bind:values={service.networks} options={networkOptions} placeholder="Network name" addLabel="Add network" />
+        {#if hasNetworkMode}
+          <p class="text-xs text-amber-400">Disabled — network_mode: {networkMode} cannot be combined with network attachments.</p>
+        {:else}
+          <ArraySelect bind:values={service.networks} options={networkOptions} placeholder="Network name" addLabel="Add network" />
+        {/if}
       </div>
 
       <!-- Depends on -->

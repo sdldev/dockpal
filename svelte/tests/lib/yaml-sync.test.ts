@@ -69,6 +69,50 @@ services:
     expect(yaml).toContain('# keep me');
     expect(yaml).toContain('postgres:16');
   });
+
+  // Issue #28 — GUI edits for network_mode / network driver must survive the
+  // JSON → YAML round trip.
+  it('round-trips network_mode set from the GUI', () => {
+    const original = `services:
+  web:
+    image: nginx
+`;
+    const { config, doc } = yamlToJson(original);
+    config.services.web.network_mode = 'host';
+    const { yaml } = jsonToYaml(config, doc);
+    expect(yaml).toContain('network_mode: host');
+    const reparsed = yamlToJson(yaml);
+    expect(reparsed.config.services.web.network_mode).toBe('host');
+  });
+
+  it('drops network_mode when the GUI deletes the key', () => {
+    const original = `services:
+  web:
+    image: nginx
+    network_mode: host
+`;
+    const { config, doc } = yamlToJson(original);
+    delete config.services.web.network_mode;
+    const { yaml } = jsonToYaml(config, doc);
+    expect(yaml).not.toContain('network_mode');
+  });
+
+  it('round-trips a custom network driver', () => {
+    const original = `services:
+  web:
+    image: nginx
+    networks:
+      - backend
+networks:
+  backend: {}
+`;
+    const { config, doc } = yamlToJson(original);
+    config.networks.backend = { driver: 'macvlan' };
+    const { yaml } = jsonToYaml(config, doc);
+    expect(yaml).toContain('driver: macvlan');
+    const reparsed = yamlToJson(yaml);
+    expect(reparsed.config.networks.backend.driver).toBe('macvlan');
+  });
 });
 
 describe('envsubst', () => {

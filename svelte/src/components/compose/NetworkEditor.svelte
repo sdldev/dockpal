@@ -12,7 +12,12 @@
     externalOptions = []
   }: Props = $props();
 
+  // Drivers compose accepts for a network definition. bridge is the compose
+  // default, so we keep the YAML minimal ({}) for it (issue #28).
+  const NETWORK_DRIVERS = ['bridge', 'overlay', 'macvlan', 'ipvlan'] as const;
+
   let newName = $state('');
+  let newDriver = $state<string>('bridge');
   let selectedExternal = $state('');
 
   const internalNames = $derived(
@@ -31,9 +36,15 @@
     const n = newName.trim();
     if (!n) return;
     const next = { ...ensure() };
-    if (!(n in next)) next[n] = {};
+    if (!(n in next)) next[n] = newDriver === 'bridge' ? {} : { driver: newDriver };
     networks = next;
     newName = '';
+    newDriver = 'bridge';
+  }
+
+  function driverOf(name: string): string {
+    const d = networks?.[name]?.driver;
+    return typeof d === 'string' && d !== '' ? d : 'bridge';
   }
 
   function addExternal() {
@@ -59,7 +70,7 @@
 
   {#each internalNames as name (name)}
     <div class="flex items-center justify-between rounded-sm bg-zinc-900 px-2 py-1">
-      <span class="text-sm text-zinc-200">{name}</span>
+      <span class="text-sm text-zinc-200">{name} <span class="text-xs text-zinc-400">({driverOf(name)})</span></span>
       <button class="text-xs text-zinc-400 hover:text-red-400" onclick={() => remove(name)}>remove</button>
     </div>
   {/each}
@@ -77,6 +88,15 @@
       bind:value={newName}
       onkeydown={(e) => e.key === 'Enter' && addInternal()}
     />
+    <select
+      class="rounded-sm border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+      bind:value={newDriver}
+      title="Network driver"
+    >
+      {#each NETWORK_DRIVERS as d}
+        <option value={d}>{d}</option>
+      {/each}
+    </select>
     <button
       class="rounded-sm bg-zinc-700 px-3 py-1 text-sm text-zinc-100 hover:bg-zinc-600"
       onclick={addInternal}

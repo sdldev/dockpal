@@ -215,6 +215,19 @@
       addToast('No services found in compose.yaml', 'error');
       return false;
     }
+    // Compose rejects a service that sets both network_mode and networks —
+    // catch it here instead of at deploy time (issue #28).
+    for (const [svcName, svc] of Object.entries(jsonConfig.services)) {
+      const s = svc as Record<string, any>;
+      if (typeof s?.network_mode === 'string' && s.network_mode !== '') {
+        const nets = s.networks;
+        const hasNets = Array.isArray(nets) ? nets.length > 0 : nets && Object.keys(nets).length > 0;
+        if (hasNets) {
+          addToast(`Service "${svcName}": network_mode cannot be combined with networks — remove one of them`, 'error');
+          return false;
+        }
+      }
+    }
     return true;
   }
 
@@ -283,6 +296,15 @@
       const full = await getStack(stack.name, instanceId);
       stack = { ...full, composeYAML: stack.composeYAML, composeENV: stack.composeENV };
       refreshServiceStatus(full);
+      // Saving only rewrites the files on disk — running containers keep
+      // their old config until they are recreated. Warn so users don't
+      // expect ↻ Restart to apply compose changes (issue #29).
+      if (full.status === 'running' || full.status === 'partial') {
+        addToast(
+          'Saved. Running containers still use the old config — use ♻ Recreate (or Down → Start) to apply changes.',
+          'info'
+        );
+      }
     } catch (e) {
       addToast(e instanceof Error ? e.message : 'Save failed', 'error');
     } finally {
@@ -290,7 +312,7 @@
     }
   }
 
-  async function doAction(action: 'start' | 'stop' | 'restart' | 'update' | 'down') {
+  async function doAction(action: 'start' | 'stop' | 'restart' | 'recreate' | 'update' | 'down') {
     processing = true;
     try {
       const s = await stackAction(stack.name, action, instanceId);
@@ -345,7 +367,7 @@
     guiMutated();
   }
 
-  async function serviceAction(name: string, action: 'up' | 'stop' | 'restart') {
+  async function serviceAction(name: string, action: 'up' | 'stop' | 'restart' | 'recreate') {
     processing = true;
     try {
       const s = await stackServiceAction(stack.name, name, action, instanceId);
@@ -450,6 +472,14 @@
             onclick={() => doAction('restart')}
           >
             ↻ Restart
+          </button>
+          <button
+            class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
+            disabled={processing}
+            title="Recreate containers so saved compose changes (network_mode, ports, volumes, …) take effect"
+            onclick={() => doAction('recreate')}
+          >
+            ♻ Recreate
           </button>
         {/if}
         {#if stack.managed}
@@ -578,6 +608,7 @@
             onstart={() => serviceAction(name, 'up')}
             onstop={() => serviceAction(name, 'stop')}
             onrestart={() => serviceAction(name, 'restart')}
+            onrecreate={() => serviceAction(name, 'recreate')}
             onremove={() => removeService(name)}
           />
         {/each}
