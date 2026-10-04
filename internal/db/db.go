@@ -161,6 +161,7 @@ func New(path string) (*DB, error) {
 		}
 		return nil
 	}); err != nil {
+		bdb.Close()
 		return nil, fmt.Errorf("failed to create buckets: %w", err)
 	}
 

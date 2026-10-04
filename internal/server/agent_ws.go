@@ -104,8 +104,16 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 			return
 		}
 
-		conn.SetReadDeadline(time.Time{})
-		conn.SetWriteDeadline(time.Time{})
+		// Clearing the deadlines must succeed or the connection dies at the
+		// auth deadline even though authentication passed.
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			log.Printf("Agent WebSocket: clear read deadline: %v", err)
+			return
+		}
+		if err := conn.SetWriteDeadline(time.Time{}); err != nil {
+			log.Printf("Agent WebSocket: clear write deadline: %v", err)
+			return
+		}
 
 		// Authentication successful - register the connection
 		agentMgr.RegisterEdgeConnection(instance.ID, conn)
@@ -118,7 +126,9 @@ func HandleAgentConnect(database *db.DB, agentMgr *agent.Manager) gin.HandlerFun
 
 		log.Printf("Agent WebSocket: agent %s (%s) connected successfully", instance.ID, instance.Name)
 
-		// Request host info from the agent
+		// Request host info from the agent. Best-effort: the agent is already
+		// authenticated and online, so a failed refresh only leaves stale
+		// metadata that the next connect overwrites.
 		reqID := generateRequestID()
 		if resp, err := agentMgr.SendEdgeRequest(instance.ID, &agent.AgentRequest{
 			RequestID: reqID,
