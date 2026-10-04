@@ -3,6 +3,7 @@
 	import { containersBasePath } from '$lib/api/containers';
 	import type { ContainerInfo } from '$lib/types/api';
 	import { formatPort, dedupePorts } from '$lib/format';
+	import { deleteThenToast } from '$lib/ui-actions';
 	import { navigate } from '$lib/router';
 	import Button from '../ui/Button.svelte';
 	import Icon from '../ui/Icon.svelte';
@@ -92,16 +93,13 @@
 		const target = pendingDelete;
 		if (!target) return;
 		actionBusy = target.id;
-		try {
-			await api.delete(`${basePath}/${encodeURIComponent(target.id)}?force=true`);
-			containers = containers.filter((c) => c.id !== target.id);
-			addToast(`Container ${target.name} deleted`, 'success');
-		} catch (e) {
-			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
-		} finally {
-			actionBusy = null;
-			pendingDelete = null;
-		}
+		await deleteThenToast(`${basePath}/${encodeURIComponent(target.id)}?force=true`, `Container ${target.name} deleted`, {
+			refresh: () => {
+				containers = containers.filter((c) => c.id !== target.id);
+			}
+		});
+		actionBusy = null;
+		pendingDelete = null;
 	}
 
 	// Group containers by owning stack so the table mirrors the Stacks page:

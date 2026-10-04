@@ -1490,7 +1490,8 @@
       "path": "svelte/src/components/admin/RegistriesTab.svelte",
       "line": 20,
       "strength": "review",
-      "message": "`load` (svelte/src/components/admin/RegistriesTab.svelte:20), `load` (svelte/src/components/pages/WebhooksPage.svelte:28) and 4 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`load` (svelte/src/components/admin/RegistriesTab.svelte:20), `load` (svelte/src/components/pages/WebhooksPage.svelte:28) and 4 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "d76cad16310b90808e196a0b790eafe1388c654fe06fb333a7f8f0998554c40b",
@@ -1498,7 +1499,8 @@
       "path": "svelte/src/components/admin/RegistriesTab.svelte",
       "line": 53,
       "strength": "review",
-      "message": "`addRegistry` (svelte/src/components/admin/RegistriesTab.svelte:53) and `addDomain` (svelte/src/components/pages/DomainsPage.svelte:53) may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`addRegistry` (svelte/src/components/admin/RegistriesTab.svelte:53) and `addDomain` (svelte/src/components/pages/DomainsPage.svelte:53) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "e6c6fac5fb44f9f3d3d307ae7ea007a661c0734755e7d1a07039fc87cbacdcde",
@@ -1506,7 +1508,8 @@
       "path": "svelte/src/components/admin/RegistriesTab.svelte",
       "line": 88,
       "strength": "review",
-      "message": "`statusClass` (svelte/src/components/admin/RegistriesTab.svelte:88) and `stageClass` (svelte/src/components/pages/AppsPage.svelte:184) may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`statusClass` (svelte/src/components/admin/RegistriesTab.svelte:88) and `stageClass` (svelte/src/components/pages/AppsPage.svelte:184) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "ef50a004c333c866e6d580fa7b98274f8ad631fa6fa5c392477eb01e71c17439",
@@ -1514,7 +1517,8 @@
       "path": "svelte/src/components/admin/RegistriesTab.svelte",
       "line": 74,
       "strength": "review",
-      "message": "`deleteRegistry` (svelte/src/components/admin/RegistriesTab.svelte:74), `deleteWebhook` (svelte/src/components/pages/WebhooksPage.svelte:74) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place."
+      "message": "`deleteRegistry` (svelte/src/components/admin/RegistriesTab.svelte:74), `deleteWebhook` (svelte/src/components/pages/WebhooksPage.svelte:74) and 2 more copies may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "ee04c1753538ba20086079d95a9e449aa6b034dd707fc3eb32542f2398622a96",

@@ -8,6 +8,7 @@
   // The `editorFocus` flag is the one-way gate that prevents echo loops,
   // exactly like Dockge's implementation.
   import { onMount } from 'svelte';
+  import GlobalEnvEditor from '../compose/GlobalEnvEditor.svelte';
   import type { Document } from 'yaml';
   // CodeMirror is ~500 KB and only used on this page; load it lazily so the
   // bundle stays off the critical path for every other route.
@@ -19,7 +20,7 @@
   import Modal from '../ui/Modal.svelte';
   import {
     getStack, createStack, updateStackFiles, deleteStack, stackAction, deployStack,
-    stackServiceAction, listDockerNetworks, watchDeploy, getGlobalEnv, setGlobalEnv,
+    stackServiceAction, listDockerNetworks, watchDeploy,
     type Stack, type StackService
   } from '$lib/api/stacks';
   import { yamlToJson, jsonToYaml, envsubstYAML } from '$lib/yaml-sync';
@@ -71,10 +72,6 @@
   let unwatchDeploy: (() => void) | null = null;
 
   // --- global env (shared by all stacks on this instance) ---
-  let globalEnv = $state('');
-  let showGlobalEnv = $state(false);
-  let globalEnvDirty = $state(false);
-
   const active = $derived(stack.status === 'running');
   const serviceEntries = $derived(Object.entries(jsonConfig.services ?? {}));
   const networkList = $derived(Object.keys(jsonConfig.networks ?? {}));
@@ -177,26 +174,6 @@
     }
   }
 
-  async function loadGlobalEnv() {
-    try {
-      const res = await getGlobalEnv(instanceId);
-      globalEnv = res.content ?? '';
-      globalEnvDirty = false;
-    } catch {
-      globalEnv = '';
-    }
-  }
-
-  async function saveGlobalEnv() {
-    try {
-      await setGlobalEnv(globalEnv, instanceId);
-      globalEnvDirty = false;
-      addToast('Global env saved', 'success');
-    } catch (e) {
-      addToast(e instanceof Error ? e.message : 'Failed to save global env', 'error');
-    }
-  }
-
   onMount(() => {
     // Fire-and-forget: the editor renders once the chunk resolves (guarded below).
     void import('../compose/CodeMirrorEditor.svelte').then((m) => {
@@ -221,7 +198,6 @@
       loadStack(name);
     }
     refreshNetworks();
-    loadGlobalEnv();
     return () => {
       unwatchDeploy?.();
       if (yamlErrorTimeout) clearTimeout(yamlErrorTimeout);
@@ -674,40 +650,7 @@
           />
         </div>
 
-        {#if $isOperator}
-          <h4 class="mb-3 text-lg font-semibold text-white">
-            <button
-              class="flex items-center gap-2 text-zinc-300 hover:text-white"
-              onclick={() => (showGlobalEnv = !showGlobalEnv)}
-            >
-              <span>{showGlobalEnv ? '▾' : '▸'}</span>
-              Global Env
-              <span class="text-xs font-normal text-zinc-500">(shared by all stacks on this instance)</span>
-            </button>
-          </h4>
-          {#if showGlobalEnv}
-            <div class="mb-4">
-              <div class="mb-2">
-                {#if CodeMirrorEditor}
-                  <CodeMirrorEditor
-                    value={globalEnv}
-                    placeholder="# KEY=value"
-                    onchange={(v) => { globalEnv = v; globalEnvDirty = true; }}
-                  />
-                {:else}
-                  <div class="codemirror-host flex min-h-48 items-center justify-center rounded-md border border-zinc-700 bg-[#282a36] text-sm text-zinc-500">Loading editor…</div>
-                {/if}
-              </div>
-              <button
-                class="rounded-sm bg-zinc-700 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-50"
-                disabled={!globalEnvDirty || processing}
-                onclick={saveGlobalEnv}
-              >
-                💾 Save Global Env
-              </button>
-            </div>
-          {/if}
-        {/if}
+        <GlobalEnvEditor processing={processing} />
       {/if}
     </div>
   </div>

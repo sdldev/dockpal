@@ -2,6 +2,7 @@
 	import { api } from '$lib/api/client';
 	import { imagesBasePath } from '$lib/api/containers';
 	import { addToast, selectedInstance } from '$lib/store';
+	import { deleteThenToast } from '$lib/ui-actions';
 	import type { ImageInfo } from '$lib/types/generated';
 	import { formatBytes } from '$lib/format';
 	import Button from '../ui/Button.svelte';
@@ -62,15 +63,11 @@
 	async function removeImage() {
 		const target = pendingDelete;
 		if (!target) return;
-		try {
-			await api.delete(`${basePath}/${encodeURIComponent(target.id)}`);
-			addToast('Image removed', 'success');
-			await load();
-		} catch (e) {
-			addToast(e instanceof Error ? e.message : 'Remove failed', 'error');
-		} finally {
-			pendingDelete = null;
-		}
+		await deleteThenToast(`${basePath}/${encodeURIComponent(target.id)}`, 'Image removed', {
+			refresh: load,
+			errorFallback: 'Remove failed'
+		});
+		pendingDelete = null;
 	}
 
 	async function forcePull(image: ImageInfo) {

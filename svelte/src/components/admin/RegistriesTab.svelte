@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import { addToast } from '$lib/store';
+	import { deleteThenToast } from '$lib/ui-actions';
 	import type { RegistryCredential, RegistryTestResult } from '$lib/types/generated';
 	import Button from '../ui/Button.svelte';
 	import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -73,15 +74,8 @@
 	async function deleteRegistry() {
 		const target = pendingDelete;
 		if (!target) return;
-		try {
-			await api.delete(`/registries/${target.id}`);
-			addToast('Registry removed', 'success');
-			await load();
-		} catch (e) {
-			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
-		} finally {
-			pendingDelete = null;
-		}
+		await deleteThenToast(`/registries/${target.id}`, 'Registry removed', { refresh: load });
+		pendingDelete = null;
 	}
 
 	function statusClass(status: string) {

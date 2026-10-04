@@ -5,7 +5,7 @@
   import { instanceWSURL, wsCredential } from '../../lib/ws';
   import { addToast, currentStackName } from '../../lib/store';
   import { navigate } from '../../lib/router';
-  import { buildCustomCompose, type CustomEnvRow, type CustomPortRow, type CustomVolumeRow } from '../../lib/compose-builder';
+  import { buildCustomCompose, collectDeployErrors, type CustomEnvRow, type CustomPortRow, type CustomVolumeRow } from '../../lib/compose-builder';
   import type { Template } from '../../lib/types/api';
 
   interface Props {
@@ -103,10 +103,6 @@
     logs = [...logs, { time: new Date().toLocaleTimeString(), message, status }];
   }
 
-  // Mirrors internal/validator.ValidateContainerName so an invalid name is
-  // rejected in the UI before it reaches the backend.
-  const SERVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$/;
-
   function clearError(key: string) {
     if (errors[key]) {
       const next = { ...errors };
@@ -118,47 +114,9 @@
   // validate() recomputes every field error and returns whether the form is
   // valid. It also points the user at the first tab holding an error.
   function validate(): boolean {
-    const e: Record<string, string> = {};
+    errors = collectDeployErrors({ mode, serviceName, template, env, ports, customImage, customEnv, customPorts });
 
-    const name = serviceName.trim();
-    if (!name) {
-      e.serviceName = 'App name is required';
-    } else if (name.length > 128) {
-      e.serviceName = 'App name must be 128 characters or fewer';
-    } else if (!SERVICE_NAME_RE.test(name)) {
-      e.serviceName = 'App name must start with a letter or digit and can only contain letters, digits, ".", "_", and "-"';
-    }
-
-    if (mode === 'template') {
-      for (const key of template?.env_required ?? []) {
-        if (!env[key] || !String(env[key]).trim()) {
-          e[`env-${key}`] = `${key} is required`;
-        }
-      }
-      for (const p of template?.ports ?? []) {
-        const hp = ports[String(p.container_port)];
-        if (hp !== undefined && (hp < 1 || hp > 65535)) {
-          e[`port-${p.container_port}`] = 'Host port must be between 1 and 65535';
-        }
-      }
-    } else {
-      if (!customImage.trim()) {
-        e.customImage = 'Docker image is required';
-      }
-      customEnv.forEach((row, idx) => {
-        if (row.key.trim() && !row.value.trim()) {
-          e[`cenv-${idx}`] = `Value required for ${row.key}`;
-        }
-      });
-      customPorts.forEach((row, idx) => {
-        if (row.host > 0 && (row.host < 1 || row.host > 65535 || row.container < 1 || row.container > 65535)) {
-          e[`cport-${idx}`] = 'Ports must be between 1 and 65535';
-        }
-      });
-    }
-
-    errors = e;
-
+    const e = errors;
     if (Object.keys(e).length > 0) {
       const hasEnvError = e.serviceName || Object.keys(e).some((k) => k.startsWith('env-') || k === 'customImage');
       const hasPortError = Object.keys(e).some((k) => k.startsWith('port-') || k.startsWith('cport-'));

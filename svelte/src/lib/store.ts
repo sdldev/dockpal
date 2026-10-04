@@ -170,3 +170,7 @@ export function createServersStore() {
 
 	return { subscribe, fetchMetrics, startPolling, stopPolling, isOnline };
 }
+
+// Singleton: the servers page, its summary cards and the bulk-deploy tab all
+// read the same fleet poll — a second instance would run its own poll loop.
+export const servers = createServersStore();

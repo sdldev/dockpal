@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import { addToast } from '$lib/store';
+	import { deleteThenToast } from '$lib/ui-actions';
 	import type { AppSummary, AppUpdateRecord, ServiceRecord } from '$lib/types/generated';
 	import type { Service } from '$lib/types/api';
 	import Button from '../ui/Button.svelte';
@@ -134,12 +135,13 @@
 				uninstallTarget = null;
 				return;
 			}
-			await api.delete(`/services/${service.id}`);
-			addToast(`${name} uninstalled`, 'success');
-			uninstallTarget = null;
-			await load();
-		} catch (e) {
-			addToast(e instanceof Error ? e.message : 'Uninstall failed', 'error');
+			const ok = await deleteThenToast(`/services/${service.id}`, `${name} uninstalled`, {
+				errorFallback: 'Uninstall failed'
+			});
+			if (ok) {
+				uninstallTarget = null;
+				await load();
+			}
 		} finally {
 			uninstalling = false;
 		}
@@ -154,16 +156,9 @@
 		const target = pendingDelete;
 		if (!target) return;
 		serviceBusy = target.id;
-		try {
-			await api.delete(`/services/${target.id}`);
-			addToast('Service deleted', 'success');
-			await loadServices();
-		} catch (e) {
-			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
-		} finally {
-			serviceBusy = null;
-			pendingDelete = null;
-		}
+		await deleteThenToast(`/services/${target.id}`, 'Service deleted', { refresh: loadServices });
+		serviceBusy = null;
+		pendingDelete = null;
 	}
 
 	function serviceTypeBadge(type: string) {

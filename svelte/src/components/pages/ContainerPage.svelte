@@ -2,6 +2,7 @@
 	import { api } from '$lib/api/client';
 	import { containersBasePath } from '$lib/api/containers';
 	import { addToast, selectedInstance, isOperator } from '$lib/store';
+	import { deleteThenToast } from '$lib/ui-actions';
 	import { routeParams } from '$lib/router';
 	import type { ContainerDetail, ContainerInfo } from '$lib/types/generated';
 	import { formatPorts, formatBytes } from '$lib/format';
@@ -100,17 +101,13 @@
 
 	async function deleteContainer() {
 		busy = 'delete';
-		try {
-			await api.delete(`${basePath}/${encodeURIComponent(containerId)}?force=true`);
-			addToast('Container deleted', 'success');
+		const ok = await deleteThenToast(`${basePath}/${encodeURIComponent(containerId)}?force=true`, 'Container deleted');
+		if (ok) {
 			// Redirect back to containers list
 			window.history.back();
-		} catch (e) {
-			addToast(e instanceof Error ? e.message : 'Delete failed', 'error');
-		} finally {
-			busy = null;
-			showDeleteDialog = false;
 		}
+		busy = null;
+		showDeleteDialog = false;
 	}
 
 	async function saveEdit() {
