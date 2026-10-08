@@ -40,6 +40,7 @@ func RegisterInstanceScopedRoutes(g *gin.RouterGroup) {
 	g.DELETE("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceRemoveContainer)
 	g.PUT("/containers/:id", RequireRole(auth.RoleOperator), handleInstanceEditContainer)
 	g.POST("/containers/:id/update-image", RequireRole(auth.RoleOperator), handleInstanceUpdateContainerImage)
+	g.POST("/containers/:id/exec", RequireRole(auth.RoleOperator), handleInstanceContainerExecCommand)
 	g.GET("/containers/:id/stats", RequireRole(auth.RoleViewer), handleInstanceContainerStats)
 
 	// Deploy routes
@@ -301,6 +302,74 @@ func handleInstanceContainerStats(c *gin.Context) {
 func handleInstanceContainerLogs(c *gin.Context) {
 	client := c.MustGet("agent_client").(agent.AgentClient)
 	serveContainerLogsWS(c, client, c.Param("id"))
+}
+
+// handleInstanceContainerExecCommand runs a one-shot non-interactive command
+// inside a container and returns its captured output and exit code. Unlike
+// handleInstanceContainerExec (interactive TTY over WebSocket), this works on
+// every transport including edge agents — the agent's POST
+// /docker/containers/{id}/exec endpoint carries the whole result as a single
+// JSON response.
+//
+// Security: operator role minimum (RequireRole on the route), the Dockpal
+// agent container itself is protected, and the command is audited with a
+// truncation-safe summary of what was run.
+func handleInstanceContainerExecCommand(c *gin.Context) {
+	client := c.MustGet("agent_client").(agent.AgentClient)
+	containerID := c.Param("id")
+
+	var req docker.ExecRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cmd is required (array of arguments)"})
+		return
+	}
+	if len(req.Cmd) == 0 || len(req.Cmd) > 64 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cmd must contain 1..64 arguments"})
+		return
+	}
+	for _, arg := range req.Cmd {
+		if len(arg) > 8192 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "command argument too long"})
+			return
+		}
+	}
+	if req.Timeout < 0 || req.Timeout > 120 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "timeout must be 0..120 seconds"})
+		return
+	}
+
+	// The agent container carries the panel token and manages the host —
+	// running arbitrary commands there would be self-pwning.
+	detail, err := client.InspectContainer(c.Request.Context(), containerID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	if isProtectedDockpalAgentContainer(detail) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Dockpal agent container cannot be exec'd from Dockpal", "protected": true})
+		return
+	}
+
+	result, err := client.ExecCommand(c.Request.Context(), containerID, req)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+
+	auditInstanceContainer(c, "container.exec", containerID, truncateAuditCmd(req.Cmd))
+
+	c.JSON(http.StatusOK, result)
+}
+
+// truncateAuditCmd renders the executed command for the audit log, capped so
+// a huge argv cannot bloat the audit bucket.
+func truncateAuditCmd(cmd []string) string {
+	const max = 512
+	summary := strings.Join(cmd, " ")
+	if len(summary) > max {
+		summary = summary[:max] + "…"
+	}
+	return summary
 }
 
 // handleInstanceContainerExec upgrades a browser WebSocket into an

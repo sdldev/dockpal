@@ -196,6 +196,25 @@ func (e *EdgeClient) ExecAttachAndBridge(ctx context.Context, id, shell string, 
 			"update the agent image on this server, or use direct mode")
 }
 
+// ExecCommand runs a one-shot non-interactive command on the edge agent via
+// its POST /docker/containers/{id}/exec endpoint — a single request/response
+// that fits the edge transport. Agents older than the endpoint answer 404,
+// reported as an upgrade hint.
+func (e *EdgeClient) ExecCommand(ctx context.Context, id string, req docker.ExecRequest) (*docker.ExecCommandResult, error) {
+	resp, err := e.sendRequest(ctx, "POST", "/docker/containers/"+id+"/exec", nil, req)
+	if err != nil {
+		return nil, fmt.Errorf("command execution unavailable: the remote agent may be outdated (upgrade the agent image) — %w", err)
+	}
+	if resp.Status >= 400 {
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.Status, string(resp.Body))
+	}
+	var result docker.ExecCommandResult
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode exec result: %w", err)
+	}
+	return &result, nil
+}
+
 // Compose operations
 
 // deployComposeRequest is the request body for deploying compose.

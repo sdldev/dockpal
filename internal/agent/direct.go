@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -345,6 +346,29 @@ func (c *DirectClient) ExecAttachAndBridge(ctx context.Context, id, shell string
 
 	wg.Wait()
 	return nil
+}
+
+// ExecCommand runs a one-shot non-interactive command on the remote agent
+// via its POST /agent/docker/containers/{id}/exec endpoint. Agents older
+// than the endpoint return a 404, surfaced as an error by doRequest.
+func (c *DirectClient) ExecCommand(ctx context.Context, id string, req docker.ExecRequest) (*docker.ExecCommandResult, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode exec request: %w", err)
+	}
+	httpReq, err := c.makeRequest(ctx, "POST", "/agent/docker/containers/"+id+"/exec", nil, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	respBody, err := c.doRequest(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	var result docker.ExecCommandResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode exec result: %w", err)
+	}
+	return &result, nil
 }
 
 // Compose operations

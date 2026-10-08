@@ -60,6 +60,9 @@ func (f *protectionFakeAgentClient) ContainerLogs(context.Context, string, strin
 func (f *protectionFakeAgentClient) ExecAttachAndBridge(context.Context, string, string, *docker.TerminalBridge) error {
 	return nil
 }
+func (f *protectionFakeAgentClient) ExecCommand(context.Context, string, docker.ExecRequest) (*docker.ExecCommandResult, error) {
+	return nil, nil
+}
 func (f *protectionFakeAgentClient) DeployCompose(context.Context, string, string, map[string]string, bool) error {
 	return nil
 }

@@ -144,6 +144,12 @@ func (c *LocalClient) ExecAttachAndBridge(ctx context.Context, id, shell string,
 	return c.dockerClient.ExecAttachAndBridge(ctx, execID, bridge)
 }
 
+// ExecCommand runs a one-shot non-interactive command in the container via
+// the local Docker daemon.
+func (c *LocalClient) ExecCommand(ctx context.Context, id string, req docker.ExecRequest) (*docker.ExecCommandResult, error) {
+	return c.dockerClient.ExecCommand(ctx, id, req)
+}
+
 // Compose operations
 
 // getAuthHeader creates an AuthHeaderFunc from a registryAuths map.

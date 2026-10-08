@@ -12,6 +12,7 @@
 	import StatsChart from '../Container/StatsChart.svelte';
 	import LogsViewer from '../Container/LogsViewer.svelte';
 	import ContainerTerminal from '../Container/ContainerTerminal.svelte';
+	import ContainerRunCommand from '../Container/ContainerRunCommand.svelte';
 
 	// container id from the /containers/:id route (see lib/router.ts)
 	const containerId = $derived($routeParams.id ?? '');
@@ -304,7 +305,10 @@
 				</section>
 			</div>
 		{:else if activeTab === 'terminal'}
-			<ContainerTerminal {instanceId} {containerId} running={isRunning} />
+			<div class="space-y-4">
+				<ContainerRunCommand {instanceId} {containerId} running={isRunning} />
+				<ContainerTerminal {instanceId} {containerId} running={isRunning} />
+			</div>
 		{/if}
 	{/if}
 </div>

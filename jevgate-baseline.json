@@ -107,6 +107,15 @@
       "message": "`getMemoryInfo` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
     },
     {
+      "fingerprint": "53d020fffd73b420fbd44a89f6393fb1bb7d070dd206e14205ea5e5c89a51bb7",
+      "rule": "maintainability/file-organization",
+      "path": "internal/agent/local.go",
+      "line": 35,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
       "fingerprint": "798c95aea9633e4cedf0ffbc8dc88b704bd85ec7a19acf4f5336f50d7b0be6b6",
       "rule": "maintainability/function-simplification",
       "path": "internal/agent/local.go",
@@ -128,7 +137,8 @@
       "path": "internal/agent/local.go",
       "line": 35,
       "strength": "review",
-      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations."
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
     },
     {
       "fingerprint": "7249c42a65ea3ca9a7a9a548c92a4babeb16e4c125623b7e1eaf7613ab4ab2d7",
@@ -802,6 +812,15 @@
       "message": "`handleInstanceContainerExec` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs."
     },
     {
+      "fingerprint": "3e155aafd6ad263c60c681f71100b11f4250b62294ff87d5388f078061c248b5",
+      "rule": "maintainability/file-organization",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 33,
+      "strength": "review",
+      "message": "This file may do several separate kinds of work, such as separate features, layers or integrations.",
+      "reason": "wrong"
+    },
+    {
       "fingerprint": "4bfa9f2c52eaa8b923c30238e05c3fdbbdcf37497c1e0ef1c5a673b0c3d69751",
       "rule": "documentation/comments",
       "path": "internal/server/instance_scoped_routes.go",
@@ -936,6 +955,15 @@
       "line": 387,
       "strength": "review",
       "message": "`handleInstanceContainerLogs` (internal/server/instance_scoped_routes.go:387) and `RegisterRoutes` (internal/server/routes.go:1048) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "f311e8855a2668262da229d3f8384fc2228504b1b2d78173bc8f572fbf5b0821",
+      "rule": "maintainability/function-simplification",
+      "path": "internal/server/instance_scoped_routes.go",
+      "line": 33,
+      "strength": "review",
+      "message": "`RegisterInstanceScopedRoutes` could likely be made simpler to read or change: it may be long, deeply nested, repetitive or mix separate jobs.",
+      "reason": "wrong"
     },
     {
       "fingerprint": "8b31e79d242f2fc1ad7038ecebf30c3aa49f12ea468b1899243af32c82de4944",
@@ -1395,6 +1423,15 @@
       "line": 29,
       "strength": "review",
       "message": "`loadUser` (svelte/src/App.svelte:29) and `handleLogin` (svelte/src/components/pages/Login.svelte:22) may repeat one piece of logic, so a change to it would have to be made in each place."
+    },
+    {
+      "fingerprint": "a2161dbf9a294a689b72412d70d8e2a670b9ccca89b3535376c56eb2080f5bb8",
+      "rule": "maintainability/shared-logic",
+      "path": "svelte/src/components/Container/ContainerRunCommand.svelte",
+      "line": 52,
+      "strength": "review",
+      "message": "`run` (svelte/src/components/Container/ContainerRunCommand.svelte:52) and `load` (svelte/src/components/pages/ContainerPage.svelte:49) may repeat one piece of logic, so a change to it would have to be made in each place.",
+      "reason": "intended"
     },
     {
       "fingerprint": "08ed26e98f57b73dbf744ccc2a533913be9e9a4a6f3089ed7cd82ac11d4c65a0",

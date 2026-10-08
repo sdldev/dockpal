@@ -53,6 +53,12 @@ type AgentClient interface {
 	// agents with older images report an error until their image is updated.
 	ExecAttachAndBridge(ctx context.Context, id, shell string, bridge *docker.TerminalBridge) error
 
+	// ExecCommand runs a one-shot non-interactive command inside a container
+	// and returns its captured output and exit code. Works on every
+	// transport, including edge agents whose image carries the
+	// POST /docker/containers/{id}/exec endpoint (no interactive TTY).
+	ExecCommand(ctx context.Context, id string, req docker.ExecRequest) (*docker.ExecCommandResult, error)
+
 	// Compose operations
 	DeployCompose(ctx context.Context, name, composeYAML string, registryAuths map[string]string, forcePull bool) error
 	DeployComposeStreamed(ctx context.Context, name, composeYAML string, session *docker.DeploySession, registryAuths map[string]string, forcePull bool) error
